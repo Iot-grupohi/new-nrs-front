@@ -107,13 +107,13 @@ Regras:
 ```bash
 source .venv/bin/activate
 cd ~/lav60-panel
-gunicorn -w 2 -b 127.0.0.1:3000 'backend.panel_server:app'
+gunicorn -w 1 -b 127.0.0.1:3000 --timeout 0 'backend.panel_server:app'
 ```
 
 Se aparecer `No module named 'lav60_env'`, atualize o projeto (`git pull`) ou use:
 
 ```bash
-PYTHONPATH=/root/lav60-panel/backend gunicorn -w 2 -b 127.0.0.1:3000 'panel_server:app'
+PYTHONPATH=/root/lav60-panel/backend gunicorn -w 1 -b 127.0.0.1:3000 --timeout 0 'panel_server:app'
 ```
 
 Abra no navegador (via túnel SSH ou IP): `http://IP_DO_VPS:3000`
