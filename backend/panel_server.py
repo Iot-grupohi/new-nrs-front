@@ -48,6 +48,7 @@ DEFAULT_PORT = int(os.getenv('FRONTEND_PORT', '3000'))
 
 PUBLIC_API_PATHS = frozenset({
     '/api/auth/config',
+    '/api/auth/me',
     '/api/auth/session',
     '/api/auth/logout',
     '/api/audit/status',
