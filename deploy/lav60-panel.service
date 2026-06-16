@@ -1,0 +1,25 @@
+[Unit]
+Description=LAV60 Painel (frontend + heartbeat hub)
+After=network.target
+
+[Service]
+Type=simple
+User=lav60
+Group=lav60
+WorkingDirectory=/home/lav60/lav60-panel
+EnvironmentFile=/home/lav60/lav60-panel/.env
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/home/lav60/lav60-panel/.venv/bin/gunicorn \
+    -w 2 \
+    -b 127.0.0.1:3000 \
+    --access-logfile - \
+    --error-logfile - \
+    --timeout 120 \
+    'backend.panel_server:app'
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

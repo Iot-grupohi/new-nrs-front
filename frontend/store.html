@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAV60 — Loja</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body class="page-dashboard page-store auth-pending">
+  <div class="app-shell">
+    <header class="topbar topbar--store">
+      <div class="topbar__row">
+        <div class="topbar__brand">
+          <a href="index.html" class="topbar__back" aria-label="Voltar às lojas">‹</a>
+          <div class="topbar__logo" aria-hidden="true">L60</div>
+          <div class="topbar__identity">
+            <nav class="topbar__crumb" aria-label="Navegação">
+              <a href="index.html" class="topbar__crumb-link">Lojas</a>
+              <span class="topbar__crumb-sep" aria-hidden="true">/</span>
+              <span class="topbar__code" id="storeCode">—</span>
+            </nav>
+            <h1 class="topbar__title" id="storeTitle">—</h1>
+          </div>
+        </div>
+        <div class="topbar__toolbar">
+          <a href="records.html" class="topbar__tool" title="Registros de operações">
+            <span class="topbar__tool-icon" aria-hidden="true">☰</span>
+            <span class="topbar__tool-label">Registros</span>
+          </a>
+          <div id="headerUserMenu" class="topbar__user-slot"></div>
+        </div>
+      </div>
+      <div class="topbar__meta">
+        <p class="topbar__subtitle" id="storeSubtitle">Operação da loja</p>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <section class="stats-grid stats-grid--store">
+        <article class="stat-card stat-card--success">
+          <span class="stat-card__label">Online</span>
+          <strong class="stat-card__value" id="summaryOnline">—</strong>
+          <span class="stat-card__sub" id="summaryTotal">de — total</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-card__label">Saúde</span>
+          <strong class="stat-card__value" id="summaryHealth">—</strong>
+          <div class="stat-card__bar"><div id="summaryHealthBar" style="width:0%"></div></div>
+        </article>
+        <article class="stat-card stat-card--primary">
+          <span class="stat-card__label">Última verificação</span>
+          <strong class="stat-card__value stat-card__value--sm" id="summaryTime">—</strong>
+        </article>
+      </section>
+
+      <section class="devices-panel">
+        <div class="devices-panel__section">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Lavadoras</h2>
+            <span class="devices-panel__count" id="washersCount">—</span>
+          </header>
+          <div class="device-list" id="washersGrid"></div>
+        </div>
+
+        <div class="devices-panel__section">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Secadoras</h2>
+            <span class="devices-panel__count" id="dryersCount">—</span>
+          </header>
+          <div class="device-list" id="dryersGrid"></div>
+        </div>
+
+        <div class="devices-panel__section devices-panel__section--wide">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Dosadoras</h2>
+            <span class="devices-panel__count" id="dosersCount">—</span>
+          </header>
+          <div class="device-list" id="dosersGrid"></div>
+        </div>
+
+        <div class="devices-panel__section">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Ar-condicionado</h2>
+            <span class="devices-panel__count" id="acCount">—</span>
+          </header>
+          <div class="device-list" id="acPanel"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <span id="footerStore">LAV60 · Painel operacional</span>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <div id="actionPromptModal" class="confirm-modal confirm-modal--prompt hidden" role="alertdialog" aria-modal="true" aria-labelledby="actionPromptTitle">
+    <div class="confirm-modal__backdrop" data-action-prompt-dismiss></div>
+    <div class="confirm-modal__box">
+      <div class="confirm-modal__icon confirm-modal__icon--prompt" aria-hidden="true">?</div>
+      <h2 id="actionPromptTitle" class="confirm-modal__title">Confirmar operação</h2>
+      <p id="actionPromptMessage" class="confirm-modal__message">Deseja executar esta ação na loja?</p>
+      <div id="actionPromptBody" class="confirm-modal__body"></div>
+      <div class="confirm-modal__actions">
+        <button type="button" id="actionPromptCancel" class="btn btn--ghost">Cancelar</button>
+        <button type="button" id="actionPromptOk" class="btn btn--primary">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="confirmModal" class="confirm-modal hidden" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="confirm-modal__backdrop"></div>
+    <div class="confirm-modal__box">
+      <div class="confirm-modal__icon confirm-modal__icon--ok" aria-hidden="true"></div>
+      <h2 id="confirmTitle" class="confirm-modal__title">Comando confirmado</h2>
+      <p id="confirmMessage" class="confirm-modal__message"></p>
+      <div id="confirmBody" class="confirm-modal__body hidden"></div>
+      <span id="confirmStatus" class="confirm-modal__badge">Confirmado</span>
+      <button type="button" id="confirmOk" class="btn btn--primary confirm-modal__btn">OK</button>
+    </div>
+  </div>
+
+  <script src="auth.js"></script>
+  <script src="cache.js"></script>
+  <script src="api.js"></script>
+  <script src="audit.js"></script>
+  <script src="store.js"></script>
+</body>
+</html>

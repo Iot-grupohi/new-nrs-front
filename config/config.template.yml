@@ -1,0 +1,7 @@
+# Template interno — reescrito automaticamente conforme STORE_ID
+tunnel: pending
+protocol: http2
+credentials-file: pending
+
+ingress:
+  - service: http_status:404

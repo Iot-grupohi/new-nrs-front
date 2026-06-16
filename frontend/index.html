@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAV60 — Dashboard</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body class="page-dashboard auth-pending">
+  <div class="app-shell">
+    <header class="topbar topbar--dashboard">
+      <div class="topbar__row">
+        <div class="topbar__brand">
+          <div class="topbar__logo" aria-hidden="true">L60</div>
+          <div class="topbar__identity">
+            <span class="topbar__eyebrow">Painel central</span>
+            <h1 class="topbar__title">LAV60 Gateway</h1>
+          </div>
+        </div>
+        <div class="topbar__toolbar">
+          <a href="records.html" class="topbar__tool" title="Registros de operações">
+            <span class="topbar__tool-icon" aria-hidden="true">☰</span>
+            <span class="topbar__tool-label">Registros</span>
+          </a>
+          <div id="headerUserMenu" class="topbar__user-slot"></div>
+        </div>
+      </div>
+      <div class="topbar__meta">
+        <p class="topbar__subtitle" id="dashboardSubtitle">Monitoramento de lojas em tempo real</p>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <section class="stats-grid stats-grid--dashboard" id="dashboard">
+        <article class="stat-card stat-card--success">
+          <span class="stat-card__label">Lojas online</span>
+          <strong class="stat-card__value" id="kpiStoresOnline">—</strong>
+          <span class="stat-card__sub" id="kpiStoresOnlineSub">de — lojas</span>
+        </article>
+        <article class="stat-card stat-card--warn">
+          <span class="stat-card__label">Lojas offline</span>
+          <strong class="stat-card__value" id="kpiStoresOffline">—</strong>
+          <span class="stat-card__sub" id="kpiStoresOfflineSub">indisponíveis</span>
+        </article>
+        <article class="stat-card stat-card--danger">
+          <span class="stat-card__label">Dispositivos offline</span>
+          <strong class="stat-card__value" id="kpiDevicesOffline">—</strong>
+          <span class="stat-card__sub" id="kpiDevicesOfflineSub">de — equipamentos</span>
+        </article>
+      </section>
+
+      <section class="stores-panel">
+        <div class="stores-panel__toolbar">
+          <div class="stores-panel__head">
+            <h2 class="stores-panel__title">Lojas</h2>
+            <span class="stores-panel__meta" id="storesMeta">—</span>
+          </div>
+          <div class="stores-panel__controls">
+            <label class="search-field">
+              <span class="visually-hidden">Buscar loja</span>
+              <span class="search-field__icon" aria-hidden="true">⌕</span>
+              <input type="search" id="inputSearch" placeholder="Buscar por nome ou código…" autocomplete="off">
+            </label>
+            <div class="filter-chips" id="filterChips" role="tablist">
+              <button type="button" class="chip chip--active" data-filter="all">Todas</button>
+              <button type="button" class="chip" data-filter="ok">Operacional</button>
+              <button type="button" class="chip" data-filter="partial">Parcial</button>
+              <button type="button" class="chip" data-filter="unreachable">Offline</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="stores-list" id="storesGrid">
+          <div class="stores-empty-state">
+            <div class="spinner" aria-hidden="true"></div>
+            <p>Carregando lojas…</p>
+          </div>
+        </div>
+
+        <p class="stores-count hidden" id="storesCount"></p>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <span>LAV60 · Painel operacional</span>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <script src="auth.js"></script>
+  <script src="cache.js"></script>
+  <script src="api.js"></script>
+  <script src="stores.js"></script>
+</body>
+</html>

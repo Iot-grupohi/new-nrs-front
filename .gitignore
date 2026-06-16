@@ -1,0 +1,22 @@
+build/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+*.log
+.env
+.env.*
+!.env.example
+
+# Firebase / credenciais locais
+*firebase*adminsdk*.json
+*.pem
+
+# Config gerada pelo agente (túnel local)
+config/config.yml
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db

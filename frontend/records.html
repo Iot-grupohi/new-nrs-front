@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAV60 — Registros</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body class="page-dashboard page-records auth-pending">
+  <div class="app-shell">
+    <header class="topbar topbar--dashboard topbar--records">
+      <div class="topbar__row">
+        <div class="topbar__brand">
+          <a href="index.html" class="topbar__back" aria-label="Voltar ao dashboard">‹</a>
+          <div class="topbar__logo" aria-hidden="true">L60</div>
+          <div class="topbar__identity">
+            <nav class="topbar__crumb" aria-label="Navegação">
+              <a href="index.html" class="topbar__crumb-link">Lojas</a>
+              <span class="topbar__crumb-sep" aria-hidden="true">/</span>
+              <span>Registros</span>
+            </nav>
+            <h1 class="topbar__title">Histórico de operações</h1>
+          </div>
+        </div>
+        <div class="topbar__toolbar">
+          <div id="headerUserMenu" class="topbar__user-slot"></div>
+        </div>
+      </div>
+      <div class="topbar__meta">
+        <p class="topbar__subtitle" id="recordsSubtitle">Auditoria Firestore das ações no painel</p>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <section class="records-panel panel">
+        <div class="records-panel__toolbar">
+          <div class="records-panel__head">
+            <h2 class="records-panel__title">Registros</h2>
+            <span class="records-panel__meta" id="recordsMeta">—</span>
+          </div>
+          <div class="records-panel__controls">
+            <label class="field field--compact">
+              <span class="visually-hidden">Loja</span>
+              <select id="filterStore">
+                <option value="">Todas as lojas</option>
+              </select>
+            </label>
+            <label class="field field--compact">
+              <span class="visually-hidden">Tipo</span>
+              <select id="filterAction">
+                <option value="">Todos os tipos</option>
+              </select>
+            </label>
+            <label class="field field--compact">
+              <span class="visually-hidden">Resultado</span>
+              <select id="filterSuccess">
+                <option value="">Todos</option>
+                <option value="true">Sucesso</option>
+                <option value="false">Falha</option>
+              </select>
+            </label>
+            <label class="search-field">
+              <span class="visually-hidden">Buscar</span>
+              <span class="search-field__icon" aria-hidden="true">⌕</span>
+              <input type="search" id="filterSearch" placeholder="E-mail, código, ação…" autocomplete="off">
+            </label>
+            <button type="button" id="btnRefresh" class="btn btn--sm btn--ghost">Atualizar</button>
+          </div>
+        </div>
+
+        <div class="records-panel__body">
+          <div id="recordsEmpty" class="records-empty hidden">
+            <p id="recordsEmptyText">Nenhum registro encontrado.</p>
+          </div>
+          <div id="recordsLoading" class="records-loading">
+            <div class="spinner" aria-hidden="true"></div>
+            <p>Carregando registros…</p>
+          </div>
+          <div class="records-table-wrap hidden" id="recordsTableWrap">
+            <table class="records-table" aria-label="Registros de auditoria">
+              <thead>
+                <tr>
+                  <th scope="col">Data / hora</th>
+                  <th scope="col">Operador</th>
+                  <th scope="col">Loja</th>
+                  <th scope="col">Equipamento</th>
+                  <th scope="col">Código</th>
+                  <th scope="col">Ação</th>
+                  <th scope="col">Tempo secagem</th>
+                </tr>
+              </thead>
+              <tbody id="recordsTbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="records-panel__footer hidden" id="recordsFooter">
+          <button type="button" id="btnLoadMore" class="btn btn--sm">Carregar mais</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <span>LAV60 · Painel operacional</span>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <script src="auth.js"></script>
+  <script src="api.js"></script>
+  <script src="records.js"></script>
+</body>
+</html>
