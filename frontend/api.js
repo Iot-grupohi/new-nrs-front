@@ -170,14 +170,34 @@
     return card;
   }
 
-  /** localhost:8080 no stores.json → host atual. Túnel sempre HTTPS (HTTP→301 quebra CORS). */
+  function isPanelOnLocalMachine() {
+    if (typeof window === 'undefined') return false;
+    const host = (window.location.hostname || '').toLowerCase();
+    return (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host.startsWith('192.168.') ||
+      host.startsWith('10.') ||
+      host.endsWith('.local')
+    );
+  }
+
+  function isLocalAgentUrl(url) {
+    if (!url) return false;
+    return /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?/i.test(String(url).trim());
+  }
+
+  /** localhost:8080 só quando painel e agente estão na mesma máquina (dev). */
   function normalizeAgentUrl(url) {
     if (!url) return url;
     let base = String(url).replace(/\/$/, '');
     if (typeof window === 'undefined') return base;
-    const local = base.match(/^https?:\/\/(localhost|127\.0\.0\.1)(?::(\d+))?/i);
-    if (local) {
-      const port = local[2] || '8080';
+    if (isLocalAgentUrl(base)) {
+      if (!isPanelOnLocalMachine()) {
+        return null;
+      }
+      const local = base.match(/^https?:\/\/(localhost|127\.0\.0\.1)(?::(\d+))?/i);
+      const port = local?.[2] || '8080';
       const host = window.location.hostname || '127.0.0.1';
       return `http://${host}:${port}`;
     }
@@ -208,7 +228,10 @@
     const candidates = [];
     // Cada loja no seu PC/túnel — nunca reutilizar localhost:8080 entre lojas
     candidates.push(`https://${storeId}.${suffix}`);
-    if (meta?.agent) candidates.push(normalizeAgentUrl(meta.agent));
+    if (meta?.agent) {
+      const normalized = normalizeAgentUrl(meta.agent);
+      if (normalized) candidates.push(normalized);
+    }
     return [...new Set(candidates.filter(Boolean))];
   }
 
@@ -242,12 +265,13 @@
 
   function agentUrlCandidatesFromHeartbeat(entry) {
     const payload = entry?.payload || entry || {};
-    const urls = [
-      payload.agent_local_url,
-      'http://127.0.0.1:8080',
-      payload.agent_url,
-    ].filter(Boolean);
-    return [...new Set(urls.map((u) => normalizeAgentUrl(u)))];
+    const urls = [];
+    if (payload.agent_url) urls.push(payload.agent_url);
+    if (isPanelOnLocalMachine()) {
+      if (payload.agent_local_url) urls.push(payload.agent_local_url);
+      urls.push('http://127.0.0.1:8080');
+    }
+    return [...new Set(urls.map((u) => normalizeAgentUrl(u)).filter(Boolean))];
   }
 
   async function resolveAgentEndpointForStore(meta, catalog, token, heartbeatEntry = null) {
@@ -340,7 +364,10 @@
     }
     const suffix = catalog?.domain_suffix || 'powpay.com.br';
     if (meta?.agent) {
-      return { base: normalizeAgentUrl(meta.agent).replace(/\/$/, ''), storeId: catalogId };
+      const normalized = normalizeAgentUrl(meta.agent);
+      if (normalized) {
+        return { base: normalized.replace(/\/$/, ''), storeId: catalogId };
+      }
     }
     return { base: `https://${catalogId}.${suffix}`, storeId: catalogId };
   }

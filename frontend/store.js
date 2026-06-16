@@ -1473,9 +1473,6 @@
     }
     if (window.Lav60Audit) {
       await Lav60Audit.refreshStatus();
-      if (Lav60Audit.isEnabled() === false) {
-        showToast('Auditoria Firestore indisponível — operações não serão registradas', false);
-      }
     }
     await init();
   })();
