@@ -322,10 +322,10 @@ def api_heartbeats_stream():
             yield f"data: {json.dumps({'type': 'snapshot', **snapshot})}\n\n"
             while True:
                 try:
-                    payload = client_q.get(timeout=25)
+                    payload = client_q.get(timeout=15)
                     yield f"data: {payload}\n\n"
                 except queue.Empty:
-                    yield ': keepalive\n\n'
+                    yield f"data: {json.dumps({'type': 'keepalive', 'ts': time.time()})}\n\n"
         finally:
             with sse_lock:
                 if client_q in sse_clients:

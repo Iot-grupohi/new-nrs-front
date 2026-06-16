@@ -271,6 +271,7 @@ Reinicie o painel. O dashboard abre **sem login** — use só em ambiente contro
 | Loja offline no dashboard | Agente sem `PANEL_HEARTBEAT_URL` ou `API_TOKEN` diferente |
 | Login não funciona pelo IP | Firebase bloqueia IP — use domínio autorizado ou `PANEL_AUTH_DISABLED=true` temporário |
 | `auth/me` 401 no console | Atualize o painel (`git pull`) — versão nova retorna 200 com `authenticated: false` |
+| SSE `ERR_INCOMPLETE_CHUNKED_ENCODING` | Gunicorn com `-w 2` — use **1 worker** (`deploy/lav60-panel.root.service`) e `--timeout 0` |
 | Registros vazios | `FIREBASE_SERVICE_ACCOUNT_FILE` inválido no VPS |
 | 502 Bad Gateway | Serviço `lav60-panel` parado — `systemctl status lav60-panel` |
 

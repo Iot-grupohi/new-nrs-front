@@ -802,6 +802,7 @@
   let heartbeatMonitorStarted = false;
   let heartbeatEventSource = null;
   let heartbeatTimeoutTimer = null;
+  let heartbeatPollTimer = null;
   let heartbeatPageStartedAt = Date.now();
   let heartbeatCatalog = null;
   let heartbeatOnUpdate = null;
@@ -1031,16 +1032,18 @@
       clearInterval(heartbeatTimeoutTimer);
       heartbeatTimeoutTimer = null;
     }
+    if (heartbeatPollTimer) {
+      clearInterval(heartbeatPollTimer);
+      heartbeatPollTimer = null;
+    }
   }
 
-  function startHeartbeatMonitor(catalog, onUpdate, token = '') {
-    heartbeatCatalog = catalog;
-    heartbeatOnUpdate = onUpdate;
-    heartbeatAuthToken = token || '';
-    heartbeatPageStartedAt = Date.now();
-    if (heartbeatMonitorStarted) return;
-    heartbeatMonitorStarted = true;
-
+  function connectHeartbeatStream() {
+    if (!heartbeatMonitorStarted) return;
+    if (heartbeatEventSource) {
+      heartbeatEventSource.close();
+      heartbeatEventSource = null;
+    }
     heartbeatEventSource = new EventSource('/api/heartbeats/stream');
     heartbeatEventSource.onmessage = (event) => {
       try {
@@ -1057,13 +1060,43 @@
       }
     };
     heartbeatEventSource.onerror = () => {
-      emitHeartbeatUpdate({ streamError: true });
+      if (!heartbeatMonitorStarted) return;
+      if (heartbeatEventSource) {
+        heartbeatEventSource.close();
+        heartbeatEventSource = null;
+      }
+      setTimeout(connectHeartbeatStream, 3000);
     };
+  }
+
+  function startHeartbeatMonitor(catalog, onUpdate, token = '') {
+    heartbeatCatalog = catalog;
+    heartbeatOnUpdate = onUpdate;
+    heartbeatAuthToken = token || '';
+    heartbeatPageStartedAt = Date.now();
+    if (heartbeatMonitorStarted) return;
+    heartbeatMonitorStarted = true;
+
+    pollHeartbeatsSnapshot();
+    if (heartbeatPollTimer) clearInterval(heartbeatPollTimer);
+    heartbeatPollTimer = setInterval(pollHeartbeatsSnapshot, 20000);
+
+    connectHeartbeatStream();
 
     if (heartbeatTimeoutTimer) clearInterval(heartbeatTimeoutTimer);
     heartbeatTimeoutTimer = setInterval(() => {
       emitHeartbeatUpdate({ tick: true });
     }, 5000);
+  }
+
+  async function pollHeartbeatsSnapshot() {
+    try {
+      const snap = await fetchHeartbeatsSnapshot();
+      ingestHeartbeatSnapshot(snap);
+      emitHeartbeatUpdate({ poll: true });
+    } catch {
+      /* painel indisponível */
+    }
   }
 
   async function fetchHeartbeatsSnapshot() {
@@ -1086,6 +1119,7 @@
 
     let stopped = false;
     let eventSource = null;
+    let pollTimer = null;
 
     function deliver(entry) {
       if (stopped || !entry) return;
@@ -1109,6 +1143,10 @@
 
     function connect() {
       if (stopped) return;
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
       eventSource = new EventSource('/api/heartbeats/stream');
       eventSource.onmessage = (event) => {
         if (stopped) return;
@@ -1124,12 +1162,39 @@
           /* ignore malformed SSE */
         }
       };
+      eventSource.onerror = () => {
+        if (stopped) return;
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+        setTimeout(connect, 3000);
+      };
+    }
+
+    async function pollOnce() {
+      if (stopped) return;
+      try {
+        const snap = await fetchHeartbeatsSnapshot();
+        const entry = snap.heartbeats?.[id];
+        if (entry && isHeartbeatEntryAlive(entry, catalog)) {
+          deliver(entry);
+        }
+      } catch {
+        /* painel indisponível */
+      }
     }
 
     bootstrap().then(connect);
+    pollOnce();
+    pollTimer = setInterval(pollOnce, 20000);
 
     return () => {
       stopped = true;
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
       if (eventSource) {
         eventSource.close();
         eventSource = null;

@@ -4,13 +4,13 @@ After=network.target
 
 [Service]
 Type=simple
-User=lav60
-Group=lav60
-WorkingDirectory=/home/lav60/lav60-panel
-EnvironmentFile=/home/lav60/lav60-panel/.env
+User=root
+Group=root
+WorkingDirectory=/root/lav60-panel
+EnvironmentFile=/root/lav60-panel/.env
 Environment=PYTHONUNBUFFERED=1
 
-ExecStart=/home/lav60/lav60-panel/.venv/bin/gunicorn \
+ExecStart=/root/lav60-panel/.venv/bin/gunicorn \
     -w 1 \
     -b 127.0.0.1:3000 \
     --access-logfile - \
