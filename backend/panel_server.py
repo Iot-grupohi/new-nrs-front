@@ -359,15 +359,22 @@ def api_panel_bootstrap():
 @app.route('/api/audit/status', methods=['GET'])
 def api_audit_status():
     available = audit_logging_available()
+    sa_path = service_account_path()
     payload = {
         'available': available,
         'collection': audit_collection(),
         'project_id': env_value('FIREBASE_PROJECT_ID'),
         'service_account_configured': service_account_configured(),
+        'service_account_env': env_value('FIREBASE_SERVICE_ACCOUNT_FILE') or None,
+        'service_account_resolved': sa_path or None,
     }
     if not available:
         if not service_account_configured():
             payload['reason'] = 'service_account_missing'
+            payload['hint'] = (
+                'Copie o JSON da service account para o VPS e defina '
+                'FIREBASE_SERVICE_ACCOUNT_FILE com caminho absoluto no .env'
+            )
         elif firebase_init_error():
             payload['reason'] = firebase_init_error()
         else:
@@ -395,7 +402,21 @@ def api_audit_log():
 @app.route('/api/audit/logs', methods=['GET'])
 def api_audit_logs():
     if not audit_logging_available():
-        return jsonify({'detail': 'audit_unavailable', 'items': []}), 503
+        reason = 'service_account_missing'
+        hint = None
+        if not service_account_configured():
+            hint = (
+                'Arquivo da service account não encontrado. '
+                'No VPS: copie o JSON e use caminho absoluto em FIREBASE_SERVICE_ACCOUNT_FILE'
+            )
+        elif firebase_init_error():
+            reason = firebase_init_error() or 'firestore_unavailable'
+        return jsonify({
+            'detail': 'audit_unavailable',
+            'reason': reason,
+            'hint': hint,
+            'items': [],
+        }), 503
 
     store = request.args.get('store', '').strip().lower() or None
     action = request.args.get('action', '').strip() or None

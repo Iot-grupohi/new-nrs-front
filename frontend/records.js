@@ -167,7 +167,9 @@
       const res = await fetch(`/api/audit/logs?${query}`, { credentials: 'same-origin' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.detail || `Erro ao carregar registros (HTTP ${res.status})`);
+        const hint = data.hint ? ` — ${data.hint}` : '';
+        const reason = data.reason ? ` (${data.reason})` : '';
+        throw new Error((data.detail || 'Erro ao carregar registros') + reason + hint);
       }
 
       actionLabels = data.action_labels || actionLabels;

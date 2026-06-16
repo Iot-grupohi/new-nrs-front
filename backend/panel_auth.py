@@ -59,7 +59,7 @@ def init_firebase_admin() -> bool:
     global _firebase_admin_ready, _firebase_init_error
     if _firebase_admin_ready:
         return True
-    if not firebase_auth_enabled() or not service_account_configured():
+    if not service_account_configured():
         _firebase_init_error = 'service_account_missing'
         return False
     try:

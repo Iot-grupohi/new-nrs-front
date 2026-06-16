@@ -100,6 +100,34 @@ Regras:
 - Envie o JSON da service account para o VPS (nunca commite no Git).
 - Ajuste `frontend/stores.json` com as lojas reais (`id`, `name`).
 
+### 4.1 Auditoria (Registros / Firestore)
+
+O painel **não lê** o caminho do Windows. No VPS o arquivo precisa existir fisicamente.
+
+**No seu PC** (PowerShell, pasta do projeto):
+
+```powershell
+scp "hipag-02-firebase-adminsdk-fbsvc-888378701a.json" root@161.97.110.117:/root/lav60-panel/service-account.json
+```
+
+**No `.env` da VPS** (caminho **absoluto**):
+
+```env
+FIREBASE_SERVICE_ACCOUNT_FILE=/root/lav60-panel/service-account.json
+FIREBASE_AUDIT_COLLECTION=audit_logs
+```
+
+Reinicie e teste:
+
+```bash
+sudo systemctl restart lav60-panel
+curl -s http://127.0.0.1:3000/api/audit/status | python3 -m json.tool
+```
+
+Deve retornar `"available": true`. Se `"service_account_configured": false`, o arquivo não está no caminho indicado.
+
+No Firebase Console → **Firestore Database** → crie o banco (modo produção ou teste) se ainda não existir.
+
 ---
 
 ## 5. Testar manualmente
@@ -272,7 +300,7 @@ Reinicie o painel. O dashboard abre **sem login** — use só em ambiente contro
 | Login não funciona pelo IP | Firebase bloqueia IP — use domínio autorizado ou `PANEL_AUTH_DISABLED=true` temporário |
 | `auth/me` 401 no console | Atualize o painel (`git pull`) — versão nova retorna 200 com `authenticated: false` |
 | SSE `ERR_INCOMPLETE_CHUNKED_ENCODING` | Use **1 worker** + `--worker-class gthread --threads 8` e `--timeout 0` (sync bloqueia SSE + heartbeat) |
-| Registros vazios | `FIREBASE_SERVICE_ACCOUNT_FILE` inválido no VPS |
+| Registros vazios / `audit_unavailable` | JSON da service account ausente ou caminho errado no `.env` — veja seção 4.1 |
 | 502 Bad Gateway | Serviço `lav60-panel` parado — `systemctl status lav60-panel` |
 
 ---
