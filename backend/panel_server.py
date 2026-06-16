@@ -110,6 +110,8 @@ def enforce_panel_auth():
         return None
     if path == '/api/heartbeat' and request.method == 'POST':
         return None
+    if path in ('/api/heartbeats', '/api/heartbeats/stream') and request.method == 'GET':
+        return None
     if path in PUBLIC_API_PATHS:
         return None
     return require_panel_user()
