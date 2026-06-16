@@ -231,12 +231,46 @@ sudo systemctl restart lav60-panel
 
 ---
 
+## Login Firebase (obrigatório: domínio)
+
+O Firebase **não aceita login pelo IP** (`http://161.97.110.117`). Ao tentar entrar pelo IP, o login falha com `auth/unauthorized-domain`.
+
+### Solução correta (produção)
+
+1. **DNS:** registro **A** `panel.powpay.com.br` → `161.97.110.117`
+2. **Nginx:** use `deploy/nginx-lav60-panel.conf` (inclui `panel.powpay.com.br`)
+3. **Firebase Console** → Authentication → Settings → **Authorized domains** → adicione `panel.powpay.com.br`
+4. **HTTPS:** `sudo certbot --nginx -d panel.powpay.com.br`
+5. Acesse **`https://panel.powpay.com.br/login.html`** (não use o IP)
+
+No `.env` da VPS:
+
+```env
+FLASK_SECRET_KEY=<string fixa longa>
+FIREBASE_SERVICE_ACCOUNT_FILE=/root/lav60-panel/hipag-02-firebase-adminsdk-fbsvc-888378701a.json
+```
+
+Copie o JSON da service account para o VPS e reinicie: `sudo systemctl restart lav60-panel`.
+
+### Solução temporária (sem login, só IP)
+
+Enquanto o domínio não estiver pronto, no `.env` da VPS:
+
+```env
+PANEL_AUTH_DISABLED=true
+```
+
+Reinicie o painel. O dashboard abre **sem login** — use só em ambiente controlado.
+
+---
+
 ## Problemas comuns
 
 | Sintoma | Causa provável |
 |---------|----------------|
 | Loja offline no dashboard | Agente sem `PANEL_HEARTBEAT_URL` ou `API_TOKEN` diferente |
-| Login não funciona | `FIREBASE_*` incorreto ou domínio não autorizado no Firebase Console |
+| Login não funciona pelo IP | Firebase bloqueia IP — use domínio autorizado ou `PANEL_AUTH_DISABLED=true` temporário |
+| `auth/me` 401 no console | Atualize o painel (`git pull`) — versão nova retorna 200 com `authenticated: false` |
 | Registros vazios | `FIREBASE_SERVICE_ACCOUNT_FILE` inválido no VPS |
 | 502 Bad Gateway | Serviço `lav60-panel` parado — `systemctl status lav60-panel` |
 

@@ -28,6 +28,9 @@ def firebase_public_config() -> dict[str, str] | None:
 
 
 def firebase_auth_enabled() -> bool:
+    flag = env_value('PANEL_AUTH_DISABLED').lower()
+    if flag in ('1', 'true', 'yes', 'on'):
+        return False
     return firebase_public_config() is not None
 
 

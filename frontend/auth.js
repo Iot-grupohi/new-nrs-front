@@ -85,12 +85,12 @@
       return { authenticated: true, auth_disabled: true, user: null };
     }
     const res = await panelFetch(AUTH_ME_URL);
-    if (res.status === 401) {
+    const data = await parseJson(res);
+    if (!res.ok) throw new Error('Erro ao verificar sessão');
+    if (!data.authenticated) {
       currentUser = null;
       return { authenticated: false, user: null };
     }
-    if (!res.ok) throw new Error('Erro ao verificar sessão');
-    const data = await parseJson(res);
     currentUser = data.user || null;
     return data;
   }

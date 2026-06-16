@@ -160,13 +160,9 @@ def api_auth_me():
     if not firebase_auth_enabled():
         return jsonify({'authenticated': True, 'auth_disabled': True, 'user': None}), 200
 
-    blocked = require_panel_user()
-    if blocked:
-        return blocked
-
     user = panel_user()
     if not user:
-        return jsonify({'authenticated': False}), 401
+        return jsonify({'authenticated': False, 'user': None}), 200
     return jsonify({'authenticated': True, 'user': user}), 200
 
 
