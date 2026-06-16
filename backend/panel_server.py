@@ -335,8 +335,9 @@ def api_heartbeats_stream():
         stream_with_context(generate()),
         mimetype='text/event-stream',
         headers={
-            'Cache-Control': 'no-cache',
+            'Cache-Control': 'no-cache, no-transform',
             'Connection': 'keep-alive',
+            'Content-Type': 'text/event-stream; charset=utf-8',
             'X-Accel-Buffering': 'no',
         },
     )

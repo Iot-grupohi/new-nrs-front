@@ -12,6 +12,8 @@ Environment=PYTHONUNBUFFERED=1
 
 ExecStart=/home/lav60/lav60-panel/.venv/bin/gunicorn \
     -w 1 \
+    --worker-class gthread \
+    --threads 8 \
     -b 127.0.0.1:3000 \
     --access-logfile - \
     --error-logfile - \

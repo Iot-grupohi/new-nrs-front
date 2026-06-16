@@ -337,9 +337,12 @@ def get_panel_heartbeat_url_candidates() -> list[str]:
     if _cached_working_panel_url:
         add(_cached_working_panel_url)
     add(_resolve_panel_heartbeat_url())
-    # Mesmo PC (dev) ou painel local antes do servidor remoto responder
-    add('http://127.0.0.1:3000/api/heartbeat')
-    add('http://localhost:3000/api/heartbeat')
+    explicit_env = (
+        os.getenv('PANEL_HEARTBEAT_URL') or _windows_env('PANEL_HEARTBEAT_URL') or ''
+    ).strip()
+    if not explicit_env:
+        add('http://127.0.0.1:3000/api/heartbeat')
+        add('http://localhost:3000/api/heartbeat')
     return ordered
 
 
@@ -1098,6 +1101,13 @@ DOSADORA_MAP = {
 AC_ID = '110'
 AC_IP = f'{NETWORK_BASE_IP}.110'
 
+# Ocultar no frontend quando offline (ping). Demais equipamentos permanecem visíveis offline.
+FRONTEND_HIDE_WHEN_OFFLINE: frozenset[tuple[str, str]] = frozenset({
+    ('washer', '321'),
+    ('dryer', '210'),
+    ('doser', '321'),
+})
+
 WASHER_IDS = list(WASHER_MAP.keys())
 DRYER_IDS = list(DRYER_MAP.keys())
 MACHINE_MAP = {mid: ip.rsplit('.', 1)[-1] for mid, ip in {**WASHER_MAP, **DRYER_MAP}.items()}
@@ -1675,6 +1685,51 @@ def attach_network_summary(data: dict) -> dict:
     return data
 
 
+def get_cached_network_status() -> dict | None:
+    with network_status_lock:
+        return dict(last_network_status) if last_network_status else None
+
+
+def is_device_visible_in_frontend(device_type: str, machine_id: str, network: dict | None = None) -> bool:
+    """True = mostrar card no frontend. IDs em FRONTEND_HIDE_WHEN_OFFLINE somem quando ping falha."""
+    mid = normalize_machine_id(machine_id)
+    dtype = canonical_device_type(device_type) or str(device_type or '').strip().lower()
+    if (dtype, mid) not in FRONTEND_HIDE_WHEN_OFFLINE:
+        return True
+    net = network if network is not None else get_cached_network_status()
+    if not net:
+        return True
+    group_key = {'washer': 'washers', 'dryer': 'dryers', 'doser': 'dosers'}.get(dtype)
+    if not group_key:
+        return True
+    items = net.get(group_key) or {}
+    if mid not in items:
+        return True
+    return bool(items[mid])
+
+
+def filter_machines_for_frontend(machines: list[dict], network: dict | None = None) -> list[dict]:
+    return [
+        m for m in (machines or [])
+        if is_device_visible_in_frontend(m.get('type', ''), m.get('id', ''), network)
+    ]
+
+
+def filter_network_status_for_frontend(data: dict | None) -> dict | None:
+    """Remove do payload público equipamentos configurados para ocultar quando offline."""
+    if not data:
+        return data
+    out = dict(data)
+    for group_key, dtype in (('washers', 'washer'), ('dryers', 'dryer'), ('dosers', 'doser')):
+        block = dict(out.get(group_key) or {})
+        out[group_key] = {
+            mid: online
+            for mid, online in block.items()
+            if is_device_visible_in_frontend(dtype, mid, data)
+        }
+    return attach_network_summary(out)
+
+
 def _count_online_map(items: dict) -> tuple[int, int]:
     if not items:
         return 0, 0
@@ -1770,8 +1825,8 @@ def build_panel_heartbeat_payload() -> dict:
         'agent_url': agent_static_public_url(),
         'agent_local_url': 'http://127.0.0.1:8080',
         'timestamp': datetime.now().isoformat(),
-        'network': network,
-        'machines': get_store_machines_list(),
+        'network': filter_network_status_for_frontend(network),
+        'machines': filter_machines_for_frontend(get_store_machines_list(), network),
     }
 
 
@@ -1781,7 +1836,7 @@ def send_panel_heartbeat_once() -> bool:
     if API_TOKEN:
         headers['X-Token'] = API_TOKEN
     payload = build_panel_heartbeat_payload()
-    last_error = ''
+    errors: list[str] = []
 
     for url in get_panel_heartbeat_url_candidates():
         try:
@@ -1792,18 +1847,18 @@ def send_panel_heartbeat_once() -> bool:
                 timeout=PANEL_HEARTBEAT_TRY_TIMEOUT,
             )
             if response.status_code >= 400:
-                last_error = f'HTTP {response.status_code} em {url}'
+                errors.append(f'{url}: HTTP {response.status_code}')
                 continue
             if _cached_working_panel_url != url:
                 logger.info(f"{Fore.GREEN}💓 Heartbeat painel OK → {url}{Style.RESET_ALL}")
             _cached_working_panel_url = url
             return True
         except Exception as exc:
-            last_error = f'{url}: {exc}'
+            errors.append(f'{url}: {exc}')
 
     logger.warning(
         f"{Fore.YELLOW}💓 Heartbeat painel falhou — painel inacessível "
-        f"({last_error or 'sem URL'}){Style.RESET_ALL}"
+        f"({' | '.join(errors) if errors else 'sem URL'}){Style.RESET_ALL}"
     )
     return False
 
@@ -2157,11 +2212,12 @@ def get_dryer_release_count(timer: int) -> int:
     return DRYER_TIMER_RELEASES.get(timer, 1)
 
 
-def device_catalog() -> dict:
+def device_catalog(network: dict | None = None) -> dict:
+    net = network if network is not None else get_cached_network_status()
     return {
-        'washers': sorted(get_washer_map().keys()),
-        'dryers': sorted(get_dryer_map().keys()),
-        'dosers': sorted(get_doser_map().keys()),
+        'washers': sorted(mid for mid in get_washer_map() if is_device_visible_in_frontend('washer', mid, net)),
+        'dryers': sorted(mid for mid in get_dryer_map() if is_device_visible_in_frontend('dryer', mid, net)),
+        'dosers': sorted(mid for mid in get_doser_map() if is_device_visible_in_frontend('doser', mid, net)),
         'ac': AC_ID,
     }
 
@@ -2689,9 +2745,10 @@ def gateway_doser_type(store: str, machine: str, cmd_type: str):
 def gateway_status_payload(store: str, machine: str | None, device_type: str | None):
     store_key = normalize_store_id(store)
     if not machine and not device_type:
-        data = attach_network_summary(build_network_status_all())
+        raw = attach_network_summary(build_network_status_all())
+        data = filter_network_status_for_frontend(raw)
         data['store'] = store_key
-        data['machines'] = get_store_machines_list()
+        data['machines'] = filter_machines_for_frontend(get_store_machines_list(), raw)
         return gateway_json(data, 200)
 
     if device_type == 'washer' or (machine and is_washer_id(machine) and not device_type):
@@ -3034,7 +3091,8 @@ def network_status():
 
     if not machine_id:
         logger.info(f"[{request_id}] Network status (all devices) requested")
-        data = attach_network_summary(build_network_status_all())
+        raw = attach_network_summary(build_network_status_all())
+        data = filter_network_status_for_frontend(raw)
         return jsonify(data), 200
 
     resolved = resolve_device(machine_id, device_type)
@@ -3118,14 +3176,15 @@ def agent_public_base_url() -> str:
 def agent_api_config():
     """Metadados desta loja para o frontend (sem segredos)."""
     with network_status_lock:
-        cached = dict(last_network_status) if last_network_status else None
+        cached_raw = dict(last_network_status) if last_network_status else None
+    cached = filter_network_status_for_frontend(cached_raw) if cached_raw else None
     return jsonify({
         'store': env_store_id().lower(),
         'agent_url': agent_public_base_url(),
         'token_required': bool(API_TOKEN),
         'network_check_interval': NETWORK_CHECK_INTERVAL,
-        'devices': device_catalog(),
-        'machines': get_store_machines_list(),
+        'devices': device_catalog(cached_raw),
+        'machines': filter_machines_for_frontend(get_store_machines_list(), cached_raw),
         'washer_am_options': list(VALID_WASHER_AM),
         'dryer_minutes': list(DRYER_TIMER_RELEASES.keys()),
         'ac_temperatures': list(AC_TEMPERATURES),

@@ -803,6 +803,7 @@
   let heartbeatEventSource = null;
   let heartbeatTimeoutTimer = null;
   let heartbeatPollTimer = null;
+  let heartbeatStreamReconnectMs = 3000;
   let heartbeatPageStartedAt = Date.now();
   let heartbeatCatalog = null;
   let heartbeatOnUpdate = null;
@@ -1046,6 +1047,7 @@
     }
     heartbeatEventSource = new EventSource('/api/heartbeats/stream');
     heartbeatEventSource.onmessage = (event) => {
+      heartbeatStreamReconnectMs = 3000;
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'heartbeat') {
@@ -1065,7 +1067,9 @@
         heartbeatEventSource.close();
         heartbeatEventSource = null;
       }
-      setTimeout(connectHeartbeatStream, 3000);
+      const delay = heartbeatStreamReconnectMs;
+      heartbeatStreamReconnectMs = Math.min(Math.round(heartbeatStreamReconnectMs * 1.5), 30000);
+      setTimeout(connectHeartbeatStream, delay);
     };
   }
 
@@ -1074,6 +1078,7 @@
     heartbeatOnUpdate = onUpdate;
     heartbeatAuthToken = token || '';
     heartbeatPageStartedAt = Date.now();
+    heartbeatStreamReconnectMs = 3000;
     if (heartbeatMonitorStarted) return;
     heartbeatMonitorStarted = true;
 
@@ -1120,6 +1125,7 @@
     let stopped = false;
     let eventSource = null;
     let pollTimer = null;
+    let streamReconnectMs = 3000;
 
     function deliver(entry) {
       if (stopped || !entry) return;
@@ -1150,6 +1156,7 @@
       eventSource = new EventSource('/api/heartbeats/stream');
       eventSource.onmessage = (event) => {
         if (stopped) return;
+        streamReconnectMs = 3000;
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'heartbeat' && normalizeStoreId(msg.store) === id) {
@@ -1168,7 +1175,9 @@
           eventSource.close();
           eventSource = null;
         }
-        setTimeout(connect, 3000);
+        const delay = streamReconnectMs;
+        streamReconnectMs = Math.min(Math.round(streamReconnectMs * 1.5), 30000);
+        setTimeout(connect, delay);
       };
     }
 

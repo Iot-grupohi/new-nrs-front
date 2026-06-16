@@ -107,7 +107,7 @@ Regras:
 ```bash
 source .venv/bin/activate
 cd ~/lav60-panel
-gunicorn -w 1 -b 127.0.0.1:3000 --timeout 0 'backend.panel_server:app'
+gunicorn -w 1 --worker-class gthread --threads 8 -b 127.0.0.1:3000 --timeout 0 'backend.panel_server:app'
 ```
 
 Se aparecer `No module named 'lav60_env'`, atualize o projeto (`git pull`) ou use:
@@ -271,7 +271,7 @@ Reinicie o painel. O dashboard abre **sem login** — use só em ambiente contro
 | Loja offline no dashboard | Agente sem `PANEL_HEARTBEAT_URL` ou `API_TOKEN` diferente |
 | Login não funciona pelo IP | Firebase bloqueia IP — use domínio autorizado ou `PANEL_AUTH_DISABLED=true` temporário |
 | `auth/me` 401 no console | Atualize o painel (`git pull`) — versão nova retorna 200 com `authenticated: false` |
-| SSE `ERR_INCOMPLETE_CHUNKED_ENCODING` | Gunicorn com `-w 2` — use **1 worker** (`deploy/lav60-panel.root.service`) e `--timeout 0` |
+| SSE `ERR_INCOMPLETE_CHUNKED_ENCODING` | Use **1 worker** + `--worker-class gthread --threads 8` e `--timeout 0` (sync bloqueia SSE + heartbeat) |
 | Registros vazios | `FIREBASE_SERVICE_ACCOUNT_FILE` inválido no VPS |
 | 502 Bad Gateway | Serviço `lav60-panel` parado — `systemctl status lav60-panel` |
 
