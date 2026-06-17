@@ -182,6 +182,31 @@
     );
   }
 
+  /** Painel central (VPS) — browser não pode chamar *.powpay.com.br direto (CORS). */
+  function isCentralPanelHost() {
+    if (typeof window === 'undefined') return false;
+    if (isPanelOnLocalMachine()) return false;
+    const host = (window.location.hostname || '').toLowerCase();
+    return host.includes('lav60.com') || host.endsWith('.lav60.com');
+  }
+
+  function shouldUsePanelAgentProxy(storeId) {
+    if (!isCentralPanelHost()) return false;
+    const id = normalizeStoreId(storeId);
+    const host = (window.location.hostname || '').toLowerCase();
+    if (host === `${id}.powpay.com.br`) return false;
+    return true;
+  }
+
+  function panelAgentConfigUrl(storeId) {
+    return `${window.location.origin}/api/stores/${normalizeStoreId(storeId)}/agent/config`;
+  }
+
+  function panelAgentGatewayUrl(storeId, path) {
+    const sub = String(path || '').replace(/^\//, '');
+    return `${window.location.origin}/api/stores/${normalizeStoreId(storeId)}/gateway/${sub}`;
+  }
+
   function isLocalAgentUrl(url) {
     if (!url) return false;
     return /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?/i.test(String(url).trim());
@@ -235,13 +260,18 @@
     return [...new Set(candidates.filter(Boolean))];
   }
 
-  async function probeAgentBase(base, token, timeoutMs = 5000) {
+  async function probeAgentBase(base, token, timeoutMs = 5000, storeId = null) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const res = await fetch(`${base.replace(/\/$/, '')}/api/agent/config`, {
+      const url =
+        storeId && shouldUsePanelAgentProxy(storeId)
+          ? panelAgentConfigUrl(storeId)
+          : `${String(base).replace(/\/$/, '')}/api/agent/config`;
+      const res = await fetch(url, {
         headers: authHeaders(token),
         signal: ctrl.signal,
+        credentials: storeId && shouldUsePanelAgentProxy(storeId) ? 'same-origin' : 'omit',
       });
       if (!res.ok) return null;
       return res.json();
@@ -295,9 +325,19 @@
     }
 
     if (isHeartbeatEntryAlive(entry, catalog)) {
+      if (shouldUsePanelAgentProxy(catalogId)) {
+        const ep = {
+          base: window.location.origin,
+          storeId: catalogId,
+          panelProxy: true,
+        };
+        endpointDiscoveryCache.set(catalogId, ep);
+        lav60Debug('agent', 'resolved via panel proxy', ep);
+        return ep;
+      }
       lav60Debug('agent', 'heartbeat alive', { store: catalogId, urls: agentUrlCandidatesFromHeartbeat(entry) });
       for (const base of agentUrlCandidatesFromHeartbeat(entry)) {
-        const data = await probeAgentBase(base, token, 8000);
+        const data = await probeAgentBase(base, token, 8000, catalogId);
         lav60Debug('agent', 'probe', { base, ok: Boolean(data), store: data?.store });
         if (data && agentStoreMatchesCatalog(data.store, catalogId)) {
           const ep = {
@@ -330,7 +370,7 @@
     }
 
     for (const base of buildAgentCandidates(meta, catalog)) {
-      const data = await probeAgentBase(base, token);
+      const data = await probeAgentBase(base, token, 5000, catalogId);
       if (!data) continue;
       const agentStore = normalizeStoreId(data.store);
       if (!agentStoreMatchesCatalog(agentStore, catalogId)) {
@@ -1658,15 +1698,21 @@
       };
     }
 
-    const { base, storeId } = ep;
-    const agentBase = normalizeAgentUrl(base).replace(/\/$/, '');
-    const configUrl = `${agentBase}/api/agent/config`;
+    const useProxy = ep.panelProxy || shouldUsePanelAgentProxy(catalogId);
+    const storeId = normalizeStoreId(ep.storeId || catalogId);
+    const agentBase = ep.base ? normalizeAgentUrl(ep.base).replace(/\/$/, '') : window.location.origin;
+    const configUrl = useProxy
+      ? panelAgentConfigUrl(catalogId)
+      : `${agentBase}/api/agent/config`;
 
     let config;
     try {
       const res = await fetchWithTimeout(
         configUrl,
-        { headers: authHeaders(token) },
+        {
+          headers: authHeaders(token),
+          credentials: useProxy ? 'same-origin' : 'omit',
+        },
         getAgentProbeTimeoutMs(catalog)
       );
       if (!res.ok) {
@@ -1933,13 +1979,17 @@
 
   async function fetchAgentConfig(meta, catalog, token, endpointOverride = null) {
     const ep = endpointOverride || (await discoverAgentEndpoint(meta, catalog, token));
-    if (ep.unmatched || !ep.base) {
+    if (ep.unmatched || (!ep.base && !ep.panelProxy)) {
       throw new Error(noAgentMessage(meta.id));
     }
-    const { base } = ep;
-    const configBase = normalizeAgentUrl(base).replace(/\/$/, '');
-    const res = await fetch(`${configBase}/api/agent/config`, {
+    const storeId = normalizeStoreId(meta.id);
+    const useProxy = ep.panelProxy || shouldUsePanelAgentProxy(storeId);
+    const configUrl = useProxy
+      ? panelAgentConfigUrl(storeId)
+      : `${normalizeAgentUrl(ep.base).replace(/\/$/, '')}/api/agent/config`;
+    const res = await fetch(configUrl, {
       headers: authHeaders(token),
+      credentials: useProxy ? 'same-origin' : 'omit',
     });
     if (!res.ok) {
       throw new Error(friendlyUserMessage(`Config: HTTP ${res.status}`));
@@ -1953,21 +2003,32 @@
 
   async function agentRequest(meta, catalog, token, method, path, body, endpointOverride = null) {
     const ep = endpointOverride || (await discoverAgentEndpoint(meta, catalog, token));
-    if (ep.unmatched || !ep.base) {
+    if (ep.unmatched || (!ep.base && !ep.panelProxy)) {
       throw new Error(noAgentMessage(meta.id));
     }
-    const { base, storeId } = ep;
-    const agentBase = normalizeAgentUrl(base).replace(/\/$/, '');
+    const storeId = normalizeStoreId(ep.storeId || meta.id);
+    const useProxy = ep.panelProxy || shouldUsePanelAgentProxy(storeId);
     let url;
-    if (path.startsWith('/api/')) {
-      url = `${agentBase}${path}`;
+    if (useProxy) {
+      if (path.startsWith('/api/')) {
+        url = panelAgentConfigUrl(storeId);
+      } else {
+        const sub = path.startsWith('/') ? path.slice(1) : path;
+        url = panelAgentGatewayUrl(storeId, sub);
+      }
     } else {
-      const sub = path.startsWith('/') ? path : `/${path}`;
-      url = `${agentBase}/${storeId}${sub}`;
+      const agentBase = normalizeAgentUrl(ep.base).replace(/\/$/, '');
+      if (path.startsWith('/api/')) {
+        url = `${agentBase}${path}`;
+      } else {
+        const sub = path.startsWith('/') ? path : `/${path}`;
+        url = `${agentBase}/${storeId}${sub}`;
+      }
     }
     const opts = {
       method,
       headers: authHeaders(token, { 'Content-Type': 'application/json' }),
+      credentials: useProxy ? 'same-origin' : 'omit',
     };
     if (body !== undefined) opts.body = JSON.stringify(body);
     const res = await fetch(url, opts);

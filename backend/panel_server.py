@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import requests
 from flask import Flask, Response, jsonify, request, send_from_directory, session, stream_with_context
 
 from lav60_env import env_value, load_local_env
@@ -343,6 +344,141 @@ def heartbeat_snapshot() -> dict:
         'timeout_seconds': timeout,
         'timestamp': datetime.now().isoformat(),
     }
+
+
+def get_heartbeat_entry(store_id: str) -> dict | None:
+    sid = normalize_store_id(store_id)
+    with heartbeats_lock:
+        entry = heartbeats.get(sid)
+        return dict(entry) if entry else None
+
+
+def is_store_heartbeat_alive(store_id: str) -> bool:
+    entry = get_heartbeat_entry(store_id)
+    if not entry:
+        return False
+    age = time.time() - float(entry.get('received_at') or 0)
+    return age <= heartbeat_timeout_seconds()
+
+
+def agent_base_urls_for_store(store_id: str) -> list[str]:
+    entry = get_heartbeat_entry(store_id)
+    if not entry:
+        return []
+    payload = entry.get('payload') or {}
+    urls: list[str] = []
+    for key in ('agent_url', 'agent_local_url'):
+        raw = str(payload.get(key) or '').strip().rstrip('/')
+        if raw and raw not in urls:
+            urls.append(raw)
+    return urls
+
+
+def build_agent_config_from_heartbeat(store_id: str) -> dict | None:
+    """Config mínima para a página da loja quando o túnel do agente está indisponível."""
+    entry = get_heartbeat_entry(store_id)
+    if not entry:
+        return None
+    payload = entry.get('payload') or {}
+    network = payload.get('network') or {}
+    machines = payload.get('machines') or []
+    devices = {
+        'washers': sorted(str(k) for k in (network.get('washers') or {}).keys()),
+        'dryers': sorted(str(k) for k in (network.get('dryers') or {}).keys()),
+        'dosers': sorted(str(k) for k in (network.get('dosers') or {}).keys()),
+        'ac': '110',
+    }
+    return {
+        'store': normalize_store_id(store_id),
+        'agent_url': payload.get('agent_url'),
+        'token_required': bool(os.getenv('API_TOKEN', '').strip()),
+        'network_check_interval': int(load_catalog().get('network_check_interval') or 60),
+        'devices': devices,
+        'machines': machines,
+        'washer_am_options': ['am01-1', 'am01-2', 'am02-1', 'am02-2'],
+        'dryer_minutes': [15, 30, 45],
+        'ac_temperatures': ['18', '22', 'off'],
+        'doser_types': [
+            'softener0', 'softener1', 'softener2', 'softener3',
+            'am01-1', 'am01-2', 'am02-1', 'am02-2',
+            'rele1on', 'rele2on', 'rele3on', 'status',
+        ],
+        'last_network_check': network,
+        'from_heartbeat': True,
+    }
+
+
+def forward_agent_request(store_id: str, method: str, agent_path: str, timeout: int = 45):
+    """Encaminha requisição ao agente da loja (server-side — evita CORS no browser)."""
+    headers = {'Accept': 'application/json'}
+    token = request.headers.get('X-Token')
+    if token:
+        headers['X-Token'] = token
+
+    json_body = None
+    if method in ('POST', 'PUT', 'PATCH'):
+        json_body = request.get_json(silent=True)
+        if json_body is not None:
+            headers['Content-Type'] = 'application/json'
+
+    last_error: str | None = None
+    for base in agent_base_urls_for_store(store_id):
+        url = f"{base.rstrip('/')}{agent_path}"
+        try:
+            return requests.request(
+                method,
+                url,
+                headers=headers,
+                json=json_body,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            last_error = str(exc)
+    raise ConnectionError(last_error or 'Agente da loja indisponível')
+
+
+def agent_proxy_response(resp: requests.Response):
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = {'detail': resp.text or resp.reason}
+    return jsonify(payload), resp.status_code
+
+
+@app.route('/api/stores/<store_id>/agent/config', methods=['GET', 'OPTIONS'])
+def api_store_agent_config(store_id: str):
+    if request.method == 'OPTIONS':
+        return '', 204
+    sid = normalize_store_id(store_id)
+    if not sid:
+        return jsonify({'detail': 'Invalid store id'}), 400
+    if not is_store_heartbeat_alive(sid):
+        return jsonify({'detail': 'Loja offline ou sem heartbeat recente'}), 503
+    try:
+        resp = forward_agent_request(sid, 'GET', '/api/agent/config', timeout=20)
+        return agent_proxy_response(resp)
+    except ConnectionError as exc:
+        fallback = build_agent_config_from_heartbeat(sid)
+        if fallback:
+            return jsonify(fallback), 200
+        return jsonify({'detail': str(exc)}), 502
+
+
+@app.route('/api/stores/<store_id>/gateway/<path:subpath>', methods=['GET', 'POST', 'OPTIONS'])
+def api_store_agent_gateway(store_id: str, subpath: str):
+    if request.method == 'OPTIONS':
+        return '', 204
+    sid = normalize_store_id(store_id)
+    if not sid:
+        return jsonify({'detail': 'Invalid store id'}), 400
+    if not is_store_heartbeat_alive(sid):
+        return jsonify({'detail': 'Loja offline ou sem heartbeat recente'}), 503
+    agent_path = f'/{sid}/{subpath.lstrip("/")}'
+    try:
+        resp = forward_agent_request(sid, request.method, agent_path, timeout=60)
+        return agent_proxy_response(resp)
+    except ConnectionError as exc:
+        return jsonify({'detail': str(exc)}), 502
 
 
 @app.route('/api/heartbeats', methods=['GET'])
