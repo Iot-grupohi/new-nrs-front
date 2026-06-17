@@ -627,8 +627,12 @@
     );
   }
 
-  /** Só equipamentos cadastrados na API Lav60; sem lista, oculta extras do mapa fixo (321/210/321). */
+  /** Lav/sec exigem API Lav60; dosadoras usam mapa de rede (ping), sem esperar a API. */
   function isDeviceRegisteredInCatalog(machines, deviceType, machineId) {
+    const dtype = String(deviceType || '').toLowerCase();
+    if (dtype === 'doser') {
+      return true;
+    }
     if (!Array.isArray(machines)) {
       return !isFixedMapExtra(deviceType, machineId);
     }
@@ -636,13 +640,12 @@
       return !isFixedMapExtra(deviceType, machineId);
     }
     const mid = normalizeStoreId(machineId);
-    const dtype = String(deviceType || '').toLowerCase();
     return machines.some(
       (m) => machineRecordType(m) === dtype && normalizeStoreId(m.id) === mid
     );
   }
 
-  /** Exige cadastro Lav60; lavadora 321, secadora 210 e dosadora 321 também exigem ping online. */
+  /** Lav/sec exigem API; dosadoras só ping; lavadora 321, secadora 210 e dosadora 321 exigem online. */
   function isDeviceVisibleInFrontend(deviceType, machineId, network) {
     const machines = network?.machines;
     if (!isDeviceRegisteredInCatalog(machines, deviceType, machineId)) return false;
@@ -682,20 +685,14 @@
     const catalog = machines || [];
     const net = { ...network, machines: network?.machines ?? catalog };
     catalog.forEach((m) => {
-      const t = m.type;
+      const t = machineRecordType(m);
+      if (t === 'doser') return;
       if (!isDeviceVisibleInFrontend(t, m.id, net)) return;
-      const key = t === 'washer' ? 'washers' : t === 'dryer' ? 'dryers' : t === 'doser' ? 'dosers' : null;
+      const key = t === 'washer' ? 'washers' : t === 'dryer' ? 'dryers' : null;
       if (key) ids[key].add(normalizeStoreId(m.id));
     });
-    if (catalog.length) {
-      return {
-        washers: [...ids.washers].sort(),
-        dryers: [...ids.dryers].sort(),
-        dosers: [...ids.dosers].sort(),
-        ac: '110',
-      };
-    }
-    ['washers', 'dryers', 'dosers'].forEach((key) => {
+    const networkKeys = catalog.length ? ['dosers'] : ['washers', 'dryers', 'dosers'];
+    networkKeys.forEach((key) => {
       const dtype = { washers: 'washer', dryers: 'dryer', dosers: 'doser' }[key];
       Object.keys(network[key] || {}).forEach((id) => {
         if (isDeviceVisibleInFrontend(dtype, id, net)) {
@@ -744,7 +741,18 @@
       const mtype = DEVICE_GROUP_TYPE[key];
       let list;
 
-      if (machines.length) {
+      if (key === 'dosers' || !machines.length) {
+        list = Object.keys(items)
+          .filter((id) => isDeviceVisibleInFrontend(mtype, id, status))
+          .map((id) => {
+            const meta = findMachineMeta(machines, id, mtype);
+            return {
+              ...(meta || {}),
+              id,
+              online: Boolean(items[id]),
+            };
+          });
+      } else {
         list = machines
           .filter(
             (m) =>
@@ -757,17 +765,6 @@
               ...normalized,
               id: normalized.id,
               online: items[id] === true,
-            };
-          });
-      } else {
-        list = Object.keys(items)
-          .filter((id) => isDeviceVisibleInFrontend(mtype, id, status))
-          .map((id) => {
-            const meta = findMachineMeta(machines, id, mtype);
-            return {
-              ...(meta || {}),
-              id,
-              online: Boolean(items[id]),
             };
           });
       }

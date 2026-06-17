@@ -1849,17 +1849,19 @@ def registered_device_keys() -> frozenset[tuple[str, str]] | None:
 
 
 def is_device_registered_in_catalog(device_type: str, machine_id: str) -> bool:
-    """Só exibe equipamentos presentes na API Lav60; sem catálogo, oculta extras do mapa fixo."""
-    registered = registered_device_keys()
+    """Lavadoras/secadoras exigem API Lav60; dosadoras usam mapa local (ping)."""
     dtype = canonical_device_type(device_type) or str(device_type or '').strip().lower()
     mid = normalize_machine_id(machine_id)
+    if dtype == 'doser':
+        return mid in get_doser_map()
+    registered = registered_device_keys()
     if registered is None:
         return (dtype, mid) not in FRONTEND_HIDE_WHEN_OFFLINE
     return (dtype, mid) in registered
 
 
 def is_device_visible_in_frontend(device_type: str, machine_id: str, network: dict | None = None) -> bool:
-    """True = mostrar no painel. Exige cadastro Lav60; 321/210/321 também exigem ping online."""
+    """True = mostrar no painel. Lav/sec exigem API; dosadoras só ping; 321/210/321 exigem online."""
     if not is_device_registered_in_catalog(device_type, machine_id):
         return False
     mid = normalize_machine_id(machine_id)
