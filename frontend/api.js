@@ -674,7 +674,7 @@
     });
     if (Array.isArray(next.machines)) {
       next.machines = next.machines.filter((m) =>
-        isDeviceVisibleInFrontend(m.type, m.id, next)
+        isDeviceVisibleInFrontend(machineRecordType(m), m.id, next)
       );
     }
     return reconcileStatusSummary(next, acId);
@@ -1120,6 +1120,11 @@
     const card = normalizeCardAccess({ ...row.card, loading: false });
     let status = row.status ? { ...row.status } : statusFromCard(row.card);
     if (status) {
+      status.machines = mergeMachinesCatalog(
+        status.machines,
+        row.card?.machines,
+        machinesFromCardDevices(row.card)
+      );
       status = applyFrontendDeviceVisibility(status, acId);
       card.devices = buildDeviceDots(status, acId);
       card.summary = status.summary || card.summary;
@@ -1224,7 +1229,13 @@
       timestamp: network.timestamp || payload.timestamp || new Date().toISOString(),
       summary: network.summary || null,
     };
-    status.machines = mergeMachinesCatalog(payload?.machines);
+    const id = normalizeStoreId(payload.store || catalogId);
+    const prev = heartbeatState.get(id);
+    status.machines = mergeMachinesCatalog(
+      payload?.machines,
+      prev?.lastStatus?.machines,
+      prev?.payload?.machines
+    );
     return applyFrontendDeviceVisibility(status);
   }
 
@@ -1246,13 +1257,21 @@
   }
 
   function buildOfflineCardFromHeartbeat(meta, catalog, hb, cacheMap) {
-    const lastStatus = hb?.lastStatus || null;
+    const cachedRow = cacheMap?.[normalizeStoreId(meta.id)];
+    const cachedMachines = mergeMachinesCatalog(
+      cachedRow?.status?.machines,
+      cachedRow?.card?.machines,
+      machinesFromCardDevices(cachedRow?.card)
+    );
+    let lastStatus = hb?.lastStatus || null;
+    if (lastStatus && cachedMachines.length) {
+      lastStatus = { ...lastStatus, machines: mergeMachinesCatalog(lastStatus.machines, cachedMachines) };
+    }
     if (lastStatus) {
       return buildStoreCard(meta, lastStatus, 'Sem conexão com a loja', catalog, {
         staleSnapshot: Boolean(lastStatus),
       });
     }
-    const cachedRow = cacheMap?.[normalizeStoreId(meta.id)];
     if (cachedRow) {
       const cached = cardFromCacheRow(meta, cachedRow, catalog);
       if (cached) {
@@ -1721,7 +1740,20 @@
     return card;
   }
 
-  /** Reconstrói payload /status a partir do card (cache antigo sem status). */
+  function machinesFromCardDevices(card) {
+    if (!card?.devices) return [];
+    const out = [];
+    ['washers', 'dryers', 'dosers'].forEach((key) => {
+      const dtype = DEVICE_GROUP_TYPE[key];
+      (card.devices[key] || []).forEach((dev) => {
+        if (!dev?.id) return;
+        const normalized = normalizeMachineRecord({ ...dev, type: dev.type || dtype });
+        out.push(normalized || { ...dev, type: dtype });
+      });
+    });
+    return out;
+  }
+
   function statusFromCard(card) {
     if (!card) return null;
     const status = {
@@ -1743,6 +1775,7 @@
     });
     const acDev = (card.devices?.ac || [])[0];
     status.ac = acDev ? Boolean(acDev.online) : false;
+    status.machines = mergeMachinesCatalog(card.machines, machinesFromCardDevices(card));
     return status;
   }
 
