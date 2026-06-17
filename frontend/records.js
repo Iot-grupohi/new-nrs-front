@@ -1,15 +1,24 @@
 (() => {
   'use strict';
 
-  const PAGE_SIZE = 40;
+  const PAGE_SIZE = 20;
+  const CACHE_VERSION = '3';
+  const CACHE_TTL_MS = 5 * 60 * 1000;
+  const CACHE_PREFIX = `lav60:records:v${CACHE_VERSION}:`;
+  const FILTERS_KEY = `${CACHE_PREFIX}filters`;
+  const OPERATORS_KEY = `${CACHE_PREFIX}operators`;
+
   let actionLabels = {};
   let deviceLabels = {};
   let catalogStores = [];
+  let operatorOptions = [];
   let items = [];
-  let nextBeforeMs = null;
   let hasMore = false;
   let loading = false;
   let searchTimer = null;
+  let currentPage = 1;
+  /** @type {Record<number, number|null>} cursor before_ms para abrir cada página (página 1 = null) */
+  let pageCursors = { 1: null };
 
   const $ = (id) => document.getElementById(id);
 
@@ -138,32 +147,141 @@
   function currentFilters() {
     return {
       store: $('filterStore').value.trim(),
+      operator: $('filterOperator').value.trim(),
       action: $('filterAction').value.trim(),
       success: $('filterSuccess').value.trim(),
       q: $('filterSearch').value.trim(),
     };
   }
 
-  function buildQueryParams(filters, beforeMs) {
+  function filtersSignature(filters) {
+    return JSON.stringify(filters);
+  }
+
+  function pageCacheKey(filters, page) {
+    return `${CACHE_PREFIX}page:${filtersSignature(filters)}:${page}`;
+  }
+
+  function readSessionJson(key) {
+    try {
+      const raw = sessionStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function writeSessionJson(key, value) {
+    try {
+      sessionStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      /* quota / private mode */
+    }
+  }
+
+  function readPageCache(filters, page) {
+    const entry = readSessionJson(pageCacheKey(filters, page));
+    if (!entry || Date.now() - (entry.at || 0) > CACHE_TTL_MS) return null;
+    return entry;
+  }
+
+  function writePageCache(filters, page, payload) {
+    writeSessionJson(pageCacheKey(filters, page), {
+      at: Date.now(),
+      items: payload.items,
+      hasMore: payload.hasMore,
+      nextPageCursor: payload.nextPageCursor,
+      page,
+      filters,
+    });
+  }
+
+  function saveFiltersToSession(filters) {
+    writeSessionJson(FILTERS_KEY, { at: Date.now(), filters });
+  }
+
+  function restoreFiltersFromSession() {
+    const entry = readSessionJson(FILTERS_KEY);
+    if (!entry?.filters) return;
+    const f = entry.filters;
+    if ($('filterStore')) $('filterStore').value = f.store || '';
+    if ($('filterOperator')) $('filterOperator').value = f.operator || '';
+    if ($('filterAction')) $('filterAction').value = f.action || '';
+    if ($('filterSuccess')) $('filterSuccess').value = f.success || '';
+    if ($('filterSearch')) $('filterSearch').value = f.q || '';
+  }
+
+  function resetPagination() {
+    currentPage = 1;
+    pageCursors = { 1: null };
+  }
+
+  function buildQueryParams(filters, page) {
     const params = new URLSearchParams();
     params.set('limit', String(PAGE_SIZE));
     if (filters.store) params.set('store', filters.store);
+    if (filters.operator) params.set('operator', filters.operator);
     if (filters.action) params.set('action', filters.action);
     if (filters.success === 'true') params.set('success', 'true');
     if (filters.success === 'false') params.set('success', 'false');
     if (filters.q) params.set('q', filters.q);
+    const beforeMs = page > 1 ? pageCursors[page] : null;
     if (beforeMs) params.set('before_ms', String(beforeMs));
     return params.toString();
   }
 
-  async function fetchLogs({ append = false, beforeMs = null } = {}) {
-    if (loading) return;
-    loading = true;
-    setLoadingState(!append);
+  function applyPagePayload(data, page) {
+    actionLabels = data.action_labels || actionLabels;
+    deviceLabels = data.device_labels || deviceLabels;
+    const batch = Array.isArray(data.items) ? data.items : [];
+    items = batch.slice(0, PAGE_SIZE);
+    hasMore = Boolean(data.has_more) || batch.length > PAGE_SIZE;
+    if (hasMore && data.next_before_ms) {
+      pageCursors[page + 1] = data.next_before_ms;
+    } else if (hasMore && batch.length > PAGE_SIZE && batch[PAGE_SIZE - 1]?.ts_ms) {
+      pageCursors[page + 1] = batch[PAGE_SIZE - 1].ts_ms;
+    } else {
+      delete pageCursors[page + 1];
+    }
+    populateActionFilter();
+    renderTable();
+    updateMeta();
+  }
+
+  async function fetchLogs({ page = currentPage, force = false, silent = false } = {}) {
+    if (loading && !silent) return;
+    const filters = currentFilters();
+    saveFiltersToSession(filters);
+
+    if (page !== currentPage) {
+      currentPage = page;
+    }
+
+    if (page > 1 && pageCursors[page] == null) {
+      showToast('Não há mais páginas nesta direção', false);
+      return;
+    }
+
+    const cached = !force ? readPageCache(filters, page) : null;
+    if (cached) {
+      items = (cached.items || []).slice(0, PAGE_SIZE);
+      hasMore = Boolean(cached.hasMore);
+      if (cached.nextPageCursor) {
+        pageCursors[page + 1] = cached.nextPageCursor;
+      }
+      renderTable();
+      updateMeta();
+      if (!silent) {
+        fetchLogs({ page, force: true, silent: true });
+      }
+      return;
+    }
+
+    loading = !silent;
+    if (!silent) setLoadingState(!items.length);
 
     try {
-      const filters = currentFilters();
-      const query = buildQueryParams(filters, append ? beforeMs : null);
+      const query = buildQueryParams(filters, page);
       const res = await fetch(`/api/audit/logs?${query}`, { credentials: 'same-origin' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -172,24 +290,20 @@
         throw new Error((data.detail || 'Erro ao carregar registros') + reason + hint);
       }
 
-      actionLabels = data.action_labels || actionLabels;
-      deviceLabels = data.device_labels || deviceLabels;
-      const batch = data.items || [];
-      items = append ? items.concat(batch) : batch;
-      hasMore = Boolean(data.has_more);
-      nextBeforeMs = data.next_before_ms || (batch.length ? batch[batch.length - 1].ts_ms : null);
-
-      populateActionFilter();
-      renderTable();
-      updateMeta();
+      applyPagePayload(data, page);
+      writePageCache(filters, page, {
+        items,
+        hasMore,
+        nextPageCursor: hasMore ? pageCursors[page + 1] : null,
+      });
     } catch (e) {
-      if (!append) {
+      if (!silent) {
         items = [];
         renderTable();
+        showToast(e.message || 'Falha ao carregar registros', false);
       }
-      showToast(e.message || 'Falha ao carregar registros', false);
     } finally {
-      loading = false;
+      if (!silent) loading = false;
       setLoadingState(false);
     }
   }
@@ -203,12 +317,19 @@
   }
 
   function updateMeta() {
-    const collection = 'audit_logs';
     $('recordsMeta').textContent = items.length
-      ? `${items.length} registro(s) exibido(s)${hasMore ? '+' : ''}`
-      : collection;
-    $('recordsFooter').classList.toggle('hidden', !hasMore);
-    $('btnLoadMore').disabled = !hasMore;
+      ? `${items.length} registro(s) · ${PAGE_SIZE} por página`
+      : 'audit_logs';
+    const pageInfo = $('recordsPageInfo');
+    if (pageInfo) pageInfo.textContent = `Página ${currentPage}`;
+    const prev = $('btnPrevPage');
+    const next = $('btnNextPage');
+    if (prev) prev.disabled = currentPage <= 1 || loading;
+    if (next) next.disabled = !hasMore || loading;
+    const footer = $('recordsFooter');
+    if (footer) {
+      footer.classList.toggle('hidden', items.length === 0 && currentPage <= 1);
+    }
   }
 
   function populateStoreFilter() {
@@ -222,6 +343,21 @@
       select.appendChild(opt);
     });
     if (current) select.value = current;
+  }
+
+  function populateOperatorFilter() {
+    const select = $('filterOperator');
+    const current = select.value;
+    select.innerHTML = '<option value="">Todos os operadores</option>';
+    operatorOptions.forEach((op) => {
+      const opt = document.createElement('option');
+      opt.value = op.email;
+      opt.textContent = op.name && op.name !== op.email ? `${op.name} (${op.email})` : op.email;
+      select.appendChild(opt);
+    });
+    if (current && operatorOptions.some((op) => op.email === current)) {
+      select.value = current;
+    }
   }
 
   function populateActionFilter() {
@@ -282,19 +418,80 @@
     populateStoreFilter();
   }
 
+  async function loadOperators({ force = false } = {}) {
+    if (!force) {
+      const cached = readSessionJson(OPERATORS_KEY);
+      if (cached?.operators && Date.now() - (cached.at || 0) <= CACHE_TTL_MS) {
+        operatorOptions = cached.operators;
+        populateOperatorFilter();
+        return;
+      }
+    }
+
+    try {
+      const res = await fetch('/api/audit/operators', { credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      operatorOptions = data.operators || [];
+      writeSessionJson(OPERATORS_KEY, { at: Date.now(), operators: operatorOptions });
+      populateOperatorFilter();
+    } catch {
+      /* filtro opcional */
+    }
+  }
+
+  function bindClick(id, fn) {
+    const el = $(id);
+    if (el) el.addEventListener('click', fn);
+  }
+
+  function clearLegacyRecordsCache() {
+    try {
+      const versionKey = 'lav60:records:version';
+      if (sessionStorage.getItem(versionKey) === CACHE_VERSION) return;
+      Object.keys(sessionStorage).forEach((key) => {
+        if (key.startsWith('lav60:records:')) sessionStorage.removeItem(key);
+      });
+      sessionStorage.setItem(versionKey, CACHE_VERSION);
+    } catch {
+      /* private mode */
+    }
+  }
+
+  function onFiltersChanged() {
+    resetPagination();
+    items = [];
+    fetchLogs({ page: 1, force: true });
+  }
+
   function initFilters() {
-    ['filterStore', 'filterAction', 'filterSuccess'].forEach((id) => {
-      $(id).addEventListener('change', () => fetchLogs());
+    ['filterStore', 'filterOperator', 'filterAction', 'filterSuccess'].forEach((id) => {
+      const el = $(id);
+      if (el) el.addEventListener('change', onFiltersChanged);
     });
 
-    $('filterSearch').addEventListener('input', () => {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => fetchLogs(), 350);
+    const search = $('filterSearch');
+    if (search) {
+      search.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(onFiltersChanged, 350);
+      });
+    }
+
+    bindClick('btnRefresh', () => {
+      resetPagination();
+      loadOperators({ force: true });
+      fetchLogs({ page: 1, force: true });
     });
 
-    $('btnRefresh').addEventListener('click', () => fetchLogs());
-    $('btnLoadMore').addEventListener('click', () => {
-      if (hasMore && nextBeforeMs) fetchLogs({ append: true, beforeMs: nextBeforeMs });
+    bindClick('btnPrevPage', () => {
+      if (currentPage <= 1 || loading) return;
+      fetchLogs({ page: currentPage - 1 });
+    });
+
+    bindClick('btnNextPage', () => {
+      if (!hasMore || loading) return;
+      fetchLogs({ page: currentPage + 1 });
     });
   }
 
@@ -307,11 +504,14 @@
   }
 
   async function init() {
+    clearLegacyRecordsCache();
     initFilters();
     initAuthUi();
+    restoreFiltersFromSession();
     try {
       await loadCatalog();
-      await fetchLogs();
+      await loadOperators();
+      await fetchLogs({ page: 1 });
     } catch (e) {
       showToast(e.message || 'Erro ao iniciar página', false);
       $('recordsLoading').classList.add('hidden');

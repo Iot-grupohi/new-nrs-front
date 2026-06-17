@@ -2259,6 +2259,10 @@ a.topbar__tool {
   background: rgba(148, 163, 184, 0.1);
 }
 
+.page-store .devices-panel--loading {
+  visibility: hidden;
+}
+
 .page-store .device-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
@@ -3184,9 +3188,19 @@ a.topbar__tool {
 
 .records-panel__footer {
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: 0.75rem;
   padding: 0.85rem 1rem 1rem;
   border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.records-panel__page {
+  min-width: 6.5rem;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 960px) {

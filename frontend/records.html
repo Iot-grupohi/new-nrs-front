@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LAV60 — Registros</title>
-  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="app.css?v=3">
 </head>
 <body class="page-dashboard page-records auth-pending">
   <div class="app-shell">
@@ -39,6 +39,12 @@
             <span class="records-panel__meta" id="recordsMeta">—</span>
           </div>
           <div class="records-panel__controls">
+            <label class="field field--compact">
+              <span class="visually-hidden">Operador</span>
+              <select id="filterOperator">
+                <option value="">Todos os operadores</option>
+              </select>
+            </label>
             <label class="field field--compact">
               <span class="visually-hidden">Loja</span>
               <select id="filterStore">
@@ -95,7 +101,9 @@
         </div>
 
         <div class="records-panel__footer hidden" id="recordsFooter">
-          <button type="button" id="btnLoadMore" class="btn btn--sm">Carregar mais</button>
+          <button type="button" id="btnPrevPage" class="btn btn--sm btn--ghost" disabled>Anterior</button>
+          <span class="records-panel__page" id="recordsPageInfo">Página 1</span>
+          <button type="button" id="btnNextPage" class="btn btn--sm btn--ghost" disabled>Próxima</button>
         </div>
       </section>
     </main>
@@ -107,8 +115,8 @@
 
   <div id="toast" class="toast hidden" role="status"></div>
 
-  <script src="auth.js"></script>
-  <script src="api.js"></script>
-  <script src="records.js"></script>
+  <script src="auth.js?v=3"></script>
+  <script src="api.js?v=3"></script>
+  <script src="records.js?v=3"></script>
 </body>
 </html>

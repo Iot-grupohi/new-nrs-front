@@ -18,6 +18,7 @@ from panel_audit import (
     audit_collection,
     audit_logging_available,
     list_audit_events,
+    list_audit_operators,
     log_audit_event,
 )
 from panel_auth import (
@@ -420,6 +421,7 @@ def api_audit_logs():
 
     store = request.args.get('store', '').strip().lower() or None
     action = request.args.get('action', '').strip() or None
+    operator = request.args.get('operator', '').strip().lower() or None
     q = request.args.get('q', '').strip() or None
     success_raw = request.args.get('success', '').strip().lower()
     success = None
@@ -429,9 +431,9 @@ def api_audit_logs():
         success = False
 
     try:
-        limit = int(request.args.get('limit', '50'))
+        limit = int(request.args.get('limit', '20'))
     except ValueError:
-        limit = 50
+        limit = 20
 
     before_ms = None
     before_raw = request.args.get('before_ms', '').strip()
@@ -444,6 +446,7 @@ def api_audit_logs():
     items, has_more, err = list_audit_events(
         store=store,
         action=action,
+        operator=operator,
         success=success,
         q=q,
         limit=limit,
@@ -461,6 +464,16 @@ def api_audit_logs():
         'action_labels': ACTION_LABELS_PT,
         'device_labels': DEVICE_LABELS_PT,
     }), 200
+
+
+@app.route('/api/audit/operators', methods=['GET'])
+def api_audit_operators():
+    if not audit_logging_available():
+        return jsonify({'detail': 'audit_unavailable', 'operators': []}), 503
+    operators, err = list_audit_operators()
+    if err:
+        return jsonify({'detail': err, 'operators': []}), 500
+    return jsonify({'operators': operators}), 200
 
 
 @app.route('/api/panel/health', methods=['GET'])

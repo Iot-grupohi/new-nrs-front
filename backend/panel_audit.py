@@ -252,10 +252,41 @@ def _serialize_audit_doc(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def list_audit_operators(limit_scan: int = 400) -> tuple[list[dict[str, str]], str | None]:
+    """Operadores distintos nos registros mais recentes (para filtro do painel)."""
+    if not audit_logging_available():
+        return [], 'audit_unavailable'
+
+    try:
+        from firebase_admin import firestore
+
+        query = (
+            firestore.client()
+            .collection(audit_collection())
+            .order_by('ts_ms', direction=firestore.Query.DESCENDING)
+            .limit(min(max(int(limit_scan), 50), 800))
+        )
+        seen: dict[str, dict[str, str]] = {}
+        for doc in query.stream():
+            data = doc.to_dict() or {}
+            email = str(data.get('operator_email') or data.get('user_email') or '').strip().lower()
+            if not email or email in seen:
+                continue
+            seen[email] = {
+                'email': email,
+                'name': str(data.get('operator_name') or email).strip(),
+            }
+        operators = sorted(seen.values(), key=lambda row: row['name'].lower())
+        return operators, None
+    except Exception as exc:
+        return [], str(exc)[:400]
+
+
 def list_audit_events(
     *,
     store: str | None = None,
     action: str | None = None,
+    operator: str | None = None,
     success: bool | None = None,
     q: str | None = None,
     limit: int = 50,
@@ -266,10 +297,12 @@ def list_audit_events(
         return [], False, 'audit_unavailable'
 
     page_size = min(max(int(limit or 50), 1), 100)
-    fetch_size = min(page_size * 4, 400) if (action or success is not None or q) else page_size + 1
+    needs_scan = bool(action or success is not None or q or operator)
+    fetch_size = min(page_size * 4, 400) if needs_scan else page_size + 1
 
     store_key = str(store or '').strip().lower()
     action_key = str(action or '').strip()
+    operator_key = str(operator or '').strip().lower()
     query_text = str(q or '').strip().lower()
 
     try:
@@ -291,6 +324,10 @@ def list_audit_events(
             data = doc.to_dict() or {}
             if action_key and data.get('action') != action_key:
                 continue
+            if operator_key:
+                row_email = str(data.get('operator_email') or data.get('user_email') or '').strip().lower()
+                if row_email != operator_key:
+                    continue
             if success is not None and bool(data.get('success')) != success:
                 continue
             if query_text:
