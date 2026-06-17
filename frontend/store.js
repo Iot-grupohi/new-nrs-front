@@ -26,6 +26,7 @@
     friendlyUserMessage,
     formatOperatorError,
     findMachineMeta,
+    mergeMachinesCatalog,
     canOperateMachineStatus,
     machineMetaFacts,
     deviceUnifiedStatus,
@@ -329,8 +330,14 @@
   function applyStatus(data, options = {}) {
     const acId = catalog?.ac_id || '110';
     statusData = data ? applyFrontendDeviceVisibility({ ...data }, acId) : data;
+    if (statusData) {
+      const merged = mergeMachinesCatalog(config?.machines, statusData.machines);
+      if (merged.length) {
+        statusData.machines = merged;
+      }
+    }
     if (config) {
-      if (Array.isArray(statusData.machines) && statusData.machines.length) {
+      if (statusData?.machines?.length) {
         config.machines = statusData.machines;
       }
       syncConfigDevices(config, statusData);
@@ -392,8 +399,10 @@
       throw new Error(noAgentMessage(pageStore));
     }
     config = await fetchAgentConfig(storeMeta, catalog, agentToken, agentEndpoint);
-    if (Array.isArray(statusData?.machines) && statusData.machines.length) {
-      config.machines = statusData.machines;
+    const merged = mergeMachinesCatalog(config.machines, statusData?.machines);
+    if (merged.length) {
+      config.machines = merged;
+      if (statusData) statusData.machines = merged;
     }
     syncConfigDevices(config, statusData || config.last_network_check);
     agentEndpoint = resolveAgentEndpoint(storeMeta, catalog, config);
@@ -900,10 +909,7 @@
   }
 
   function getMachinesCatalog() {
-    if (Array.isArray(statusData?.machines) && statusData.machines.length) {
-      return statusData.machines;
-    }
-    return config?.machines || [];
+    return mergeMachinesCatalog(config?.machines, statusData?.machines);
   }
 
   function canOperateMachine(meta, online) {

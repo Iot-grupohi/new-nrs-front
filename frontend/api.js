@@ -415,12 +415,100 @@
     dosers: 'doser',
   };
 
-  function findMachineMeta(machines, id, type) {
-    const list = machines || [];
-    const norm = normalizeStoreId(id);
-    return (
-      list.find((m) => normalizeStoreId(m.id) === norm && m.type === type) || null
+  const MACHINE_CAPACITY_LABELS = {
+    normal_capacity: 'giant',
+    large_capacity: 'titan',
+  };
+
+  function normalizeMachineCapacity(raw) {
+    const key = String(raw || '').trim().toLowerCase();
+    if (!key || key === '—') return '';
+    return MACHINE_CAPACITY_LABELS[key] || key;
+  }
+
+  function machineRecordType(record) {
+    const raw = record?.type || record?.machine_type || record?.['machine-type'] || '';
+    const value = String(raw).trim().toLowerCase().replace(/_/g, '-');
+    const aliases = {
+      washer: 'washer',
+      lavadora: 'washer',
+      washers: 'washer',
+      dryer: 'dryer',
+      secadora: 'dryer',
+      dryers: 'dryer',
+      doser: 'doser',
+      dosadora: 'doser',
+      dosadoras: 'doser',
+    };
+    return aliases[value] || value;
+  }
+
+  function normalizeMachineRecord(record) {
+    if (!record?.id) return null;
+    const capacityRaw =
+      record.capacity_raw ||
+      record['machine-capacity'] ||
+      record.machine_capacity ||
+      (record.capacity && record.capacity !== '—' ? record.capacity : '');
+    const capacity = normalizeMachineCapacity(capacityRaw);
+    const statusRaw = record.status_raw || record.status || '';
+    const status = normalizeMachineStatus(statusRaw);
+    const liter =
+      record.liter_capacity ?? record['liter-capacity'] ?? record.literCapacity ?? null;
+    const waiting =
+      record.waiting_minutes ?? record['waiting-minutes'] ?? record.waitingMinutes ?? null;
+    return {
+      ...record,
+      id: String(record.id).trim(),
+      type: machineRecordType(record),
+      address: record.address || record.ip || '',
+      status,
+      status_raw: String(statusRaw || '').trim().toLowerCase(),
+      status_label:
+        record.status_label ||
+        (status === 'available'
+          ? 'Disponível'
+          : status === 'occupied'
+            ? 'Ocupada'
+            : status === 'suspended'
+              ? 'Suspensa'
+              : ''),
+      capacity,
+      capacity_raw: String(capacityRaw || ''),
+      liter_capacity: liter,
+      waiting_minutes: waiting,
+      time_dosage: record.time_dosage ?? record['time-dosage'] ?? null,
+      port: record.port ?? null,
+      store_code: record.store_code || record.storeCode || '',
+    };
+  }
+
+  function normalizeMachinesList(machines) {
+    return (machines || []).map(normalizeMachineRecord).filter(Boolean);
+  }
+
+  function mergeMachinesCatalog(...sources) {
+    const merged = new Map();
+    sources.forEach((list) => {
+      normalizeMachinesList(list).forEach((record) => {
+        const key = `${record.type}:${normalizeStoreId(record.id)}`;
+        merged.set(key, { ...merged.get(key), ...record });
+      });
+    });
+    return [...merged.values()].sort(
+      (a, b) =>
+        String(a.type).localeCompare(String(b.type)) ||
+        normalizeStoreId(a.id).localeCompare(normalizeStoreId(b.id))
     );
+  }
+
+  function findMachineMeta(machines, id, type) {
+    const norm = normalizeStoreId(id);
+    const dtype = String(type || '').toLowerCase();
+    const found = (machines || []).find(
+      (m) => normalizeStoreId(m.id) === norm && machineRecordType(m) === dtype
+    );
+    return found ? normalizeMachineRecord(found) : null;
   }
 
   function normalizeMachineStatus(status) {
@@ -550,7 +638,7 @@
     const mid = normalizeStoreId(machineId);
     const dtype = String(deviceType || '').toLowerCase();
     return machines.some(
-      (m) => String(m.type || '').toLowerCase() === dtype && normalizeStoreId(m.id) === mid
+      (m) => machineRecordType(m) === dtype && normalizeStoreId(m.id) === mid
     );
   }
 
@@ -658,12 +746,16 @@
 
       if (machines.length) {
         list = machines
-          .filter((m) => m.type === mtype && isDeviceVisibleInFrontend(mtype, m.id, status))
+          .filter(
+            (m) =>
+              machineRecordType(m) === mtype && isDeviceVisibleInFrontend(mtype, m.id, status)
+          )
           .map((meta) => {
-            const id = normalizeStoreId(meta.id);
+            const normalized = normalizeMachineRecord(meta) || meta;
+            const id = normalizeStoreId(normalized.id);
             return {
-              ...meta,
-              id: meta.id,
+              ...normalized,
+              id: normalized.id,
               online: items[id] === true,
             };
           });
@@ -1135,7 +1227,7 @@
       timestamp: network.timestamp || payload.timestamp || new Date().toISOString(),
       summary: network.summary || null,
     };
-    status.machines = payload?.machines || [];
+    status.machines = mergeMachinesCatalog(payload?.machines);
     return applyFrontendDeviceVisibility(status);
   }
 
@@ -1471,7 +1563,7 @@
       timestamp: cached.timestamp || new Date().toISOString(),
       summary: cached.summary || null,
     };
-    status.machines = config?.machines || [];
+    status.machines = mergeMachinesCatalog(config?.machines);
     return applyFrontendDeviceVisibility(status);
   }
 
@@ -1595,6 +1687,9 @@
       if (status.store && !agentStoreMatchesCatalog(status.store, catalogId)) {
         return { status: null, error: noAgentMessage(catalogId) };
       }
+      if (Array.isArray(status.machines)) {
+        status.machines = mergeMachinesCatalog(status.machines);
+      }
       if (status && !status.summary) attachSummary(status);
       return { status, error: null };
     } catch (e) {
@@ -1663,7 +1758,7 @@
   ];
 
   function configFromStatus(status) {
-    const machines = status?.machines || [];
+    const machines = mergeMachinesCatalog(status?.machines);
     return {
       devices: devicesFromMachines(machines, status || {}),
       machines,
@@ -1820,6 +1915,9 @@
       throw new Error(friendlyUserMessage(`Config: HTTP ${res.status}`));
     }
     const data = await res.json();
+    if (Array.isArray(data.machines)) {
+      data.machines = mergeMachinesCatalog(data.machines);
+    }
     return { ...data, washer_dosage_options: WASHER_DOSAGE_OPTIONS };
   }
 
@@ -1892,6 +1990,8 @@
     configFromStatus,
     fetchStoreStatus,
     findMachineMeta,
+    mergeMachinesCatalog,
+    normalizeMachineCapacity,
     normalizeMachineStatus,
     machineStatusPillClass,
     canOperateMachineStatus,
