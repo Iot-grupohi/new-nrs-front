@@ -667,8 +667,18 @@
     );
   }
 
-  /** Lav/sec exigem API Lav60; dosadoras usam mapa de rede (ping), sem esperar a API. */
+  /** Lav/sec exigem API Lav60; dosadoras usam rede; extras 321/210/321 só se cadastrados na API. */
   function isDeviceRegisteredInCatalog(machines, deviceType, machineId) {
+    if (isFixedMapExtra(deviceType, machineId)) {
+      if (!Array.isArray(machines) || !machines.length) {
+        return false;
+      }
+      const mid = normalizeStoreId(machineId);
+      const dtype = String(deviceType || '').toLowerCase();
+      return machines.some(
+        (m) => machineRecordType(m) === dtype && normalizeStoreId(m.id) === mid
+      );
+    }
     const dtype = String(deviceType || '').toLowerCase();
     if (dtype === 'doser') {
       return true;

@@ -41,6 +41,15 @@ AGENT_WINDOWS_PANEL_ENV_KEYS = frozenset({
     'PANEL_PORT',
 })
 
+# Se vazio no registro Windows, mantém valor do .env embutido ou ao lado do .exe.
+AGENT_WINDOWS_ENV_FALLBACK_KEYS = frozenset({
+    'API_TOKEN',
+    'LAV60_API_TOKEN',
+    'LAV60_MACHINES_API_TOKEN',
+    'MACHINES_API_TOKEN',
+    *AGENT_WINDOWS_PANEL_ENV_KEYS,
+})
+
 
 def _read_windows_registry_env(name: str) -> str:
     """Lê variável User/Machine do registro Windows (quando o processo não herdou)."""
@@ -74,7 +83,7 @@ def _windows_env(name: str) -> str:
         reg_val = _read_windows_registry_env(name)
         if reg_val:
             return reg_val
-        if name in AGENT_WINDOWS_PANEL_ENV_KEYS:
+        if name in AGENT_WINDOWS_ENV_FALLBACK_KEYS:
             return (os.environ.get(name) or '').strip()
         if name in AGENT_WINDOWS_ENV_KEYS:
             return ''
@@ -89,7 +98,7 @@ def apply_windows_registry_env() -> None:
         value = _read_windows_registry_env(key)
         if value:
             os.environ[key] = value
-        elif key not in AGENT_WINDOWS_PANEL_ENV_KEYS:
+        elif key not in AGENT_WINDOWS_ENV_FALLBACK_KEYS:
             os.environ.pop(key, None)
 
 
@@ -1489,6 +1498,18 @@ def load_store_machines_catalog(store_code: str) -> dict | None:
             store_machines_catalog = None
     if catalog:
         log_store_machines_summary(catalog)
+    else:
+        token = _resolve_machines_api_token()
+        if not token:
+            logger.warning(
+                f"{Fore.YELLOW}⚠️ LAV60_API_TOKEN ausente — configure no registro Windows "
+                f"ou no .env ao lado do executável{Style.RESET_ALL}"
+            )
+        else:
+            logger.warning(
+                f"{Fore.YELLOW}⚠️ API Lav60 sem resposta para {store_code.upper()} "
+                f"(verifique token e rede){Style.RESET_ALL}"
+            )
     return catalog
 
 
@@ -1849,9 +1870,14 @@ def registered_device_keys() -> frozenset[tuple[str, str]] | None:
 
 
 def is_device_registered_in_catalog(device_type: str, machine_id: str) -> bool:
-    """Lavadoras/secadoras exigem API Lav60; dosadoras usam mapa local (ping)."""
+    """Lav/sec exigem API Lav60; dosadoras usam mapa local (ping). Extras 321/210/321 só na API."""
     dtype = canonical_device_type(device_type) or str(device_type or '').strip().lower()
     mid = normalize_machine_id(machine_id)
+    if (dtype, mid) in FRONTEND_HIDE_WHEN_OFFLINE:
+        registered = registered_device_keys()
+        if registered is None:
+            return False
+        return (dtype, mid) in registered
     if dtype == 'doser':
         return mid in get_doser_map()
     registered = registered_device_keys()
@@ -4357,6 +4383,14 @@ def run_server() -> None:
         env_file = load_local_env()
         if env_file:
             logger.info(f"{Fore.CYAN}📄 .env carregado: {Fore.WHITE}{env_file}{Style.RESET_ALL}")
+        lav60_tok = _resolve_machines_api_token()
+        if lav60_tok:
+            src = 'registro Windows' if _read_windows_registry_env('LAV60_API_TOKEN') else '.env'
+            logger.info(f"{Fore.CYAN}🔑 LAV60_API_TOKEN: {Fore.GREEN}ok{Style.RESET_ALL} ({src})")
+        else:
+            logger.warning(
+                f"{Fore.YELLOW}⚠️ LAV60_API_TOKEN ausente — dados das máquinas (API) não serão carregados{Style.RESET_ALL}"
+            )
     except RuntimeError as e:
         log_section("STORE_ID REQUIRED", "ERROR")
         logger.error(f"{Fore.RED}❌ {e}{Style.RESET_ALL}")
