@@ -344,12 +344,17 @@
     }
 
     if (payload.timestamp) {
-      const offlineDevices = devices.offline ?? 0;
+      const suspended = devices.suspended ?? 0;
+      const offlineNetwork = devices.offline_network ?? 0;
       const totalStores = stores.total ?? 0;
-      subtitle.textContent =
-        offlineDevices > 0
-          ? `${offlineDevices} equipamento(s) offline no total · ${totalStores} loja(s) monitoradas`
-          : `${totalStores} loja(s) monitoradas · rede estável`;
+      if (suspended > 0 || offlineNetwork > 0) {
+        const parts = [];
+        if (offlineNetwork > 0) parts.push(`${offlineNetwork} offline na rede`);
+        if (suspended > 0) parts.push(`${suspended} suspensa(s)`);
+        subtitle.textContent = `${parts.join(' · ')} · ${totalStores} loja(s) monitoradas`;
+      } else {
+        subtitle.textContent = `${totalStores} loja(s) monitoradas · rede estável`;
+      }
       return;
     }
 
@@ -368,8 +373,13 @@
     $('kpiStoresOffline').textContent = stores.offline ?? '—';
     $('kpiStoresOfflineSub').textContent =
       stores.pending > 0 ? `${stores.pending} carregando` : 'sem equipamento ou agente';
-    $('kpiDevicesOffline').textContent = devices.offline ?? '—';
-    $('kpiDevicesOfflineSub').textContent = `de ${devices.total ?? '—'} equipamentos`;
+    $('kpiDevicesSuspended').textContent = devices.suspended ?? '—';
+    $('kpiDevicesSuspendedSub').textContent = `de ${devices.total ?? '—'} equipamentos`;
+    $('kpiDevicesOffline').textContent = devices.offline_network ?? '—';
+    $('kpiDevicesOfflineSub').textContent =
+      (devices.offline_network ?? 0) > 0
+        ? 'sem resposta na rede · não suspensos'
+        : 'nenhum fora da rede';
 
     updateDashboardHeader({ dashboard, ...payload });
 

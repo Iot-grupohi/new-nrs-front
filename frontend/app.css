@@ -745,7 +745,7 @@ a.topbar__tool {
 }
 
 .stats-grid--dashboard {
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.85rem;
   margin-bottom: 0;
 }
@@ -766,6 +766,10 @@ a.topbar__tool {
 
 .page-dashboard .stat-card--danger::before {
   background: var(--danger);
+}
+
+.page-dashboard .stat-card--suspended::before {
+  background: #64748b;
 }
 
 .page-dashboard .stat-card__label {
@@ -1119,6 +1123,7 @@ a.topbar__tool {
 .stat-card--success::before { background: var(--success); }
 .stat-card--warn::before { background: var(--warning); }
 .stat-card--danger::before { background: var(--danger); }
+.stat-card--suspended::before { background: #64748b; }
 
 .stat-card__label {
   display: block;
@@ -2693,7 +2698,11 @@ a.topbar__tool {
 @media (max-width: 900px) {
   .stats-grid,
   .page-dashboard .stats-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .stats-grid--dashboard {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .page-dashboard .stores-list {

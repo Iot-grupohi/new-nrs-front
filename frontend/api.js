@@ -643,6 +643,22 @@
     return normalizeMachineStatus(dev.status) !== 'suspended';
   }
 
+  function isDeviceSuspended(dev) {
+    return normalizeMachineStatus(dev?.status) === 'suspended';
+  }
+
+  function countDeviceStates(devices) {
+    let suspended = 0;
+    let offlineNetwork = 0;
+    ['washers', 'dryers', 'dosers', 'ac'].forEach((key) => {
+      (devices?.[key] || []).forEach((dev) => {
+        if (isDeviceSuspended(dev)) suspended += 1;
+        else if (!dev.online) offlineNetwork += 1;
+      });
+    });
+    return { suspended, offlineNetwork };
+  }
+
   function summaryFromDevices(devices) {
     let online = 0;
     let total = 0;
@@ -736,6 +752,8 @@
     }).length;
     let devicesOnline = 0;
     let devicesTotal = 0;
+    let devicesSuspended = 0;
+    let devicesOfflineNetwork = 0;
     const alerts = [];
     const typeLabels = {
       washers: 'Lavadora',
@@ -748,14 +766,26 @@
       const summary = card.summary || {};
       devicesOnline += summary.online || 0;
       devicesTotal += summary.total || 0;
+      const stateCounts = countDeviceStates(card.devices);
+      devicesSuspended += stateCounts.suspended;
+      devicesOfflineNetwork += stateCounts.offlineNetwork;
       Object.entries(typeLabels).forEach(([group, label]) => {
         (card.devices?.[group] || []).forEach((dev) => {
-          if (!dev.online) {
+          if (isDeviceSuspended(dev)) {
             alerts.push({
               store: card.id,
               store_name: card.name,
               type_label: label,
               id: dev.id,
+              kind: 'suspended',
+            });
+          } else if (!dev.online) {
+            alerts.push({
+              store: card.id,
+              store_name: card.name,
+              type_label: label,
+              id: dev.id,
+              kind: 'offline',
             });
           }
         });
@@ -774,7 +804,9 @@
       devices: {
         online: devicesOnline,
         total: devicesTotal,
-        offline: devicesTotal - devicesOnline,
+        offline: devicesSuspended + devicesOfflineNetwork,
+        suspended: devicesSuspended,
+        offline_network: devicesOfflineNetwork,
         health_pct: devicesTotal ? Math.round((devicesOnline / devicesTotal) * 100) : 0,
       },
       alerts: alerts.slice(0, 24),
