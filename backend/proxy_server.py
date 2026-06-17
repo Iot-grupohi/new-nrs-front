@@ -1835,8 +1835,33 @@ def get_cached_network_status() -> dict | None:
         return dict(last_network_status) if last_network_status else None
 
 
+def registered_device_keys() -> frozenset[tuple[str, str]] | None:
+    """Equipamentos cadastrados na API Lav60. None = catálogo indisponível (mapa fixo local)."""
+    if get_store_machines_snapshot() is None:
+        return None
+    keys: set[tuple[str, str]] = set()
+    for machine in get_store_machines_list():
+        dtype = canonical_device_type(machine.get('type', '')) or str(machine.get('type', '')).strip().lower()
+        mid = normalize_machine_id(str(machine.get('id', '')))
+        if dtype in ('washer', 'dryer', 'doser') and mid:
+            keys.add((dtype, mid))
+    return frozenset(keys)
+
+
+def is_device_registered_in_catalog(device_type: str, machine_id: str) -> bool:
+    """Só exibe equipamentos presentes na API Lav60; sem catálogo, oculta extras do mapa fixo."""
+    registered = registered_device_keys()
+    dtype = canonical_device_type(device_type) or str(device_type or '').strip().lower()
+    mid = normalize_machine_id(machine_id)
+    if registered is None:
+        return (dtype, mid) not in FRONTEND_HIDE_WHEN_OFFLINE
+    return (dtype, mid) in registered
+
+
 def is_device_visible_in_frontend(device_type: str, machine_id: str, network: dict | None = None) -> bool:
-    """True = mostrar card. Lavadora 321, secadora 210 e dosadora 321 só aparecem se online no ping."""
+    """True = mostrar no painel. Exige cadastro Lav60; 321/210/321 também exigem ping online."""
+    if not is_device_registered_in_catalog(device_type, machine_id):
+        return False
     mid = normalize_machine_id(machine_id)
     dtype = canonical_device_type(device_type) or str(device_type or '').strip().lower()
     if (dtype, mid) not in FRONTEND_HIDE_WHEN_OFFLINE:

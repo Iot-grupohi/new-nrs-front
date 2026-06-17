@@ -531,13 +531,36 @@
     { type: 'doser', id: '321' },
   ];
 
-  /** Lavadora 321, secadora 210 e dosadora 321: só no front se online no ping. Demais sempre visíveis. */
-  function isDeviceVisibleInFrontend(deviceType, machineId, network) {
+  function isFixedMapExtra(deviceType, machineId) {
     const mid = normalizeStoreId(machineId);
     const dtype = String(deviceType || '').toLowerCase();
-    const mustBeOnline = HIDE_WHEN_OFFLINE.some(
+    return HIDE_WHEN_OFFLINE.some(
       (rule) => rule.type === dtype && normalizeStoreId(rule.id) === mid
     );
+  }
+
+  /** Só equipamentos cadastrados na API Lav60; sem lista, oculta extras do mapa fixo (321/210/321). */
+  function isDeviceRegisteredInCatalog(machines, deviceType, machineId) {
+    if (!Array.isArray(machines)) {
+      return !isFixedMapExtra(deviceType, machineId);
+    }
+    if (!machines.length) {
+      return !isFixedMapExtra(deviceType, machineId);
+    }
+    const mid = normalizeStoreId(machineId);
+    const dtype = String(deviceType || '').toLowerCase();
+    return machines.some(
+      (m) => String(m.type || '').toLowerCase() === dtype && normalizeStoreId(m.id) === mid
+    );
+  }
+
+  /** Exige cadastro Lav60; lavadora 321, secadora 210 e dosadora 321 também exigem ping online. */
+  function isDeviceVisibleInFrontend(deviceType, machineId, network) {
+    const machines = network?.machines;
+    if (!isDeviceRegisteredInCatalog(machines, deviceType, machineId)) return false;
+    const mid = normalizeStoreId(machineId);
+    const dtype = String(deviceType || '').toLowerCase();
+    const mustBeOnline = isFixedMapExtra(dtype, mid);
     if (!mustBeOnline) return true;
     const key =
       dtype === 'washer' ? 'washers' : dtype === 'dryer' ? 'dryers' : dtype === 'doser' ? 'dosers' : null;
@@ -568,16 +591,26 @@
 
   function devicesFromMachines(machines, network = {}) {
     const ids = { washers: new Set(), dryers: new Set(), dosers: new Set() };
-    (machines || []).forEach((m) => {
+    const catalog = machines || [];
+    const net = { ...network, machines: network?.machines ?? catalog };
+    catalog.forEach((m) => {
       const t = m.type;
-      if (!isDeviceVisibleInFrontend(t, m.id, network)) return;
+      if (!isDeviceVisibleInFrontend(t, m.id, net)) return;
       const key = t === 'washer' ? 'washers' : t === 'dryer' ? 'dryers' : t === 'doser' ? 'dosers' : null;
       if (key) ids[key].add(normalizeStoreId(m.id));
     });
+    if (catalog.length) {
+      return {
+        washers: [...ids.washers].sort(),
+        dryers: [...ids.dryers].sort(),
+        dosers: [...ids.dosers].sort(),
+        ac: '110',
+      };
+    }
     ['washers', 'dryers', 'dosers'].forEach((key) => {
       const dtype = { washers: 'washer', dryers: 'dryer', dosers: 'doser' }[key];
       Object.keys(network[key] || {}).forEach((id) => {
-        if (isDeviceVisibleInFrontend(dtype, id, network)) {
+        if (isDeviceVisibleInFrontend(dtype, id, net)) {
           ids[key].add(normalizeStoreId(id));
         }
       });
@@ -621,37 +654,31 @@
     ['washers', 'dryers', 'dosers'].forEach((key) => {
       const items = status[key] || {};
       const mtype = DEVICE_GROUP_TYPE[key];
-      const seen = new Set();
-      const list = [];
+      let list;
 
-      Object.keys(items)
-        .sort()
-        .forEach((id) => {
-          if (!isDeviceVisibleInFrontend(mtype, id, status)) return;
-          seen.add(normalizeStoreId(id));
-          const meta = findMachineMeta(machines, id, mtype);
-          list.push({
-            ...(meta || {}),
-            id,
-            online: Boolean(items[id]),
+      if (machines.length) {
+        list = machines
+          .filter((m) => m.type === mtype && isDeviceVisibleInFrontend(mtype, m.id, status))
+          .map((meta) => {
+            const id = normalizeStoreId(meta.id);
+            return {
+              ...meta,
+              id: meta.id,
+              online: items[id] === true,
+            };
           });
-        });
-
-      (machines || [])
-        .filter((m) => m.type === mtype)
-        .sort((a, b) => normalizeStoreId(a.id).localeCompare(normalizeStoreId(b.id)))
-        .forEach((meta) => {
-          const id = normalizeStoreId(meta.id);
-          if (seen.has(id)) return;
-          const online = (status[key] || {})[id] === true;
-          if (!isDeviceVisibleInFrontend(mtype, id, status)) return;
-          seen.add(id);
-          list.push({
-            id: meta.id,
-            online,
-            ...meta,
+      } else {
+        list = Object.keys(items)
+          .filter((id) => isDeviceVisibleInFrontend(mtype, id, status))
+          .map((id) => {
+            const meta = findMachineMeta(machines, id, mtype);
+            return {
+              ...(meta || {}),
+              id,
+              online: Boolean(items[id]),
+            };
           });
-        });
+      }
 
       dots[key] = list.sort((a, b) => normalizeStoreId(a.id).localeCompare(normalizeStoreId(b.id)));
     });
