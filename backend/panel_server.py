@@ -17,6 +17,7 @@ from panel_audit import (
     DEVICE_LABELS_PT,
     audit_collection,
     audit_logging_available,
+    count_audit_events,
     list_audit_events,
     list_audit_operators,
     log_audit_event,
@@ -456,14 +457,30 @@ def api_audit_logs():
         return jsonify({'detail': err, 'items': []}), 500
 
     next_before_ms = items[-1].get('ts_ms') if items and has_more else None
-    return jsonify({
+    payload = {
         'items': items,
         'has_more': has_more,
         'next_before_ms': next_before_ms,
         'collection': audit_collection(),
         'action_labels': ACTION_LABELS_PT,
         'device_labels': DEVICE_LABELS_PT,
-    }), 200
+    }
+
+    if before_ms is None:
+        total, truncated, count_err = count_audit_events(
+            store=store,
+            action=action,
+            operator=operator,
+            success=success,
+            q=q,
+        )
+        if count_err:
+            payload['total_error'] = count_err
+        elif total is not None:
+            payload['total'] = total
+            payload['total_truncated'] = truncated
+
+    return jsonify(payload), 200
 
 
 @app.route('/api/audit/operators', methods=['GET'])

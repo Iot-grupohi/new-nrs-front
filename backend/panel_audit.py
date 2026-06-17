@@ -282,6 +282,147 @@ def list_audit_operators(limit_scan: int = 400) -> tuple[list[dict[str, str]], s
         return [], str(exc)[:400]
 
 
+def _audit_row_matches(
+    data: dict[str, Any],
+    *,
+    action_key: str,
+    operator_key: str,
+    success: bool | None,
+    query_text: str,
+) -> bool:
+    if action_key and data.get('action') != action_key:
+        return False
+    if operator_key:
+        row_email = str(data.get('operator_email') or data.get('user_email') or '').strip().lower()
+        if row_email != operator_key:
+            return False
+    if success is not None and bool(data.get('success')) != success:
+        return False
+    if query_text:
+        haystack = ' '.join(
+            str(data.get(key) or '')
+            for key in (
+                'operation_summary',
+                'label',
+                'operator_name',
+                'operator_email',
+                'device_id',
+                'action',
+                'store',
+            )
+        ).lower()
+        if query_text not in haystack:
+            return False
+    return True
+
+
+_MAX_COUNT_SCAN = 10000
+
+
+def _count_audit_by_scan(
+    coll: Any,
+    *,
+    store_key: str,
+    action_key: str,
+    operator_key: str,
+    success: bool | None,
+    query_text: str,
+) -> tuple[int, bool]:
+    from firebase_admin import firestore
+
+    query = coll.order_by('ts_ms', direction=firestore.Query.DESCENDING)
+    if store_key:
+        query = query.where('store', '==', store_key)
+
+    total = 0
+    scanned = 0
+    truncated = False
+    last_doc = None
+    batch_size = 500
+
+    while scanned < _MAX_COUNT_SCAN:
+        batch = query.limit(batch_size)
+        if last_doc is not None:
+            batch = batch.start_after(last_doc)
+        docs = list(batch.stream())
+        if not docs:
+            break
+        for doc in docs:
+            scanned += 1
+            data = doc.to_dict() or {}
+            if _audit_row_matches(
+                data,
+                action_key=action_key,
+                operator_key=operator_key,
+                success=success,
+                query_text=query_text,
+            ):
+                total += 1
+        if len(docs) < batch_size:
+            break
+        last_doc = docs[-1]
+        if scanned >= _MAX_COUNT_SCAN:
+            truncated = True
+            break
+
+    return total, truncated
+
+
+def count_audit_events(
+    *,
+    store: str | None = None,
+    action: str | None = None,
+    operator: str | None = None,
+    success: bool | None = None,
+    q: str | None = None,
+) -> tuple[int | None, bool, str | None]:
+    """Conta registros que batem com os filtros. truncated=True se atingiu limite de varredura."""
+    if not audit_logging_available():
+        return None, False, 'audit_unavailable'
+
+    store_key = str(store or '').strip().lower()
+    action_key = str(action or '').strip()
+    operator_key = str(operator or '').strip().lower()
+    query_text = str(q or '').strip().lower()
+    needs_scan = bool(action_key or success is not None or query_text or operator_key)
+
+    try:
+        from firebase_admin import firestore
+
+        coll = firestore.client().collection(audit_collection())
+
+        if not needs_scan:
+            try:
+                query = coll
+                if store_key:
+                    query = coll.where('store', '==', store_key)
+                result = query.count().get()
+                total = int(result[0][0].value)
+                return total, False, None
+            except Exception:
+                total, truncated = _count_audit_by_scan(
+                    coll,
+                    store_key=store_key,
+                    action_key='',
+                    operator_key='',
+                    success=None,
+                    query_text='',
+                )
+                return total, truncated, None
+
+        total, truncated = _count_audit_by_scan(
+            coll,
+            store_key=store_key,
+            action_key=action_key,
+            operator_key=operator_key,
+            success=success,
+            query_text=query_text,
+        )
+        return total, truncated, None
+    except Exception as exc:
+        return None, False, str(exc)[:400]
+
+
 def list_audit_events(
     *,
     store: str | None = None,
@@ -324,29 +465,14 @@ def list_audit_events(
         for doc in query.stream():
             raw_read += 1
             data = doc.to_dict() or {}
-            if action_key and data.get('action') != action_key:
+            if not _audit_row_matches(
+                data,
+                action_key=action_key,
+                operator_key=operator_key,
+                success=success,
+                query_text=query_text,
+            ):
                 continue
-            if operator_key:
-                row_email = str(data.get('operator_email') or data.get('user_email') or '').strip().lower()
-                if row_email != operator_key:
-                    continue
-            if success is not None and bool(data.get('success')) != success:
-                continue
-            if query_text:
-                haystack = ' '.join(
-                    str(data.get(key) or '')
-                    for key in (
-                        'operation_summary',
-                        'label',
-                        'operator_name',
-                        'operator_email',
-                        'device_id',
-                        'action',
-                        'store',
-                    )
-                ).lower()
-                if query_text not in haystack:
-                    continue
             matched.append(_serialize_audit_doc(doc.id, data))
             if len(matched) > page_size:
                 return matched[:page_size], True, None

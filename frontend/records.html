@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LAV60 — Registros</title>
-  <link rel="stylesheet" href="app.css?v=4">
+  <link rel="stylesheet" href="app.css?v=5">
 </head>
 <body class="page-dashboard page-records auth-pending">
   <div class="app-shell">
@@ -102,7 +102,10 @@
 
         <div class="records-panel__footer hidden" id="recordsFooter">
           <button type="button" id="btnPrevPage" class="btn btn--sm btn--ghost" disabled>Anterior</button>
-          <span class="records-panel__page" id="recordsPageInfo">Página 1</span>
+          <div class="records-panel__footer-meta">
+            <span class="records-panel__page" id="recordsPageInfo">Página 1</span>
+            <span class="records-panel__total" id="recordsTotalInfo"></span>
+          </div>
           <button type="button" id="btnNextPage" class="btn btn--sm btn--ghost" disabled>Próxima</button>
         </div>
       </section>
@@ -110,6 +113,7 @@
 
     <footer class="app-footer">
       <span>LAV60 · Painel operacional</span>
+      <strong id="recordsAppFooterTotal" class="records-app-footer-total"></strong>
     </footer>
   </div>
 
@@ -117,6 +121,6 @@
 
   <script src="auth.js?v=4"></script>
   <script src="api.js?v=4"></script>
-  <script src="records.js?v=4"></script>
+  <script src="records.js?v=7"></script>
 </body>
 </html>

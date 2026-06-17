@@ -2,7 +2,7 @@
   'use strict';
 
   const PAGE_SIZE = 20;
-  const CACHE_VERSION = '4';
+  const CACHE_VERSION = '7';
   const CACHE_TTL_MS = 5 * 60 * 1000;
   const CACHE_PREFIX = `lav60:records:v${CACHE_VERSION}:`;
   const FILTERS_KEY = `${CACHE_PREFIX}filters`;
@@ -17,6 +17,8 @@
   let loading = false;
   let searchTimer = null;
   let currentPage = 1;
+  let totalRecords = null;
+  let totalTruncated = false;
   /** @type {Record<number, number|null>} cursor before_ms para abrir cada página (página 1 = null) */
   let pageCursors = { 1: null };
 
@@ -162,6 +164,24 @@
     return `${CACHE_PREFIX}page:${filtersSignature(filters)}:${page}`;
   }
 
+  function totalCacheKey(filters) {
+    return `${CACHE_PREFIX}total:${filtersSignature(filters)}`;
+  }
+
+  function readTotalCache(filters) {
+    const entry = readSessionJson(totalCacheKey(filters));
+    if (!entry || Date.now() - (entry.at || 0) > CACHE_TTL_MS) return null;
+    return entry;
+  }
+
+  function writeTotalCache(filters, total, truncated) {
+    writeSessionJson(totalCacheKey(filters), {
+      at: Date.now(),
+      total,
+      totalTruncated: truncated,
+    });
+  }
+
   function readSessionJson(key) {
     try {
       const raw = sessionStorage.getItem(key);
@@ -214,6 +234,8 @@
   function resetPagination() {
     currentPage = 1;
     pageCursors = { 1: null };
+    totalRecords = null;
+    totalTruncated = false;
   }
 
   function buildQueryParams(filters, page) {
@@ -236,12 +258,20 @@
     return last?.ts_ms ?? null;
   }
 
-  function applyPagePayload(data, page) {
+  function applyTotalFromData(data, filters) {
+    if (data.total == null) return;
+    totalRecords = Number(data.total);
+    totalTruncated = Boolean(data.total_truncated);
+    writeTotalCache(filters, totalRecords, totalTruncated);
+  }
+
+  function applyPagePayload(data, page, filters) {
     actionLabels = data.action_labels || actionLabels;
     deviceLabels = data.device_labels || deviceLabels;
     const batch = Array.isArray(data.items) ? data.items : [];
     items = batch.slice(0, PAGE_SIZE);
     hasMore = Boolean(data.has_more);
+    applyTotalFromData(data, filters);
     if (hasMore) {
       const cursor = nextPageCursor(data, items);
       if (cursor != null) {
@@ -260,10 +290,13 @@
 
   async function fetchLogs({ page = currentPage, force = false, silent = false } = {}) {
     if (loading && !silent) return;
+    // Refresh silencioso da página 1 não deve resetar a navegação na página 2+
+    if (silent && page !== currentPage) return;
+
     const filters = currentFilters();
     saveFiltersToSession(filters);
 
-    if (page !== currentPage) {
+    if (!silent) {
       currentPage = page;
     }
 
@@ -274,10 +307,18 @@
 
     const cached = !force ? readPageCache(filters, page) : null;
     if (cached) {
+      if (silent && page !== currentPage) return;
       items = (cached.items || []).slice(0, PAGE_SIZE);
       hasMore = Boolean(cached.hasMore);
       if (cached.nextPageCursor) {
         pageCursors[page + 1] = cached.nextPageCursor;
+      }
+      if (page === 1) {
+        const totalCached = readTotalCache(filters);
+        if (totalCached && totalCached.total != null) {
+          totalRecords = totalCached.total;
+          totalTruncated = Boolean(totalCached.totalTruncated);
+        }
       }
       renderTable();
       updateMeta();
@@ -300,7 +341,9 @@
         throw new Error((data.detail || 'Erro ao carregar registros') + reason + hint);
       }
 
-      applyPagePayload(data, page);
+      if (silent && page !== currentPage) return;
+
+      applyPagePayload(data, page, filters);
       writePageCache(filters, page, {
         items,
         hasMore,
@@ -310,6 +353,7 @@
       if (!silent) {
         items = [];
         renderTable();
+        updateMeta();
         showToast(e.message || 'Falha ao carregar registros', false);
       }
     } finally {
@@ -326,12 +370,26 @@
     }
   }
 
+  function formatTotalText() {
+    if (totalRecords == null) {
+      return loading ? 'Calculando total…' : '';
+    }
+    const n = Number(totalRecords).toLocaleString('pt-BR');
+    const suffix = totalTruncated ? '+' : '';
+    return `${n}${suffix} registro(s) no total`;
+  }
+
   function updateMeta() {
+    const totalText = formatTotalText();
     $('recordsMeta').textContent = items.length
-      ? `${items.length} registro(s) · ${PAGE_SIZE} por página`
-      : 'audit_logs';
+      ? `${items.length} nesta página · ${PAGE_SIZE} por página${totalText ? ` · ${totalText}` : ''}`
+      : (totalText || 'audit_logs');
     const pageInfo = $('recordsPageInfo');
     if (pageInfo) pageInfo.textContent = `Página ${currentPage}`;
+    const totalInfo = $('recordsTotalInfo');
+    if (totalInfo) totalInfo.textContent = totalText;
+    const appTotal = $('recordsAppFooterTotal');
+    if (appTotal) appTotal.textContent = totalText;
     const prev = $('btnPrevPage');
     const next = $('btnNextPage');
     if (prev) prev.disabled = currentPage <= 1 || loading;
@@ -396,7 +454,7 @@
       $('recordsEmptyText').textContent = loading
         ? 'Carregando registros…'
         : 'Nenhum registro encontrado para os filtros selecionados.';
-      $('recordsFooter').classList.add('hidden');
+      updateMeta();
       return;
     }
 
@@ -418,6 +476,7 @@
         <td class="records-table__dry-time">${escapeHtml(dryingTime(row))}</td>`;
       tbody.appendChild(tr);
     });
+    updateMeta();
   }
 
   async function loadCatalog() {
