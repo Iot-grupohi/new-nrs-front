@@ -320,7 +320,9 @@ def list_audit_events(
         query = query.limit(fetch_size)
 
         matched: list[dict[str, Any]] = []
+        raw_read = 0
         for doc in query.stream():
+            raw_read += 1
             data = doc.to_dict() or {}
             if action_key and data.get('action') != action_key:
                 continue
@@ -346,18 +348,11 @@ def list_audit_events(
                 if query_text not in haystack:
                     continue
             matched.append(_serialize_audit_doc(doc.id, data))
-            if len(matched) >= page_size:
-                break
+            if len(matched) > page_size:
+                return matched[:page_size], True, None
 
-        has_more = len(matched) >= page_size
-        if has_more and matched:
-            next_before = int(matched[-1].get('ts_ms') or 0) or None
-        elif len(matched) < page_size:
-            has_more = False
-            next_before = None
-        else:
-            next_before = int(matched[-1].get('ts_ms') or 0) if matched else None
-
-        return matched, has_more, None
+        if len(matched) >= page_size and raw_read >= fetch_size:
+            return matched[:page_size], True, None
+        return matched, False, None
     except Exception as exc:
         return [], False, str(exc)[:400]

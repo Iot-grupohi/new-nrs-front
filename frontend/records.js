@@ -2,7 +2,7 @@
   'use strict';
 
   const PAGE_SIZE = 20;
-  const CACHE_VERSION = '3';
+  const CACHE_VERSION = '4';
   const CACHE_TTL_MS = 5 * 60 * 1000;
   const CACHE_PREFIX = `lav60:records:v${CACHE_VERSION}:`;
   const FILTERS_KEY = `${CACHE_PREFIX}filters`;
@@ -230,16 +230,26 @@
     return params.toString();
   }
 
+  function nextPageCursor(data, pageItems) {
+    if (data?.next_before_ms != null) return data.next_before_ms;
+    const last = pageItems[pageItems.length - 1];
+    return last?.ts_ms ?? null;
+  }
+
   function applyPagePayload(data, page) {
     actionLabels = data.action_labels || actionLabels;
     deviceLabels = data.device_labels || deviceLabels;
     const batch = Array.isArray(data.items) ? data.items : [];
     items = batch.slice(0, PAGE_SIZE);
-    hasMore = Boolean(data.has_more) || batch.length > PAGE_SIZE;
-    if (hasMore && data.next_before_ms) {
-      pageCursors[page + 1] = data.next_before_ms;
-    } else if (hasMore && batch.length > PAGE_SIZE && batch[PAGE_SIZE - 1]?.ts_ms) {
-      pageCursors[page + 1] = batch[PAGE_SIZE - 1].ts_ms;
+    hasMore = Boolean(data.has_more);
+    if (hasMore) {
+      const cursor = nextPageCursor(data, items);
+      if (cursor != null) {
+        pageCursors[page + 1] = cursor;
+      } else {
+        delete pageCursors[page + 1];
+        hasMore = false;
+      }
     } else {
       delete pageCursors[page + 1];
     }
@@ -257,7 +267,7 @@
       currentPage = page;
     }
 
-    if (page > 1 && pageCursors[page] == null) {
+    if (page > 1 && (pageCursors[page] == null || pageCursors[page] === undefined)) {
       showToast('Não há mais páginas nesta direção', false);
       return;
     }
@@ -325,7 +335,7 @@
     const prev = $('btnPrevPage');
     const next = $('btnNextPage');
     if (prev) prev.disabled = currentPage <= 1 || loading;
-    if (next) next.disabled = !hasMore || loading;
+    if (next) next.disabled = (!hasMore && !pageCursors[currentPage + 1]) || loading;
     const footer = $('recordsFooter');
     if (footer) {
       footer.classList.toggle('hidden', items.length === 0 && currentPage <= 1);
@@ -490,7 +500,8 @@
     });
 
     bindClick('btnNextPage', () => {
-      if (!hasMore || loading) return;
+      if (loading) return;
+      if (!hasMore && !pageCursors[currentPage + 1]) return;
       fetchLogs({ page: currentPage + 1 });
     });
   }
