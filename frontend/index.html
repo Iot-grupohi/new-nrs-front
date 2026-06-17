@@ -32,26 +32,37 @@
 
     <main class="main-content">
       <section class="stats-grid stats-grid--dashboard" id="dashboard">
-        <article class="stat-card stat-card--success">
+        <article class="stat-card stat-card--success stat-card--clickable" data-kpi="stores-online" tabindex="0" role="button" aria-expanded="false" aria-controls="kpiEventsPanel">
           <span class="stat-card__label">Lojas online</span>
           <strong class="stat-card__value" id="kpiStoresOnline">—</strong>
           <span class="stat-card__sub" id="kpiStoresOnlineSub">de — lojas</span>
         </article>
-        <article class="stat-card stat-card--warn">
+        <article class="stat-card stat-card--warn stat-card--clickable" data-kpi="stores-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="kpiEventsPanel">
           <span class="stat-card__label">Lojas offline</span>
           <strong class="stat-card__value" id="kpiStoresOffline">—</strong>
           <span class="stat-card__sub" id="kpiStoresOfflineSub">indisponíveis</span>
         </article>
-        <article class="stat-card stat-card--suspended">
+        <article class="stat-card stat-card--suspended stat-card--clickable" data-kpi="devices-suspended" tabindex="0" role="button" aria-expanded="false" aria-controls="kpiEventsPanel">
           <span class="stat-card__label">Máquinas suspensas</span>
           <strong class="stat-card__value" id="kpiDevicesSuspended">—</strong>
           <span class="stat-card__sub" id="kpiDevicesSuspendedSub">de — equipamentos</span>
         </article>
-        <article class="stat-card stat-card--danger">
+        <article class="stat-card stat-card--danger stat-card--clickable" data-kpi="devices-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="kpiEventsPanel">
           <span class="stat-card__label">Offline (rede)</span>
           <strong class="stat-card__value" id="kpiDevicesOffline">—</strong>
           <span class="stat-card__sub" id="kpiDevicesOfflineSub">sem resposta · não suspensos</span>
         </article>
+      </section>
+
+      <section class="kpi-events-panel hidden" id="kpiEventsPanel" aria-labelledby="kpiEventsTitle">
+        <header class="kpi-events-panel__head">
+          <div>
+            <h2 class="kpi-events-panel__title" id="kpiEventsTitle">Eventos</h2>
+            <p class="kpi-events-panel__meta" id="kpiEventsMeta">—</p>
+          </div>
+          <button type="button" class="kpi-events-panel__close" id="kpiEventsClose" aria-label="Fechar detalhes">×</button>
+        </header>
+        <div class="kpi-events-panel__body" id="kpiEventsBody"></div>
       </section>
 
       <section class="stores-panel">

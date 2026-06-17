@@ -19,6 +19,27 @@
   let catalogConfig = null;
   let activeFilter = 'all';
   let searchQuery = '';
+  let activeKpiPanel = null;
+  let lastDashboardEvents = null;
+
+  const KPI_PANEL_CONFIG = {
+    'stores-online': {
+      title: 'Lojas operacionais',
+      empty: 'Nenhuma loja operacional no momento.',
+    },
+    'stores-offline': {
+      title: 'Lojas offline ou indisponíveis',
+      empty: 'Nenhuma loja offline.',
+    },
+    'devices-suspended': {
+      title: 'Máquinas suspensas',
+      empty: 'Nenhuma máquina suspensa.',
+    },
+    'devices-offline': {
+      title: 'Dispositivos offline na rede',
+      empty: 'Nenhum dispositivo fora da rede.',
+    },
+  };
 
   const $ = (id) => document.getElementById(id);
 
@@ -364,6 +385,7 @@
   function renderDashboard(dashboard, payload) {
     const stores = dashboard.stores || {};
     const devices = dashboard.devices || {};
+    lastDashboardEvents = dashboard.events || null;
 
     $('kpiStoresOnline').textContent = stores.online ?? '—';
     $('kpiStoresOnlineSub').textContent =
@@ -390,6 +412,167 @@
       meta = `Cache local · ${meta}`;
     }
     $('storesMeta').textContent = meta;
+
+    if (activeKpiPanel) {
+      renderKpiEventsPanel(activeKpiPanel);
+    }
+  }
+
+  function storeDisplayName(entry) {
+    return entry.store_name || String(entry.store || '').toUpperCase();
+  }
+
+  function storePageHref(storeId) {
+    return `store.html?store=${encodeURIComponent(storeId)}`;
+  }
+
+  function groupDeviceEvents(items) {
+    const map = new Map();
+    (items || []).forEach((item) => {
+      const key = item.store;
+      if (!map.has(key)) {
+        map.set(key, { store: item.store, store_name: item.store_name, devices: [] });
+      }
+      map.get(key).devices.push(item);
+    });
+    return [...map.values()].sort((a, b) => a.store.localeCompare(b.store));
+  }
+
+  function renderDeviceEventsGrouped(items) {
+    const groups = groupDeviceEvents(items);
+    if (!groups.length) return '';
+    return groups
+      .map((group) => {
+        const devicesHtml = group.devices
+          .map(
+            (dev) => `
+            <li class="kpi-event-item kpi-event-item--device">
+              <span class="kpi-event-item__main">${escapeHtml(dev.type_label)} ${escapeHtml(String(dev.id))}</span>
+              <span class="kpi-event-item__sub">${escapeHtml(dev.status_label || '')}</span>
+            </li>`
+          )
+          .join('');
+        return `
+          <article class="kpi-event-group">
+            <header class="kpi-event-group__head">
+              <a class="kpi-event-group__store" href="${storePageHref(group.store)}">${escapeHtml(storeDisplayName(group))}</a>
+              <span class="kpi-event-group__count">${group.devices.length} equip.</span>
+            </header>
+            <ul class="kpi-event-list">${devicesHtml}</ul>
+          </article>`;
+      })
+      .join('');
+  }
+
+  function renderStoreOnlineEvents(items) {
+    if (!items?.length) return '';
+    return `<ul class="kpi-event-list kpi-event-list--stores">
+      ${items
+        .map(
+          (entry) => `
+        <li class="kpi-event-item">
+          <a class="kpi-event-item__store" href="${storePageHref(entry.store)}">${escapeHtml(storeDisplayName(entry))}</a>
+          <span class="kpi-event-item__sub">${entry.summary_online} de ${entry.summary_total} operacionais · ${entry.health_pct}%</span>
+        </li>`
+        )
+        .join('')}
+    </ul>`;
+  }
+
+  function renderStoreOfflineEvents(items) {
+    if (!items?.length) return '';
+    return `<ul class="kpi-event-list kpi-event-list--stores">
+      ${items
+        .map((entry) => {
+          const dur = entry.offline_since ? formatOfflineDuration(entry.offline_since) : '';
+          const durHtml = dur ? ` · há ${escapeHtml(dur)}` : '';
+          return `
+        <li class="kpi-event-item kpi-event-item--alert">
+          <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
+          <span class="kpi-event-item__sub">${escapeHtml(entry.reason || 'Indisponível')}${durHtml}</span>
+        </li>`;
+        })
+        .join('')}
+    </ul>`;
+  }
+
+  function renderKpiEventsPanel(kpiKey) {
+    const panel = $('kpiEventsPanel');
+    const config = KPI_PANEL_CONFIG[kpiKey];
+    const events = lastDashboardEvents || {};
+    if (!panel || !config) return;
+
+    let html = '';
+    let count = 0;
+
+    if (kpiKey === 'stores-online') {
+      const items = events.stores_online || [];
+      count = items.length;
+      html = renderStoreOnlineEvents(items);
+    } else if (kpiKey === 'stores-offline') {
+      const items = events.stores_offline || [];
+      count = items.length;
+      html = renderStoreOfflineEvents(items);
+    } else if (kpiKey === 'devices-suspended') {
+      const items = events.devices_suspended || [];
+      count = items.length;
+      html = renderDeviceEventsGrouped(items);
+    } else if (kpiKey === 'devices-offline') {
+      const items = events.devices_offline_network || [];
+      count = items.length;
+      html = renderDeviceEventsGrouped(items);
+    }
+
+    $('kpiEventsTitle').textContent = config.title;
+    $('kpiEventsMeta').textContent =
+      count > 0 ? `${count} registro(s)` : config.empty;
+    $('kpiEventsBody').innerHTML =
+      html || `<p class="kpi-events-panel__empty">${escapeHtml(config.empty)}</p>`;
+
+    panel.classList.remove('hidden');
+    document.querySelectorAll('[data-kpi]').forEach((el) => {
+      const active = el.dataset.kpi === kpiKey;
+      el.classList.toggle('stat-card--active', active);
+      el.setAttribute('aria-expanded', active ? 'true' : 'false');
+    });
+  }
+
+  function closeKpiEventsPanel() {
+    activeKpiPanel = null;
+    $('kpiEventsPanel')?.classList.add('hidden');
+    document.querySelectorAll('[data-kpi]').forEach((el) => {
+      el.classList.remove('stat-card--active');
+      el.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function toggleKpiEventsPanel(kpiKey) {
+    if (activeKpiPanel === kpiKey) {
+      closeKpiEventsPanel();
+      return;
+    }
+    activeKpiPanel = kpiKey;
+    renderKpiEventsPanel(kpiKey);
+  }
+
+  function initKpiEvents() {
+    const dashboard = $('dashboard');
+    if (!dashboard) return;
+
+    dashboard.addEventListener('click', (e) => {
+      const card = e.target.closest('[data-kpi]');
+      if (!card) return;
+      toggleKpiEventsPanel(card.dataset.kpi);
+    });
+
+    dashboard.addEventListener('keydown', (e) => {
+      const card = e.target.closest('[data-kpi]');
+      if (!card || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      toggleKpiEventsPanel(card.dataset.kpi);
+    });
+
+    $('kpiEventsClose')?.addEventListener('click', closeKpiEventsPanel);
   }
 
   function applyPayload(data) {
@@ -454,6 +637,7 @@
 
   async function init() {
     initFilters();
+    initKpiEvents();
     initAuthUi();
     checkBlockedParam();
     await ensureDefaultAgentToken();

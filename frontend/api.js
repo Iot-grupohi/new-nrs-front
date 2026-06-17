@@ -754,13 +754,52 @@
     let devicesTotal = 0;
     let devicesSuspended = 0;
     let devicesOfflineNetwork = 0;
-    const alerts = [];
+    const devicesSuspendedEvents = [];
+    const devicesOfflineNetworkEvents = [];
+    const storesOnlineEvents = [];
+    const storesOfflineEvents = [];
     const typeLabels = {
       washers: 'Lavadora',
       dryers: 'Secadora',
       dosers: 'Dosadora',
       ac: 'AC',
     };
+
+    ready.forEach((card) => {
+      if (card.loading) return;
+      const storeEntry = {
+        store: card.id,
+        store_name: card.name || card.id.toUpperCase(),
+        state: card.state,
+        summary_online: card.summary?.online ?? 0,
+        summary_total: card.summary?.total ?? 0,
+      };
+      if (card.accessible && (card.summary?.online ?? 0) > 0) {
+        storesOnlineEvents.push({
+          ...storeEntry,
+          health_pct: card.summary?.total
+            ? Math.round(((card.summary?.online ?? 0) / card.summary.total) * 100)
+            : 0,
+        });
+      }
+      if (!card.accessible) {
+        storesOfflineEvents.push({
+          ...storeEntry,
+          kind: 'unreachable',
+          reason: card.agentUnavailable
+            ? noAgentMessage(card.id)
+            : card.error || 'Loja indisponível',
+          offline_since: card.offlineSince || null,
+        });
+      } else if ((card.summary?.online ?? 0) <= 0 && (card.summary?.total ?? 0) > 0) {
+        storesOfflineEvents.push({
+          ...storeEntry,
+          kind: 'devices_down',
+          reason: 'Nenhum equipamento operacional',
+          offline_since: null,
+        });
+      }
+    });
 
     connected.forEach((card) => {
       const summary = card.summary || {};
@@ -772,20 +811,20 @@
       Object.entries(typeLabels).forEach(([group, label]) => {
         (card.devices?.[group] || []).forEach((dev) => {
           if (isDeviceSuspended(dev)) {
-            alerts.push({
+            devicesSuspendedEvents.push({
               store: card.id,
-              store_name: card.name,
+              store_name: card.name || card.id.toUpperCase(),
               type_label: label,
               id: dev.id,
-              kind: 'suspended',
+              status_label: dev.status_label || 'Suspensa',
             });
           } else if (!dev.online) {
-            alerts.push({
+            devicesOfflineNetworkEvents.push({
               store: card.id,
-              store_name: card.name,
+              store_name: card.name || card.id.toUpperCase(),
               type_label: label,
               id: dev.id,
-              kind: 'offline',
+              status_label: dev.status_label || 'Sem rede',
             });
           }
         });
@@ -809,7 +848,16 @@
         offline_network: devicesOfflineNetwork,
         health_pct: devicesTotal ? Math.round((devicesOnline / devicesTotal) * 100) : 0,
       },
-      alerts: alerts.slice(0, 24),
+      events: {
+        stores_online: storesOnlineEvents.sort((a, b) => a.store.localeCompare(b.store)),
+        stores_offline: storesOfflineEvents.sort((a, b) => a.store.localeCompare(b.store)),
+        devices_suspended: devicesSuspendedEvents.sort((a, b) =>
+          a.store.localeCompare(b.store) || String(a.id).localeCompare(String(b.id))
+        ),
+        devices_offline_network: devicesOfflineNetworkEvents.sort((a, b) =>
+          a.store.localeCompare(b.store) || String(a.id).localeCompare(String(b.id))
+        ),
+      },
     };
   }
 
