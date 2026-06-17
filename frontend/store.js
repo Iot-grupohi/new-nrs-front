@@ -31,6 +31,7 @@
     deviceUnifiedStatus,
     syncConfigDevices,
     isDeviceVisibleInFrontend,
+    applyFrontendDeviceVisibility,
   } = window.Lav60;
 
   const pageStore = normalizeStoreId(new URLSearchParams(window.location.search).get('store'));
@@ -326,16 +327,17 @@
   }
 
   function applyStatus(data, options = {}) {
-    statusData = data;
+    const acId = catalog?.ac_id || '110';
+    statusData = data ? applyFrontendDeviceVisibility({ ...data }, acId) : data;
     if (config) {
-      if (Array.isArray(data.machines) && data.machines.length) {
-        config.machines = data.machines;
+      if (Array.isArray(statusData.machines) && statusData.machines.length) {
+        config.machines = statusData.machines;
       }
-      syncConfigDevices(config, data);
-    } else if (data?.summary?.total || data?.washers || data?.machines?.length) {
-      config = configFromStatus(data);
+      syncConfigDevices(config, statusData);
+    } else if (statusData?.summary?.total || statusData?.washers || statusData?.machines?.length) {
+      config = configFromStatus(statusData);
     }
-    const summary = data.summary || {};
+    const summary = statusData.summary || {};
     const on = summary.online ?? 0;
     const tot = summary.total ?? 0;
     const pct = healthPercent(summary);
@@ -344,9 +346,9 @@
     $('summaryTotal').textContent = `de ${tot} total`;
     $('summaryHealth').textContent = `${pct}%`;
     $('summaryHealthBar').style.width = `${pct}%`;
-    $('summaryTime').textContent = formatTime(data.timestamp);
+    $('summaryTime').textContent = formatTime(statusData.timestamp);
 
-    updateStoreHeader(data);
+    updateStoreHeader(statusData);
     if (options.render !== false && uiReady) {
       renderDevices();
     }

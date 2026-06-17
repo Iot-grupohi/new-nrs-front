@@ -542,7 +542,28 @@
     const key =
       dtype === 'washer' ? 'washers' : dtype === 'dryer' ? 'dryers' : dtype === 'doser' ? 'dosers' : null;
     if (!key || !network) return false;
-    return Boolean((network[key] || {})[mid]);
+    return (network[key] || {})[mid] === true;
+  }
+
+  function applyFrontendDeviceVisibility(status, acId = '110') {
+    if (!status) return status;
+    const next = { ...status };
+    [
+      ['washer', 'washers'],
+      ['dryer', 'dryers'],
+      ['doser', 'dosers'],
+    ].forEach(([dtype, key]) => {
+      const block = next[key] || {};
+      next[key] = Object.fromEntries(
+        Object.entries(block).filter(([id]) => isDeviceVisibleInFrontend(dtype, id, next))
+      );
+    });
+    if (Array.isArray(next.machines)) {
+      next.machines = next.machines.filter((m) =>
+        isDeviceVisibleInFrontend(m.type, m.id, next)
+      );
+    }
+    return reconcileStatusSummary(next, acId);
   }
 
   function devicesFromMachines(machines, network = {}) {
@@ -622,11 +643,12 @@
         .forEach((meta) => {
           const id = normalizeStoreId(meta.id);
           if (seen.has(id)) return;
+          const online = (status[key] || {})[id] === true;
           if (!isDeviceVisibleInFrontend(mtype, id, status)) return;
           seen.add(id);
           list.push({
             id: meta.id,
-            online: false,
+            online,
             ...meta,
           });
         });
@@ -705,7 +727,7 @@
 
   function buildStoreCard(meta, status, error, catalog, extra = {}) {
     const acId = catalog?.ac_id || '110';
-    if (status) reconcileStatusSummary(status, acId);
+    if (status) status = applyFrontendDeviceVisibility({ ...status }, acId);
     const summary = status?.summary || null;
     const agentUnavailable = isAgentUnavailableError(error);
     const hasDeviceData = Boolean(summary?.total);
@@ -980,15 +1002,13 @@
     if (!row?.card) return null;
     const acId = catalog?.ac_id || '110';
     const card = normalizeCardAccess({ ...row.card, loading: false });
-    const status = row.status ? { ...row.status } : statusFromCard(row.card);
-    if (status) reconcileStatusSummary(status, acId);
-    if (status && !cardHasDeviceDots(card)) {
+    let status = row.status ? { ...row.status } : statusFromCard(row.card);
+    if (status) {
+      status = applyFrontendDeviceVisibility(status, acId);
       card.devices = buildDeviceDots(status, acId);
       card.summary = status.summary || card.summary;
       card.timestamp = status.timestamp || card.timestamp;
       card.machines = status.machines || card.machines || [];
-    } else if (cardHasDeviceDots(card)) {
-      card.summary = summaryFromDevices(card.devices);
     }
     if (card.summary) {
       card.state = storeHealthState(card.summary, card.error);
@@ -1089,7 +1109,7 @@
       summary: network.summary || null,
     };
     status.machines = payload?.machines || [];
-    return reconcileStatusSummary(status);
+    return applyFrontendDeviceVisibility(status);
   }
 
   function attachAgentUrlToCard(card, hb) {
@@ -1424,9 +1444,8 @@
       timestamp: cached.timestamp || new Date().toISOString(),
       summary: cached.summary || null,
     };
-    if (!status.summary) attachSummary(status);
     status.machines = config?.machines || [];
-    return status;
+    return applyFrontendDeviceVisibility(status);
   }
 
   function connectionErrorMessage(err, catalogId) {
@@ -1856,6 +1875,7 @@
     devicesFromMachines,
     syncConfigDevices,
     isDeviceVisibleInFrontend,
+    applyFrontendDeviceVisibility,
     buildStoreCard,
     findStoreInCatalog,
     storeMetaFromId,

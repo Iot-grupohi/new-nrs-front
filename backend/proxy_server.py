@@ -1848,7 +1848,7 @@ def is_device_visible_in_frontend(device_type: str, machine_id: str, network: di
     if not group_key:
         return False
     items = net.get(group_key) or {}
-    return bool(items.get(mid))
+    return items.get(mid) is True
 
 
 def filter_machines_for_frontend(machines: list[dict], network: dict | None = None) -> list[dict]:
