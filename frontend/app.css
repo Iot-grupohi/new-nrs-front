@@ -781,10 +781,6 @@ a.topbar__tool {
   font-size: 2rem;
 }
 
-.page-dashboard .stat-card__sub {
-  font-size: 0.8rem;
-}
-
 .page-dashboard .stat-card--clickable {
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;

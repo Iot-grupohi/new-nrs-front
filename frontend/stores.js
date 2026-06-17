@@ -388,20 +388,9 @@
     lastDashboardEvents = dashboard.events || null;
 
     $('kpiStoresOnline').textContent = stores.online ?? '—';
-    $('kpiStoresOnlineSub').textContent =
-      stores.connected > stores.online
-        ? `${stores.online} operacional · ${stores.connected} com agente`
-        : `de ${stores.total ?? '—'} lojas`;
     $('kpiStoresOffline').textContent = stores.offline ?? '—';
-    $('kpiStoresOfflineSub').textContent =
-      stores.pending > 0 ? `${stores.pending} carregando` : 'sem equipamento ou agente';
     $('kpiDevicesSuspended').textContent = devices.suspended ?? '—';
-    $('kpiDevicesSuspendedSub').textContent = `de ${devices.total ?? '—'} equipamentos`;
     $('kpiDevicesOffline').textContent = devices.offline_network ?? '—';
-    $('kpiDevicesOfflineSub').textContent =
-      (devices.offline_network ?? 0) > 0
-        ? 'sem resposta na rede · não suspensos'
-        : 'nenhum fora da rede';
 
     updateDashboardHeader({ dashboard, ...payload });
 
