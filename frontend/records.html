@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LAV60 — Registros</title>
-  <link rel="stylesheet" href="app.css?v=5">
+  <link rel="stylesheet" href="app.css?v=7">
 </head>
 <body class="page-dashboard page-records auth-pending">
   <div class="app-shell">
@@ -74,15 +74,18 @@
           </div>
         </div>
 
-        <div class="records-panel__body">
-          <div id="recordsEmpty" class="records-empty hidden">
-            <p id="recordsEmptyText">Nenhum registro encontrado.</p>
-          </div>
+        <div class="records-panel__body" id="recordsPanelBody" data-view="loading">
           <div id="recordsLoading" class="records-loading">
             <div class="spinner" aria-hidden="true"></div>
             <p>Carregando registros…</p>
           </div>
+          <div id="recordsEmpty" class="records-empty hidden">
+            <p id="recordsEmptyText">Nenhum registro encontrado.</p>
+          </div>
           <div class="records-table-wrap hidden" id="recordsTableWrap">
+            <div id="recordsTableOverlay" class="records-table-overlay hidden" aria-hidden="true">
+              <div class="spinner" aria-hidden="true"></div>
+            </div>
             <table class="records-table" aria-label="Registros de auditoria">
               <thead>
                 <tr>
@@ -121,6 +124,6 @@
 
   <script src="auth.js?v=4"></script>
   <script src="api.js?v=4"></script>
-  <script src="records.js?v=7"></script>
+  <script src="records.js?v=11"></script>
 </body>
 </html>

@@ -467,18 +467,20 @@ def api_audit_logs():
     }
 
     if before_ms is None:
-        total, truncated, count_err = count_audit_events(
-            store=store,
-            action=action,
-            operator=operator,
-            success=success,
-            q=q,
-        )
-        if count_err:
-            payload['total_error'] = count_err
-        elif total is not None:
-            payload['total'] = total
-            payload['total_truncated'] = truncated
+        skip_total = request.args.get('skip_total', '').strip().lower() in ('1', 'true', 'yes')
+        if not skip_total:
+            total, truncated, count_err = count_audit_events(
+                store=store,
+                action=action,
+                operator=operator,
+                success=success,
+                q=q,
+            )
+            if count_err:
+                payload['total_error'] = count_err
+            elif total is not None:
+                payload['total'] = total
+                payload['total_truncated'] = truncated
 
     return jsonify(payload), 200
 

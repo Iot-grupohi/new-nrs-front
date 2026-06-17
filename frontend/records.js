@@ -2,7 +2,7 @@
   'use strict';
 
   const PAGE_SIZE = 20;
-  const CACHE_VERSION = '7';
+  const CACHE_VERSION = '8';
   const CACHE_TTL_MS = 5 * 60 * 1000;
   const CACHE_PREFIX = `lav60:records:v${CACHE_VERSION}:`;
   const FILTERS_KEY = `${CACHE_PREFIX}filters`;
@@ -15,12 +15,15 @@
   let items = [];
   let hasMore = false;
   let loading = false;
+  let recordsReady = false;
   let searchTimer = null;
   let currentPage = 1;
   let totalRecords = null;
   let totalTruncated = false;
   /** @type {Record<number, number|null>} cursor before_ms para abrir cada página (página 1 = null) */
   let pageCursors = { 1: null };
+  /** @type {Record<number, { items: object[], hasMore: boolean, nextCursor: number|null }>} */
+  let pageSnapshots = {};
 
   const $ = (id) => document.getElementById(id);
 
@@ -234,13 +237,60 @@
   function resetPagination() {
     currentPage = 1;
     pageCursors = { 1: null };
+    pageSnapshots = {};
     totalRecords = null;
     totalTruncated = false;
+  }
+
+  function syncRecordsView() {
+    const hasItems = items.length > 0;
+    const initialLoading = !hasItems && (!recordsReady || loading);
+    const tableRefreshing = loading && hasItems;
+    const showEmpty = recordsReady && !loading && !hasItems;
+
+    let view = 'loading';
+    if (showEmpty) view = 'empty';
+    else if (hasItems) view = tableRefreshing ? 'refreshing' : 'ready';
+
+    const body = $('recordsPanelBody');
+    if (body) body.dataset.view = view;
+
+    $('recordsLoading')?.classList.toggle('hidden', !initialLoading);
+    $('recordsEmpty')?.classList.toggle('hidden', !showEmpty);
+    $('recordsTableWrap')?.classList.toggle('hidden', !hasItems);
+    $('recordsTableOverlay')?.classList.toggle('hidden', !tableRefreshing);
+    body?.classList.toggle('records-panel__body--busy', tableRefreshing);
+
+    if (showEmpty) {
+      $('recordsEmptyText').textContent = 'Nenhum registro encontrado para os filtros selecionados.';
+    }
+  }
+
+  function savePageSnapshot(page) {
+    pageSnapshots[page] = {
+      items: items.slice(),
+      hasMore,
+      nextCursor: pageCursors[page + 1] ?? null,
+    };
+  }
+
+  function restorePageSnapshot(page) {
+    const snap = pageSnapshots[page];
+    if (!snap) return false;
+    currentPage = page;
+    items = snap.items.slice();
+    hasMore = snap.hasMore;
+    if (snap.nextCursor != null) {
+      pageCursors[page + 1] = snap.nextCursor;
+    }
+    renderTable();
+    return true;
   }
 
   function buildQueryParams(filters, page) {
     const params = new URLSearchParams();
     params.set('limit', String(PAGE_SIZE));
+    if (page === 1 && totalRecords != null) params.set('skip_total', '1');
     if (filters.store) params.set('store', filters.store);
     if (filters.operator) params.set('operator', filters.operator);
     if (filters.action) params.set('action', filters.action);
@@ -284,6 +334,9 @@
       delete pageCursors[page + 1];
     }
     populateActionFilter();
+    currentPage = page;
+    savePageSnapshot(page);
+    recordsReady = true;
     renderTable();
     updateMeta();
   }
@@ -295,10 +348,6 @@
 
     const filters = currentFilters();
     saveFiltersToSession(filters);
-
-    if (!silent) {
-      currentPage = page;
-    }
 
     if (page > 1 && (pageCursors[page] == null || pageCursors[page] === undefined)) {
       showToast('Não há mais páginas nesta direção', false);
@@ -320,6 +369,11 @@
           totalTruncated = Boolean(totalCached.totalTruncated);
         }
       }
+      if (!silent) {
+        currentPage = page;
+        savePageSnapshot(page);
+        recordsReady = true;
+      }
       renderTable();
       updateMeta();
       if (!silent) {
@@ -329,7 +383,7 @@
     }
 
     loading = !silent;
-    if (!silent) setLoadingState(!items.length);
+    if (!silent) syncRecordsView();
 
     try {
       const query = buildQueryParams(filters, page);
@@ -352,21 +406,18 @@
     } catch (e) {
       if (!silent) {
         items = [];
+        recordsReady = true;
         renderTable();
         updateMeta();
         showToast(e.message || 'Falha ao carregar registros', false);
       }
     } finally {
-      if (!silent) loading = false;
-      setLoadingState(false);
-    }
-  }
-
-  function setLoadingState(isLoading) {
-    $('recordsLoading').classList.toggle('hidden', !isLoading || items.length > 0);
-    if (isLoading && !items.length) {
-      $('recordsTableWrap').classList.add('hidden');
-      $('recordsEmpty').classList.add('hidden');
+      if (!silent) {
+        loading = false;
+        recordsReady = true;
+        syncRecordsView();
+        updateMeta();
+      }
     }
   }
 
@@ -448,19 +499,6 @@
     const tbody = $('recordsTbody');
     tbody.innerHTML = '';
 
-    if (!items.length) {
-      $('recordsTableWrap').classList.add('hidden');
-      $('recordsEmpty').classList.remove('hidden');
-      $('recordsEmptyText').textContent = loading
-        ? 'Carregando registros…'
-        : 'Nenhum registro encontrado para os filtros selecionados.';
-      updateMeta();
-      return;
-    }
-
-    $('recordsEmpty').classList.add('hidden');
-    $('recordsTableWrap').classList.remove('hidden');
-
     items.forEach((row) => {
       const tr = document.createElement('tr');
       tr.className = row.success === false ? 'records-table__row records-table__row--fail' : 'records-table__row';
@@ -476,6 +514,8 @@
         <td class="records-table__dry-time">${escapeHtml(dryingTime(row))}</td>`;
       tbody.appendChild(tr);
     });
+
+    syncRecordsView();
     updateMeta();
   }
 
@@ -555,7 +595,9 @@
 
     bindClick('btnPrevPage', () => {
       if (currentPage <= 1 || loading) return;
-      fetchLogs({ page: currentPage - 1 });
+      const targetPage = currentPage - 1;
+      if (restorePageSnapshot(targetPage)) return;
+      fetchLogs({ page: targetPage });
     });
 
     bindClick('btnNextPage', () => {
@@ -578,14 +620,17 @@
     initFilters();
     initAuthUi();
     restoreFiltersFromSession();
+    syncRecordsView();
     try {
       await loadCatalog();
       await loadOperators();
       await fetchLogs({ page: 1 });
     } catch (e) {
+      recordsReady = true;
+      syncRecordsView();
       showToast(e.message || 'Erro ao iniciar página', false);
-      $('recordsLoading').classList.add('hidden');
-      $('recordsEmpty').classList.remove('hidden');
+      $('recordsEmpty')?.classList.remove('hidden');
+      $('recordsLoading')?.classList.add('hidden');
       $('recordsEmptyText').textContent = e.message || 'Erro ao carregar';
     }
   }
