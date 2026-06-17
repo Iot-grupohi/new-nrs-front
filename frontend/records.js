@@ -2,7 +2,7 @@
   'use strict';
 
   const PAGE_SIZE = 20;
-  const CACHE_VERSION = '8';
+  const CACHE_VERSION = '9';
   const CACHE_TTL_MS = 5 * 60 * 1000;
   const CACHE_PREFIX = `lav60:records:v${CACHE_VERSION}:`;
   const FILTERS_KEY = `${CACHE_PREFIX}filters`;
@@ -16,7 +16,6 @@
   let hasMore = false;
   let loading = false;
   let recordsReady = false;
-  let searchTimer = null;
   let currentPage = 1;
   let totalRecords = null;
   let totalTruncated = false;
@@ -155,7 +154,6 @@
       operator: $('filterOperator').value.trim(),
       action: $('filterAction').value.trim(),
       success: $('filterSuccess').value.trim(),
-      q: $('filterSearch').value.trim(),
     };
   }
 
@@ -231,7 +229,6 @@
     if ($('filterOperator')) $('filterOperator').value = f.operator || '';
     if ($('filterAction')) $('filterAction').value = f.action || '';
     if ($('filterSuccess')) $('filterSuccess').value = f.success || '';
-    if ($('filterSearch')) $('filterSearch').value = f.q || '';
   }
 
   function resetPagination() {
@@ -296,7 +293,6 @@
     if (filters.action) params.set('action', filters.action);
     if (filters.success === 'true') params.set('success', 'true');
     if (filters.success === 'false') params.set('success', 'false');
-    if (filters.q) params.set('q', filters.q);
     const beforeMs = page > 1 ? pageCursors[page] : null;
     if (beforeMs) params.set('before_ms', String(beforeMs));
     return params.toString();
@@ -578,14 +574,6 @@
       const el = $(id);
       if (el) el.addEventListener('change', onFiltersChanged);
     });
-
-    const search = $('filterSearch');
-    if (search) {
-      search.addEventListener('input', () => {
-        clearTimeout(searchTimer);
-        searchTimer = setTimeout(onFiltersChanged, 350);
-      });
-    }
 
     bindClick('btnRefresh', () => {
       resetPagination();
