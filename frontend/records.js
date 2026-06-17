@@ -516,8 +516,11 @@
   }
 
   async function loadCatalog() {
-    const res = await fetch('stores.json', { credentials: 'same-origin' });
-    if (!res.ok) throw new Error('Não foi possível carregar stores.json');
+    const res = await fetch('/api/catalog', {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error('Não foi possível carregar lojas do painel');
     const data = await res.json();
     catalogStores = data.stores || [];
     populateStoreFilter();

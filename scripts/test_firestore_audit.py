@@ -91,8 +91,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Testa gravação no Firestore do painel LAV60')
     parser.add_argument(
         '--store',
-        default=env_value('STORE_ID', 'pb05').lower(),
-        help='ID da loja no registro de teste (padrão: STORE_ID do .env)',
+        default=(env_value('STORE_ID') or '').lower() or None,
+        help='ID da loja no registro de teste (padrão: STORE_ID do ambiente)',
     )
     parser.add_argument(
         '--note',

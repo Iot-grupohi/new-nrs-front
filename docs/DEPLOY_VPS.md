@@ -265,11 +265,11 @@ O Firebase **não aceita login pelo IP** (`http://161.97.110.117`). Ao tentar en
 
 ### Solução correta (produção)
 
-1. **DNS:** registro **A** `panel.powpay.com.br` → `161.97.110.117`
-2. **Nginx:** use `deploy/nginx-lav60-panel.conf` (inclui `panel.powpay.com.br`)
-3. **Firebase Console** → Authentication → Settings → **Authorized domains** → adicione `panel.powpay.com.br`
-4. **HTTPS:** `sudo certbot --nginx -d panel.powpay.com.br`
-5. Acesse **`https://panel.powpay.com.br/login.html`** (não use o IP)
+1. **DNS:** registro **A** `nrs.lav60.com` → `161.97.110.117`
+2. **Nginx:** use `deploy/nginx-lav60-panel.conf` (inclui `nrs.lav60.com`)
+3. **Firebase Console** → Authentication → Settings → **Authorized domains** → adicione `nrs.lav60.com`
+4. **HTTPS:** `sudo certbot --nginx -d nrs.lav60.com`
+5. Acesse **`https://nrs.lav60.com/login.html`** (não use o IP)
 
 No `.env` da VPS:
 

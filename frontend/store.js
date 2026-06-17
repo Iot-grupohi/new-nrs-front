@@ -29,7 +29,8 @@
     canOperateMachineStatus,
     machineMetaFacts,
     deviceUnifiedStatus,
-    devicesFromMachines,
+    syncConfigDevices,
+    isDeviceVisibleInFrontend,
   } = window.Lav60;
 
   const pageStore = normalizeStoreId(new URLSearchParams(window.location.search).get('store'));
@@ -43,6 +44,7 @@
   let deviceLockTimer = null;
   let dryerLocks = {};
   let washerLocks = {};
+  let uiReady = false;
   let actionPromptResolver = null;
 
   const DRYER_LOCK_STORAGE_KEY = 'lav60_dryer_locks';
@@ -323,11 +325,15 @@
     return agentRequest(storeMeta, catalog, agentToken, method, path, body, ep);
   }
 
-  function applyStatus(data) {
+  function applyStatus(data, options = {}) {
     statusData = data;
-    if (Array.isArray(data.machines) && data.machines.length && config) {
-      config.machines = data.machines;
-      config.devices = devicesFromMachines(data.machines, data);
+    if (config) {
+      if (Array.isArray(data.machines) && data.machines.length) {
+        config.machines = data.machines;
+      }
+      syncConfigDevices(config, data);
+    } else if (data?.summary?.total || data?.washers || data?.machines?.length) {
+      config = configFromStatus(data);
     }
     const summary = data.summary || {};
     const on = summary.online ?? 0;
@@ -341,13 +347,15 @@
     $('summaryTime').textContent = formatTime(data.timestamp);
 
     updateStoreHeader(data);
-    renderDevices();
+    if (options.render !== false && uiReady) {
+      renderDevices();
+    }
   }
 
-  function applyCachedBootstrap(entry) {
+  function applyCachedBootstrap(entry, options = {}) {
     if (!entry?.status || !entry.card?.accessible) return false;
     config = configFromStatus(entry.status);
-    applyStatus(entry.status);
+    applyStatus(entry.status, options);
     return true;
   }
 
@@ -385,14 +393,8 @@
     if (Array.isArray(statusData?.machines) && statusData.machines.length) {
       config.machines = statusData.machines;
     }
-    if (Array.isArray(config.machines) && config.machines.length) {
-      config.devices = devicesFromMachines(config.machines, config.last_network_check || statusData);
-    }
+    syncConfigDevices(config, statusData || config.last_network_check);
     agentEndpoint = resolveAgentEndpoint(storeMeta, catalog, config);
-    if (statusData) {
-      updateStoreHeader(statusData);
-      renderDevices();
-    }
   }
 
   async function runAction(label, fn, audit = null) {
@@ -974,7 +976,7 @@
     grid.innerHTML = '';
     if (!config) return;
     setSectionCount('washersCount', statusData?.washers);
-    config.devices.washers.forEach((id) => {
+    visibleDeviceIds('washer', config.devices.washers).forEach((id) => {
       const online = Boolean(statusData?.washers?.[id]);
       const meta = getMachineMeta(id, 'washer', getMachinesCatalog());
       const card = createDeviceCard(
@@ -1027,7 +1029,7 @@
     grid.innerHTML = '';
     if (!config) return;
     setSectionCount('dryersCount', statusData?.dryers);
-    config.devices.dryers.forEach((id) => {
+    visibleDeviceIds('dryer', config.devices.dryers).forEach((id) => {
       const online = Boolean(statusData?.dryers?.[id]);
       const meta = getMachineMeta(id, 'dryer', getMachinesCatalog());
       const card = createDeviceCard(
@@ -1219,7 +1221,7 @@
     grid.innerHTML = '';
     if (!config) return;
     setSectionCount('dosersCount', statusData?.dosers);
-    config.devices.dosers.forEach((id) => {
+    visibleDeviceIds('doser', config.devices.dosers).forEach((id) => {
       const online = Boolean(statusData?.dosers?.[id]);
       const meta = getMachineMeta(id, 'doser', getMachinesCatalog());
       const card = createDeviceCard(
@@ -1282,12 +1284,17 @@
     );
   }
 
+  function visibleDeviceIds(deviceType, ids) {
+    return (ids || []).filter((id) => isDeviceVisibleInFrontend(deviceType, id, statusData));
+  }
+
   function renderDevices() {
     renderWashers();
     renderDryers();
     renderDosers();
     renderAc();
     scheduleDeviceLockTick();
+    $('devicesPanel')?.classList.remove('devices-panel--loading');
   }
 
   function initAuthUi() {
@@ -1320,10 +1327,15 @@
 
   function startLiveStatusWatch() {
     if (stopHeartbeatWatch) stopHeartbeatWatch();
-    stopHeartbeatWatch = watchStoreHeartbeat(pageStore, catalog, (status) => {
-      applyStatus(status);
-      lav60Debug('store', 'status SSE (espelho do card)', status.summary);
-    });
+    stopHeartbeatWatch = watchStoreHeartbeat(
+      pageStore,
+      catalog,
+      (status) => {
+        applyStatus(status);
+        lav60Debug('store', 'status SSE (espelho do card)', status.summary);
+      },
+      { skipInitialBootstrap: true, skipInitialPoll: true }
+    );
   }
 
   function redirectIfNoAgent(reason) {
@@ -1351,11 +1363,6 @@
     try {
       catalog = await loadCatalog();
       storeMeta = findStoreInCatalog(catalog, pageStore);
-      if (!storeMeta) {
-        showToast(`Loja ${pageStore} não está em stores.json`, false);
-        setTimeout(() => { window.location.href = 'index.html'; }, 2000);
-        return;
-      }
 
       agentToken = await ensureDefaultAgentToken();
 
@@ -1381,7 +1388,7 @@
         );
         if (status?.summary?.total) {
           config = configFromStatus(status);
-          applyStatus(status);
+          applyStatus(status, { render: false });
           lav60Debug('store', 'status from heartbeat', status.summary);
         }
       } catch (e) {
@@ -1419,7 +1426,7 @@
         }
       }
 
-      if (!statusData && applyCachedBootstrap(cached)) {
+      if (!statusData && applyCachedBootstrap(cached, { render: false })) {
         $('summaryTime').title = '';
         lav60Debug('store', 'bootstrap from cache');
       }
@@ -1446,6 +1453,13 @@
           agentEndpoint,
         });
         return;
+      }
+
+      uiReady = true;
+      if (statusData) {
+        applyStatus(statusData);
+      } else {
+        renderDevices();
       }
 
       lav60Debug('store', 'ready — staying on store page');

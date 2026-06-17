@@ -297,7 +297,7 @@
     if (!allStores.length) {
       grid.innerHTML = `
         <div class="stores-empty-state">
-          <p>Nenhuma loja em stores.json</p>
+          <p>Nenhuma loja conectada — aguardando heartbeat dos agentes</p>
         </div>`;
       $('storesCount').classList.add('hidden');
       return;

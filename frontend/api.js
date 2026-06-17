@@ -92,7 +92,7 @@
       return 'Acesso negado — verifique o token';
     }
     if (m.includes('404')) return 'Recurso não encontrado';
-    if (m.includes('stores.json')) return 'Lista de lojas indisponível';
+    if (m.includes('stores.json') || m.includes('configuração do painel')) return 'Configuração do painel indisponível';
 
     if (
       m.includes('invalid machine') ||
@@ -525,15 +525,41 @@
       .join(' · ');
   }
 
+  const HIDE_WHEN_OFFLINE = [
+    { type: 'washer', id: '321' },
+    { type: 'dryer', id: '210' },
+    { type: 'doser', id: '321' },
+  ];
+
+  /** Lavadora 321, secadora 210 e dosadora 321: só no front se online no ping. Demais sempre visíveis. */
+  function isDeviceVisibleInFrontend(deviceType, machineId, network) {
+    const mid = normalizeStoreId(machineId);
+    const dtype = String(deviceType || '').toLowerCase();
+    const mustBeOnline = HIDE_WHEN_OFFLINE.some(
+      (rule) => rule.type === dtype && normalizeStoreId(rule.id) === mid
+    );
+    if (!mustBeOnline) return true;
+    const key =
+      dtype === 'washer' ? 'washers' : dtype === 'dryer' ? 'dryers' : dtype === 'doser' ? 'dosers' : null;
+    if (!key || !network) return false;
+    return Boolean((network[key] || {})[mid]);
+  }
+
   function devicesFromMachines(machines, network = {}) {
     const ids = { washers: new Set(), dryers: new Set(), dosers: new Set() };
     (machines || []).forEach((m) => {
       const t = m.type;
+      if (!isDeviceVisibleInFrontend(t, m.id, network)) return;
       const key = t === 'washer' ? 'washers' : t === 'dryer' ? 'dryers' : t === 'doser' ? 'dosers' : null;
       if (key) ids[key].add(normalizeStoreId(m.id));
     });
     ['washers', 'dryers', 'dosers'].forEach((key) => {
-      Object.keys(network[key] || {}).forEach((id) => ids[key].add(normalizeStoreId(id)));
+      const dtype = { washers: 'washer', dryers: 'dryer', dosers: 'doser' }[key];
+      Object.keys(network[key] || {}).forEach((id) => {
+        if (isDeviceVisibleInFrontend(dtype, id, network)) {
+          ids[key].add(normalizeStoreId(id));
+        }
+      });
     });
     return {
       washers: [...ids.washers].sort(),
@@ -541,6 +567,30 @@
       dosers: [...ids.dosers].sort(),
       ac: '110',
     };
+  }
+
+  /** Alinha config.devices ao status de rede (321/210/321 só aparecem se online). */
+  function syncConfigDevices(config, network) {
+    if (!config) return config;
+    const net = network || config.last_network_check || null;
+    const machines = config.machines || [];
+    if (machines.length || net) {
+      config.devices = devicesFromMachines(machines, net);
+    } else if (config.devices) {
+      config.devices = {
+        washers: (config.devices.washers || []).filter((id) =>
+          isDeviceVisibleInFrontend('washer', id, net)
+        ),
+        dryers: (config.devices.dryers || []).filter((id) =>
+          isDeviceVisibleInFrontend('dryer', id, net)
+        ),
+        dosers: (config.devices.dosers || []).filter((id) =>
+          isDeviceVisibleInFrontend('doser', id, net)
+        ),
+        ac: config.devices.ac || '110',
+      };
+    }
+    return config;
   }
 
   function buildDeviceDots(status, acId) {
@@ -556,6 +606,7 @@
       Object.keys(items)
         .sort()
         .forEach((id) => {
+          if (!isDeviceVisibleInFrontend(mtype, id, status)) return;
           seen.add(normalizeStoreId(id));
           const meta = findMachineMeta(machines, id, mtype);
           list.push({
@@ -571,6 +622,7 @@
         .forEach((meta) => {
           const id = normalizeStoreId(meta.id);
           if (seen.has(id)) return;
+          if (!isDeviceVisibleInFrontend(mtype, id, status)) return;
           seen.add(id);
           list.push({
             id: meta.id,
@@ -1045,6 +1097,7 @@
 
   function emitHeartbeatUpdate(extra = {}) {
     if (!heartbeatCatalog || !heartbeatOnUpdate) return;
+    heartbeatCatalog = rebuildCatalogStores(heartbeatCatalog);
     const payload = buildPayloadFromHeartbeats(heartbeatCatalog, extra);
     schedulePersistDashboardCards(payload.stores, heartbeatCatalog);
     heartbeatOnUpdate(payload);
@@ -1143,11 +1196,14 @@
    * Loja/card: escuta SSE do painel e aplica status ao vivo (mesma fonte do dashboard).
    * Retorna função para cancelar a inscrição.
    */
-  function watchStoreHeartbeat(storeId, catalog, onStatus) {
+  function watchStoreHeartbeat(storeId, catalog, onStatus, options = {}) {
     const id = normalizeStoreId(storeId);
     if (!id || typeof onStatus !== 'function') {
       return () => {};
     }
+
+    const skipInitialBootstrap = options.skipInitialBootstrap === true;
+    const skipInitialPoll = options.skipInitialPoll === true;
 
     let stopped = false;
     let eventSource = null;
@@ -1221,8 +1277,14 @@
       }
     }
 
-    bootstrap().then(connect);
-    pollOnce();
+    if (skipInitialBootstrap) {
+      connect();
+    } else {
+      bootstrap().then(connect);
+    }
+    if (!skipInitialPoll) {
+      pollOnce();
+    }
     pollTimer = setInterval(pollOnce, 20000);
 
     return () => {
@@ -1312,9 +1374,33 @@
   }
 
   async function loadCatalog() {
-    const res = await fetch('./stores.json');
-    if (!res.ok) throw new Error('Lista de lojas indisponível');
+    let res = await fetch('/api/catalog', { cache: 'no-store', credentials: 'same-origin' });
+    if (!res.ok) {
+      res = await fetch(`./stores.json?_=${Date.now()}`, { cache: 'no-store', credentials: 'same-origin' });
+    }
+    if (!res.ok) throw new Error('Configuração do painel indisponível');
     return res.json();
+  }
+
+  function storeMetaFromId(storeId, entry = null) {
+    const id = normalizeStoreId(storeId);
+    if (!id) return null;
+    const payload = entry?.payload || entry || {};
+    const name = String(payload.store_name || payload.name || id.toUpperCase()).trim();
+    return { id, name: name || id.toUpperCase() };
+  }
+
+  function rebuildCatalogStores(catalog) {
+    const byId = new Map();
+    (catalog?.stores || []).forEach((meta) => {
+      const id = normalizeStoreId(meta.id);
+      if (id) byId.set(id, { ...meta, id, name: meta.name || id.toUpperCase() });
+    });
+    heartbeatState.forEach((hb, id) => {
+      byId.set(id, storeMetaFromId(id, { payload: hb.payload }));
+    });
+    const stores = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
+    return { ...(catalog || {}), stores };
   }
 
   async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -1453,14 +1539,7 @@
   function configFromStatus(status) {
     const machines = status?.machines || [];
     return {
-      devices: machines.length
-        ? devicesFromMachines(machines, status)
-        : {
-            washers: Object.keys(status?.washers || {}).sort(),
-            dryers: Object.keys(status?.dryers || {}).sort(),
-            dosers: Object.keys(status?.dosers || {}).sort(),
-            ac: '110',
-          },
+      devices: devicesFromMachines(machines, status || {}),
       machines,
       washer_dosage_options: WASHER_DOSAGE_OPTIONS,
       washer_am_options: WASHER_DOSAGE_OPTIONS.filter((o) => o.value).map((o) => o.value),
@@ -1518,9 +1597,13 @@
 
   async function loadAllStores(token, options = {}) {
     const { onUpdate } = options;
-    const catalog = await loadCatalog();
-    heartbeatCatalog = catalog;
+    let catalog = await loadCatalog();
     heartbeatPageStartedAt = Date.now();
+
+    const snapshot = await fetchHeartbeatsSnapshot();
+    ingestHeartbeatSnapshot(snapshot);
+    catalog = rebuildCatalogStores(catalog);
+    heartbeatCatalog = catalog;
 
     dashboardCacheMap = options.force ? {} : await loadDashboardCacheMap(catalog);
 
@@ -1533,9 +1616,6 @@
         })
       );
     }
-
-    const snapshot = await fetchHeartbeatsSnapshot();
-    ingestHeartbeatSnapshot(snapshot);
 
     let cards = (catalog.stores || []).map((meta) =>
       buildCardFromHeartbeat(meta, catalog, dashboardCacheMap)
@@ -1592,7 +1672,12 @@
 
   function findStoreInCatalog(catalog, storeId) {
     const id = normalizeStoreId(storeId);
-    return (catalog.stores || []).find((s) => normalizeStoreId(s.id) === id);
+    if (!id) return null;
+    const found = (catalog.stores || []).find((s) => normalizeStoreId(s.id) === id);
+    if (found) return found;
+    const hb = heartbeatState.get(id);
+    if (hb) return storeMetaFromId(id, { payload: hb.payload });
+    return storeMetaFromId(id);
   }
 
   async function fetchAgentConfig(meta, catalog, token, endpointOverride = null) {
@@ -1689,8 +1774,12 @@
     machineMetaTitle,
     deviceUnifiedStatus,
     devicesFromMachines,
+    syncConfigDevices,
+    isDeviceVisibleInFrontend,
     buildStoreCard,
     findStoreInCatalog,
+    storeMetaFromId,
+    rebuildCatalogStores,
     fetchAgentConfig,
     agentRequest,
     attachSummary,

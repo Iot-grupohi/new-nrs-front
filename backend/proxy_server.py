@@ -21,9 +21,91 @@ from concurrent.futures import ThreadPoolExecutor
 
 from lav60_env import load_local_env
 
+# Variáveis que o agente lê obrigatoriamente do Windows (registro User/Machine).
+AGENT_WINDOWS_ENV_KEYS = (
+    'STORE_ID',
+    'TUNNEL_NAME',
+    'API_TOKEN',
+    'LAV60_API_TOKEN',
+    'LAV60_MACHINES_API_TOKEN',
+    'MACHINES_API_TOKEN',
+    'PANEL_HEARTBEAT_URL',
+    'PANEL_HOST',
+    'PANEL_PORT',
+)
+
+# Painel: registro Windows tem prioridade; se vazio, usa .env (não cai no IP LAN padrão).
+AGENT_WINDOWS_PANEL_ENV_KEYS = frozenset({
+    'PANEL_HEARTBEAT_URL',
+    'PANEL_HOST',
+    'PANEL_PORT',
+})
+
+
+def _read_windows_registry_env(name: str) -> str:
+    """Lê variável User/Machine do registro Windows (quando o processo não herdou)."""
+    if os.name != 'nt':
+        return ''
+    try:
+        import winreg
+    except ImportError:
+        return ''
+
+    def _read_hive(hive, subkey: str) -> str:
+        try:
+            with winreg.OpenKey(hive, subkey) as key:
+                val, _ = winreg.QueryValueEx(key, name)
+                return str(val).strip() if val is not None else ''
+        except OSError:
+            return ''
+
+    user_val = _read_hive(winreg.HKEY_CURRENT_USER, r'Environment')
+    if user_val:
+        return user_val
+    return _read_hive(
+        winreg.HKEY_LOCAL_MACHINE,
+        r'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
+    )
+
+
+def _windows_env(name: str) -> str:
+    """Variável do agente: no Windows, registro (User → Machine) tem prioridade."""
+    if os.name == 'nt':
+        reg_val = _read_windows_registry_env(name)
+        if reg_val:
+            return reg_val
+        if name in AGENT_WINDOWS_PANEL_ENV_KEYS:
+            return (os.environ.get(name) or '').strip()
+        if name in AGENT_WINDOWS_ENV_KEYS:
+            return ''
+    return (os.environ.get(name) or '').strip()
+
+
+def apply_windows_registry_env() -> None:
+    """Sincroniza variáveis do agente a partir do registro Windows."""
+    if os.name != 'nt':
+        return
+    for key in AGENT_WINDOWS_ENV_KEYS:
+        value = _read_windows_registry_env(key)
+        if value:
+            os.environ[key] = value
+        elif key not in AGENT_WINDOWS_PANEL_ENV_KEYS:
+            os.environ.pop(key, None)
+
+
 load_local_env()
+_ENV_FILE_API_TOKEN = (os.environ.get('API_TOKEN') or '').strip()
+apply_windows_registry_env()
 
 app = Flask(__name__)
+
+
+def _example_store_slug() -> str:
+    try:
+        return require_store_id().lower()
+    except RuntimeError:
+        return '{store_id}'
+
 
 CORS_ORIGIN = os.getenv('CORS_ORIGIN', '*')
 
@@ -65,7 +147,7 @@ def api_method_not_allowed(e):
             'hint': 'Use HTTPS — requisições http:// são redirecionadas e POST pode virar GET',
             'example': {
                 'method': 'POST',
-                'url': f'https://{host}/pb100/washer/321',
+                'url': f'https://{host}/{_example_store_slug()}/washer/321',
                 'headers': {'Content-Type': 'application/json', 'X-Token': '...'},
                 'body': {},
             },
@@ -105,6 +187,10 @@ def log_file_path() -> Path:
     return app_data_dir() / 'lav60_gateway.log'
 
 
+def cloudflared_log_path() -> Path:
+    return app_data_dir() / 'cloudflared.log'
+
+
 def pause_before_exit(message: str = '') -> None:
     """Mantém o console aberto após erro no executável."""
     if not is_frozen() and os.environ.get('LAV60_PAUSE_ON_EXIT', '').strip().lower() not in ('1', 'true', 'yes'):
@@ -134,6 +220,8 @@ tunnel_connection_failures = 0
 max_tunnel_failures = int(os.getenv('TUNNEL_MAX_FAILURES', '10'))
 max_tunnel_failures_critical = int(os.getenv('TUNNEL_MAX_FAILURES_CRITICAL', '3'))
 last_subdomain_status_code: int | None = None
+last_inbound_request_at: float | None = None
+last_inbound_client_ip: str | None = None
 # Códigos HTTP do Cloudflare que indicam túnel/origem indisponível (ex.: 530)
 TUNNEL_CRITICAL_HTTP_CODES = frozenset({502, 503, 521, 522, 523, 524, 525, 526, 530})
 
@@ -195,7 +283,7 @@ DOSADORA_RELAY_ALIASES = {
     'sport': 'SPORT', 'rele3': 'SPORT', 'rele3on': 'SPORT', '3': 'SPORT',
 }
 
-API_TOKEN = os.getenv('API_TOKEN')
+API_TOKEN = _windows_env('API_TOKEN') or (os.getenv('API_TOKEN') if os.name != 'nt' else '')
 VALID_WASHER_AM = ('am01-1', 'am01-2', 'am02-1', 'am02-2')
 AC_TEMPERATURES = ('18', '22', 'off')
 AC_DEVICE_PATHS = {'18': '/airon1', '22': '/airon2', 'off': '/airon3'}
@@ -208,46 +296,15 @@ DOSER_TYPE_PATHS = {
 }
 AMACIANTE_NUMBER_PATHS = {1: '/softener1', 2: '/softener2', 3: '/softener3'}
 GATEWAY_PUBLIC_PATHS = {'/', '/health', '/api/health', '/api/agent/config'}
+SKIP_ACCESS_LOG_PATHS = frozenset({'/health', '/api/health'})
+GATEWAY_OPERATION_ACTIONS = frozenset({'washer', 'dryer', 'doser', 'ac', 'led'})
+LOGGER_NAME = 'lav60.gateway'
 GATEWAY_STORE_ROUTE_ACTIONS = frozenset({'washer', 'dryer', 'doser', 'ac', 'status', 'led', 'devices'})
-
-
-def _read_windows_registry_env(name: str) -> str:
-    """Lê variável User/Machine do registro Windows (quando o processo não herdou)."""
-    if os.name != 'nt':
-        return ''
-    try:
-        import winreg
-    except ImportError:
-        return ''
-
-    def _read_hive(hive, subkey: str) -> str:
-        try:
-            with winreg.OpenKey(hive, subkey) as key:
-                val, _ = winreg.QueryValueEx(key, name)
-                return str(val).strip() if val is not None else ''
-        except OSError:
-            return ''
-
-    user_val = _read_hive(winreg.HKEY_CURRENT_USER, r'Environment')
-    if user_val:
-        return user_val
-    return _read_hive(
-        winreg.HKEY_LOCAL_MACHINE,
-        r'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
-    )
-
-
-def _windows_env(name: str) -> str:
-    """Variável de ambiente Windows: processo atual → registro (User → Machine)."""
-    value = (os.environ.get(name) or '').strip()
-    if value:
-        return value
-    return _read_windows_registry_env(name)
 
 
 def _resolve_machines_api_token() -> str:
     for name in ('LAV60_API_TOKEN', 'LAV60_MACHINES_API_TOKEN', 'MACHINES_API_TOKEN'):
-        value = (os.getenv(name) or _windows_env(name) or '').strip()
+        value = (_windows_env(name) or '').strip()
         if value:
             return value
     return ''
@@ -289,15 +346,13 @@ def _normalize_panel_heartbeat_url(url: str) -> str:
 
 
 def _resolve_panel_heartbeat_url() -> str:
-    explicit = _normalize_panel_heartbeat_url(
-        (os.getenv('PANEL_HEARTBEAT_URL') or _windows_env('PANEL_HEARTBEAT_URL') or '').strip()
-    )
+    explicit = _normalize_panel_heartbeat_url(_windows_env('PANEL_HEARTBEAT_URL'))
     if explicit:
         return explicit
     from_file = _read_panel_url_file()
     if from_file:
         return from_file
-    panel_host = (os.getenv('PANEL_HOST') or _windows_env('PANEL_HOST') or '').strip()
+    panel_host = _windows_env('PANEL_HOST')
     if panel_host:
         if panel_host.startswith('http'):
             return _normalize_panel_heartbeat_url(panel_host)
@@ -308,8 +363,7 @@ def _resolve_panel_heartbeat_url() -> str:
         or os.getenv('DEFAULT_PANEL_LAN_HOST', '192.168.50.248')
     ).strip()
     lan_port = (
-        os.getenv('PANEL_PORT')
-        or _windows_env('PANEL_PORT')
+        _windows_env('PANEL_PORT')
         or os.getenv('DEFAULT_PANEL_PORT', '3000')
     ).strip()
     if lan_host:
@@ -352,57 +406,19 @@ def get_panel_heartbeat_url() -> str:
     return candidates[0] if candidates else ''
 
 
-def _read_store_id_file() -> str:
-    """store_id.txt ao lado do .exe ou em %USERPROFILE%\\.lav60\\ (sem variáveis Windows)."""
-    candidates = []
-    if is_frozen():
-        candidates.append(Path(sys.executable).resolve().parent / 'store_id.txt')
-    candidates.append(app_data_dir() / 'store_id.txt')
-    candidates.append(Path.cwd() / 'store_id.txt')
-    for path in candidates:
-        try:
-            if path.is_file():
-                value = path.read_text(encoding='utf-8').strip()
-                if value:
-                    return value.upper()
-        except OSError:
-            continue
-    return ''
-
-
-def _infer_store_id_from_config() -> str:
-    """Extrai PB05 de hostname pb05.powpay.com.br no config.yml."""
-    try:
-        text = Path(resolve_config_path()).read_text(encoding='utf-8')
-    except OSError:
-        return ''
-    match = re.search(
-        r'hostname:\s*([a-z0-9][a-z0-9_-]*)\.' + re.escape(DOMAIN_SUFFIX),
-        text,
-        re.IGNORECASE,
-    )
-    if match:
-        return match.group(1).upper()
-    return ''
-
-
 def require_store_id() -> str:
-    for source in (
-        lambda: _windows_env('STORE_ID'),
-        _read_store_id_file,
-        _infer_store_id_from_config,
-    ):
-        value = source() if callable(source) else source
-        if value:
-            return str(value).strip().upper()
+    value = _windows_env('STORE_ID')
+    if value:
+        return value.strip().upper()
     raise RuntimeError(
-        'Código da loja não encontrado. Crie um arquivo store_id.txt (ex.: PB05) '
-        'na mesma pasta do LAV60_Gateway.exe, ou defina STORE_ID nas variáveis do Windows.'
+        'Defina STORE_ID nas variáveis de ambiente do Windows '
+        '(Configurações → Sistema → Sobre → Configurações avançadas do sistema → '
+        'Variáveis de ambiente). Reinicie o agente após alterar.'
     )
 
 
 def env_store_id() -> str:
-    """Código da loja — obrigatório via STORE_ID (variável de ambiente Windows)."""
+    """Código da loja — obrigatório via STORE_ID (variáveis de ambiente do Windows)."""
     return require_store_id()
 
 
@@ -459,18 +475,33 @@ class ColoredFormatter(logging.Formatter):
         
         return super().format(record)
 
+
+class FlushingStreamHandler(logging.StreamHandler):
+    """Garante flush imediato no console (Windows + Flask dev server)."""
+
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+
+def flush_logs() -> None:
+    for handler in logger.handlers:
+        if hasattr(handler, 'flush'):
+            handler.flush()
+
+
 def setup_logging():
     """Configura o sistema de logging profissional"""
-    # Criar logger principal
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
+    log = logging.getLogger(LOGGER_NAME)
+    log.setLevel(logging.INFO)
+    log.propagate = False
     
     # Remover handlers existentes
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
+    for handler in log.handlers[:]:
+        log.removeHandler(handler)
     
     # Criar console handler
-    console_handler = logging.StreamHandler()
+    console_handler = FlushingStreamHandler()
     console_handler.setLevel(logging.INFO)
     
     # Formatter profissional
@@ -479,7 +510,14 @@ def setup_logging():
         datefmt='%H:%M:%S'
     )
     console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    log.addHandler(console_handler)
+
+    for name in ('werkzeug', 'werkzeug.serving'):
+        wlog = logging.getLogger(name)
+        wlog.handlers.clear()
+        wlog.addHandler(console_handler)
+        wlog.setLevel(logging.INFO)
+        wlog.propagate = False
 
     try:
         plain = logging.Formatter(
@@ -498,11 +536,11 @@ def setup_logging():
         file_handler.setLevel(logging.INFO)
         file_handler.addFilter(_StripAnsiFilter())
         file_handler.setFormatter(plain)
-        logger.addHandler(file_handler)
+        log.addHandler(file_handler)
     except Exception:
         pass
     
-    return logger
+    return log
 
 # Configurar logging
 logger = setup_logging()
@@ -533,24 +571,64 @@ def log_section(title: str, level: str = "INFO"):
         logger.error(f"{Fore.RED}{title:^60}{Style.RESET_ALL}")
         logger.error(f"{Fore.RED}{separator}{Style.RESET_ALL}")
 
+def request_client_ip() -> str:
+    client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.environ.get('REMOTE_ADDR', 'unknown'))
+    if client_ip and ',' in client_ip:
+        client_ip = client_ip.split(',')[0].strip()
+    return client_ip or 'unknown'
+
+
+def should_skip_access_log(path: str, method: str) -> bool:
+    if path in SKIP_ACCESS_LOG_PATHS:
+        return True
+    parts = [p for p in path.strip('/').split('/') if p]
+    if len(parts) >= 2 and parts[1] in ('status', 'devices') and method == 'GET':
+        return True
+    return False
+
+
+def is_gateway_operation(path: str, method: str) -> bool:
+    if method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
+        return False
+    parts = [p for p in path.strip('/').split('/') if p]
+    return len(parts) >= 2 and parts[1] in GATEWAY_OPERATION_ACTIONS
+
+
 def log_request_info(request_id: str, method: str, url: str, client_ip: str):
-    """Log estruturado de informações da requisição"""
-    logger.info(f"{Fore.MAGENTA}┌─ REQUEST RECEIVED{Style.RESET_ALL}")
-    logger.info(f"{Fore.MAGENTA}│{Style.RESET_ALL} ID: {Fore.BLUE}{request_id}{Style.RESET_ALL}")
-    logger.info(f"{Fore.MAGENTA}│{Style.RESET_ALL} Method: {Fore.WHITE}{method}{Style.RESET_ALL}")
-    logger.info(f"{Fore.MAGENTA}│{Style.RESET_ALL} URL: {Fore.WHITE}{url}{Style.RESET_ALL}")
-    logger.info(f"{Fore.MAGENTA}│{Style.RESET_ALL} Client IP: {Fore.WHITE}{client_ip}{Style.RESET_ALL}")
-    logger.info(f"{Fore.MAGENTA}└─────────────────────────────────────────────────────────────{Style.RESET_ALL}")
+    """Log compacto de requisição HTTP (uma linha — visível no terminal)."""
+    path = request.path if request else url.split('://', 1)[-1].split('/', 1)[-1]
+    path = '/' + path if path and not path.startswith('/') else (path or '/')
+    if should_skip_access_log(path, method):
+        return
+    if is_gateway_operation(path, method):
+        logger.info(
+            f"{Fore.YELLOW}⚡ {method} {path}{Style.RESET_ALL} "
+            f"{Fore.CYAN}← {client_ip}{Style.RESET_ALL} "
+            f"{Fore.BLUE}[{request_id}]{Style.RESET_ALL}"
+        )
+    else:
+        logger.info(
+            f"{Fore.MAGENTA}→ {method} {path}{Style.RESET_ALL} "
+            f"{Fore.CYAN}← {client_ip}{Style.RESET_ALL} "
+            f"{Fore.BLUE}[{request_id}]{Style.RESET_ALL}"
+        )
+    flush_logs()
+
 
 def log_response_info(request_id: str, status_code: int, processing_time: float, response_size: int):
-    """Log estruturado de informações da resposta"""
+    """Log compacto de resposta HTTP (uma linha)."""
+    path = request.path if request else ''
+    method = request.method if request else ''
+    if path and should_skip_access_log(path, method):
+        return
     status_color = Fore.GREEN if 200 <= status_code < 300 else Fore.RED if status_code >= 400 else Fore.YELLOW
-    logger.info(f"{Fore.MAGENTA}┌─ RESPONSE SENT{Style.RESET_ALL}")
-    logger.info(f"{Fore.MAGENTA}│{Style.RESET_ALL} ID: {Fore.BLUE}{request_id}{Style.RESET_ALL}")
-    logger.info(f"{Fore.MAGENTA}│{Style.RESET_ALL} Status: {status_color}{status_code}{Style.RESET_ALL}")
-    logger.info(f"{Fore.MAGENTA}│{Style.RESET_ALL} Time: {Fore.WHITE}{processing_time:.3f}s{Style.RESET_ALL}")
-    logger.info(f"{Fore.MAGENTA}│{Style.RESET_ALL} Size: {Fore.WHITE}{response_size} bytes{Style.RESET_ALL}")
-    logger.info(f"{Fore.MAGENTA}└─────────────────────────────────────────────────────────────{Style.RESET_ALL}")
+    op_prefix = f"{Fore.YELLOW}⚡{Style.RESET_ALL} " if path and is_gateway_operation(path, method) else ''
+    logger.info(
+        f"{op_prefix}{status_color}← {status_code}{Style.RESET_ALL} "
+        f"{method} {path} ({processing_time:.3f}s, {response_size}B) "
+        f"{Fore.BLUE}[{request_id}]{Style.RESET_ALL}"
+    )
+    flush_logs()
 
 def log_process_info(process_name: str, action: str, pid: int = None, details: str = None):
     """Log estruturado de informações de processo"""
@@ -601,6 +679,15 @@ def initiate_tunnel_restart(reason: str) -> None:
     )
 
 
+def check_local_health(timeout: float = 3) -> bool:
+    """Confirma que o Flask local responde (origem do túnel)."""
+    try:
+        resp = requests.get(f'http://127.0.0.1:{SERVER_PORT}/health', timeout=timeout)
+        return resp.ok
+    except Exception:
+        return False
+
+
 def check_tunnel_health():
     """Verifica a saúde da conexão do túnel Cloudflare"""
     global tunnel_connection_failures, last_tunnel_check, last_subdomain_status_code
@@ -608,18 +695,35 @@ def check_tunnel_health():
     try:
         current_time = time.time()
         last_tunnel_check = current_time
+
+        if not check_local_health():
+            logger.warning(
+                f"{Fore.YELLOW}⚠️ Agente local não responde em "
+                f"http://127.0.0.1:{SERVER_PORT}/health{Style.RESET_ALL}"
+            )
+            tunnel_connection_failures += 1
+            return False
         
         # Verificar se o processo cloudflared está rodando
         if not tunnel_process or tunnel_process.poll() is not None:
             logger.warning(f"{Fore.YELLOW}⚠️ Tunnel process not running or terminated{Style.RESET_ALL}")
             tunnel_connection_failures += 1
             return False
+
+        tunnel_info = get_tunnel_status(os.environ.get('TUNNEL_NAME'))
+        if not tunnel_info.get('has_connections'):
+            logger.warning(
+                f"{Fore.YELLOW}⚠️ cloudflared sem conexão ativa com Cloudflare "
+                f"(observadas: {tunnel_info.get('connections_observed', 0)}) — "
+                f"veja {cloudflared_log_path()}{Style.RESET_ALL}"
+            )
+            tunnel_connection_failures += 1
+            return False
         
-        # Verificação simplificada: apenas testar conectividade HTTP
         try:
             store_id = env_store_id()
             subdomain_info = check_external_subdomain(store_id)
-            
+
             if not subdomain_info.get('ok', False):
                 status_code = subdomain_info.get('status_code')
                 last_subdomain_status_code = status_code
@@ -634,10 +738,12 @@ def check_tunnel_health():
                 tunnel_connection_failures += 1
                 return False
             
-            # Se chegou até aqui, tudo está funcionando
             last_subdomain_status_code = None
-            logger.info(f"{Fore.GREEN}✅ Tunnel is healthy: subdomain responding OK{Style.RESET_ALL}")
-            tunnel_connection_failures = 0  # Reset contador de falhas
+            logger.info(
+                f"{Fore.GREEN}✅ Tunnel is healthy: local OK, cloudflared conectado, "
+                f"subdomínio OK{Style.RESET_ALL}"
+            )
+            tunnel_connection_failures = 0
             return True
             
         except Exception as e:
@@ -894,6 +1000,37 @@ def send_dosadora_command(dosadora_ip: str, endpoint: str, timeout: int | None =
         return {'success': False, 'error': str(e), 'url': device_http_url(address, endpoint)}
 
 
+def send_ac_command(device_path: str, temperature: str = '', timeout: int = 10) -> dict:
+    """Envia comando HTTP ao ar-condicionado (ESP8266 na rede local)."""
+    path = device_path if device_path.startswith('/') else f'/{device_path}'
+    url = f'http://{AC_IP}{path}'
+    temp_label = 'Desligar' if str(temperature).lower() == 'off' else f'{temperature}°C'
+    try:
+        logger.info(
+            f"   {Fore.CYAN}❄️ Ar-condicionado {AC_IP}{path} ({temp_label}){Style.RESET_ALL}"
+        )
+        response = requests.get(url, timeout=timeout)
+        status_color = Fore.GREEN if response.status_code == 200 else Fore.RED
+        logger.info(
+            f"   {status_color}✅ AC command HTTP {response.status_code}{Style.RESET_ALL}"
+        )
+        return {
+            'success': response.status_code == 200,
+            'status_code': response.status_code,
+            'response': response.text,
+            'url': url,
+        }
+    except requests.exceptions.Timeout:
+        logger.error(f"   {Fore.RED}⏰ Timeout AC {AC_IP}{path}{Style.RESET_ALL}")
+        return {'success': False, 'error': 'Timeout', 'url': url}
+    except requests.exceptions.ConnectionError:
+        logger.error(f"   {Fore.RED}🔌 Connection error AC {AC_IP}{path}{Style.RESET_ALL}")
+        return {'success': False, 'error': 'Connection Error', 'url': url}
+    except Exception as e:
+        logger.error(f"   {Fore.RED}💥 Error AC {AC_IP}{path}: {str(e)}{Style.RESET_ALL}")
+        return {'success': False, 'error': str(e), 'url': url}
+
+
 def resolve_dosadora_endpoint(softener_type: str, dosage_type: str = '') -> str | None:
     """Retorna o único endpoint HTTP a enviar à dosadora."""
     softener = softener_type.upper()
@@ -999,25 +1136,24 @@ def trigger_dosadora_relay(dosadora_ip: str, product: str) -> dict:
 # Middleware para logar todas as requisições
 @app.before_request
 def log_request_middleware():
-    """Log detalhado de todas as requisições recebidas"""
+    """Log compacto de requisições recebidas."""
+    global last_inbound_request_at, last_inbound_client_ip
+
     request_id = f"req_{int(time.time() * 1000)}"
-    client_ip = request.environ.get('HTTP_X_FORWARDED_FOR', request.environ.get('REMOTE_ADDR', 'unknown'))
-    
-    # Armazenar request_id para uso posterior
+    client_ip = request_client_ip()
     request.request_id = request_id
-    
-    # Log estruturado da requisição
+    request._request_start = time.time()
+    last_inbound_request_at = request._request_start
+    last_inbound_client_ip = client_ip
+
     log_request_info(request_id, request.method, request.url, client_ip)
-    
-    # Log detalhado apenas para debug (opcional)
-    if request.args:
-        logger.info(f"   Query Params: {Fore.WHITE}{dict(request.args)}{Style.RESET_ALL}")
-    
-    if request.form:
-        logger.info(f"   Form Data: {Fore.WHITE}{dict(request.form)}{Style.RESET_ALL}")
-    
-    if request.get_json(silent=True):
-        logger.info(f"   JSON Data: {Fore.WHITE}{request.get_json(silent=True)}{Style.RESET_ALL}")
+
+    if request.args and not should_skip_access_log(request.path, request.method):
+        logger.info(f"   query: {Fore.WHITE}{dict(request.args)}{Style.RESET_ALL}")
+
+    body = request.get_json(silent=True)
+    if body and is_gateway_operation(request.path, request.method):
+        logger.info(f"   body: {Fore.WHITE}{body}{Style.RESET_ALL}")
 
 @app.before_request
 def validate_store_agent_identity():
@@ -1059,17 +1195,26 @@ def verify_api_token():
 
 @app.after_request
 def log_response_middleware(response):
-    """Log da resposta enviada"""
+    """Log compacto da resposta enviada."""
     request_id = getattr(request, 'request_id', 'unknown')
-    processing_time = getattr(request, 'processing_time', 0)
-    
-    # Log estruturado da resposta
-    log_response_info(request_id, response.status_code, processing_time, response.content_length or 0)
-    
+    start = getattr(request, '_request_start', None)
+    processing_time = time.time() - start if start else 0
+    size = response.content_length
+    if size is None:
+        try:
+            size = len(response.get_data())
+        except Exception:
+            size = 0
+
+    if request.path in SKIP_ACCESS_LOG_PATHS:
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+
+    log_response_info(request_id, response.status_code, processing_time, size or 0)
     return response
 
 # Variável global para armazenar o processo do tunnel
 tunnel_process = None
+_tunnel_log_file = None
 _cloudflared_path: str | None = None
 
 # Controle de instância única
@@ -1278,7 +1423,7 @@ def parse_machines_api_payload(payload: dict, store_code: str) -> dict:
 
 
 def fetch_store_machines_from_api(store_code: str) -> dict | None:
-    """GET /api/v1/machines?store_code=PB05"""
+    """GET /api/v1/machines?store_code={STORE_ID}"""
     if not MACHINES_API_URL:
         return None
     params = {'store_code': store_code.upper()}
@@ -1691,21 +1836,19 @@ def get_cached_network_status() -> dict | None:
 
 
 def is_device_visible_in_frontend(device_type: str, machine_id: str, network: dict | None = None) -> bool:
-    """True = mostrar card no frontend. IDs em FRONTEND_HIDE_WHEN_OFFLINE somem quando ping falha."""
+    """True = mostrar card. Lavadora 321, secadora 210 e dosadora 321 só aparecem se online no ping."""
     mid = normalize_machine_id(machine_id)
     dtype = canonical_device_type(device_type) or str(device_type or '').strip().lower()
     if (dtype, mid) not in FRONTEND_HIDE_WHEN_OFFLINE:
         return True
     net = network if network is not None else get_cached_network_status()
     if not net:
-        return True
+        return False
     group_key = {'washer': 'washers', 'dryer': 'dryers', 'doser': 'dosers'}.get(dtype)
     if not group_key:
-        return True
+        return False
     items = net.get(group_key) or {}
-    if mid not in items:
-        return True
-    return bool(items[mid])
+    return bool(items.get(mid))
 
 
 def filter_machines_for_frontend(machines: list[dict], network: dict | None = None) -> list[dict]:
@@ -1830,11 +1973,22 @@ def build_panel_heartbeat_payload() -> dict:
     }
 
 
+def _panel_heartbeat_token() -> str:
+    """Token do POST /api/heartbeat: registro Windows → .env (gateway local continua só Windows)."""
+    if os.name == 'nt':
+        reg = _read_windows_registry_env('API_TOKEN')
+        if reg:
+            return reg
+        return _ENV_FILE_API_TOKEN
+    return (os.environ.get('API_TOKEN') or _ENV_FILE_API_TOKEN or '').strip()
+
+
 def send_panel_heartbeat_once() -> bool:
     global _cached_working_panel_url
     headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
-    if API_TOKEN:
-        headers['X-Token'] = API_TOKEN
+    panel_token = _panel_heartbeat_token()
+    if panel_token:
+        headers['X-Token'] = panel_token
     payload = build_panel_heartbeat_payload()
     errors: list[str] = []
 
@@ -1847,7 +2001,10 @@ def send_panel_heartbeat_once() -> bool:
                 timeout=PANEL_HEARTBEAT_TRY_TIMEOUT,
             )
             if response.status_code >= 400:
-                errors.append(f'{url}: HTTP {response.status_code}')
+                detail = f'HTTP {response.status_code}'
+                if response.status_code == 401:
+                    detail += ' — X-Token diferente do painel (API_TOKEN no .env da VPS)'
+                errors.append(f'{url}: {detail}')
                 continue
             if _cached_working_panel_url != url:
                 logger.info(f"{Fore.GREEN}💓 Heartbeat painel OK → {url}{Style.RESET_ALL}")
@@ -2709,16 +2866,27 @@ def gateway_control_ac(store: str, temperature: str):
 
     store_key = normalize_store_id(store)
     device_path = AC_DEVICE_PATHS[temp]
-    url = f'http://{AC_IP}{device_path}'
-    try:
-        resp = requests.get(url, timeout=10)
-        if resp.status_code != 200:
-            return err_nao_respondeu('O ar-condicionado')
-    except Exception:
+    request_id = getattr(request, 'request_id', f"ac_{int(time.time() * 1000)}")
+    logger.info(
+        f"[{request_id}] {Fore.CYAN}❄️ AC request store={store_key.upper()} temp={temp}{Style.RESET_ALL}"
+    )
+    result = send_ac_command(device_path, temp)
+    if not result.get('success'):
+        logger.warning(
+            f"[{request_id}] {Fore.YELLOW}⚠️ AC failed: "
+            f"{result.get('error') or result.get('status_code')}{Style.RESET_ALL}"
+        )
         return err_nao_respondeu('O ar-condicionado')
 
     description = 'AC turned off' if temp == 'off' else f'AC set to {temp}°C'
-    return gateway_ok(store_key, f'{store_key}/ac', temp, resp.status_code, description, {'device_path': device_path})
+    return gateway_ok(
+        store_key,
+        f'{store_key}/ac',
+        temp,
+        result.get('status_code'),
+        description,
+        {'device_path': device_path, 'url': result.get('url')},
+    )
 
 
 def gateway_doser_type(store: str, machine: str, cmd_type: str):
@@ -3138,15 +3306,8 @@ def api_health():
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """
-    Endpoint de health check
-    """
-    request_id = f"health_{int(time.time() * 1000)}"
-    logger.info(f"[{request_id}] Health check requested")
-    
+    """Endpoint de health check"""
     response_data = {"status": "ok", "service": "proxy-server"}
-    logger.info(f"[{request_id}] Health check response: {response_data}")
-    
     return jsonify(response_data), 200
 
 
@@ -3189,6 +3350,7 @@ def agent_api_config():
         'dryer_minutes': list(DRYER_TIMER_RELEASES.keys()),
         'ac_temperatures': list(AC_TEMPERATURES),
         'doser_types': list(DOSER_TYPE_PATHS.keys()),
+        'hide_when_offline': [{'type': t, 'id': i} for t, i in sorted(FRONTEND_HIDE_WHEN_OFFLINE)],
         'last_network_check': cached,
     }), 200
 
@@ -3482,11 +3644,42 @@ def check_external_subdomain(store_id: str) -> dict:
     """Testa o subdomínio via Cloudflare fazendo GET em /health."""
     try:
         host = store_hostname(store_id)
-        url = f"https://{host}/health"
-        resp = requests.get(url, timeout=6)
+        url = f"https://{host}/health?_={int(time.time() * 1000)}"
+        resp = requests.get(url, timeout=6, headers={'Cache-Control': 'no-cache'})
         return {'host': host, 'url': url, 'status_code': resp.status_code, 'ok': resp.ok}
     except Exception as e:
         return {'host': store_hostname(store_id), 'url': None, 'status_code': None, 'ok': False, 'error': str(e)}
+
+
+def verify_tunnel_reaches_local(store_id: str | None = None, timeout: float = 8) -> dict:
+    """Confirma que o subdomínio roteia tráfego para este processo Flask (não só cache/ outro conector)."""
+    global last_inbound_request_at
+    sid = store_id or env_store_id()
+    before = last_inbound_request_at or 0.0
+    host = store_hostname(sid)
+    probe = int(time.time() * 1000)
+    url = f'https://{host}/health?_probe={probe}'
+    result: dict = {
+        'host': host,
+        'url': url,
+        'external_ok': False,
+        'local_hit': False,
+        'ok': False,
+    }
+    try:
+        resp = requests.get(url, timeout=timeout, headers={'Cache-Control': 'no-cache'})
+        result['external_ok'] = resp.ok
+        result['status_code'] = resp.status_code
+        deadline = time.time() + 2.5
+        while time.time() < deadline:
+            if last_inbound_request_at and last_inbound_request_at > before:
+                result['local_hit'] = True
+                break
+            time.sleep(0.05)
+        result['ok'] = bool(result['external_ok'] and result['local_hit'])
+    except Exception as e:
+        result['error'] = str(e)
+    return result
 
 
 def read_config_metadata(config_path: str) -> dict:
@@ -3647,15 +3840,23 @@ def start_tunnel():
             cmd.append(target_name)
             logger.info(f"{Fore.CYAN}🚀 Using TARGET={target_name} to start tunnel{Style.RESET_ALL}")
 
-        # Iniciar o tunnel em modo background
+        # PIPE sem leitura trava o cloudflared no Windows — gravar em arquivo
+        global _tunnel_log_file
+        log_path = cloudflared_log_path()
+        _tunnel_log_file = open(log_path, 'a', encoding='utf-8', buffering=1)
+        _tunnel_log_file.write(f"\n--- tunnel start {datetime.now().isoformat()} pid pending ---\n")
+        _tunnel_log_file.flush()
         tunnel_process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=_tunnel_log_file,
+            stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
-        
+        _tunnel_log_file.write(f"--- cloudflared pid {tunnel_process.pid} ---\n")
+        _tunnel_log_file.flush()
+
         log_process_info("Cloudflare Tunnel", "Started", tunnel_process.pid)
+        logger.info(f"{Fore.CYAN}📄 cloudflared log: {Fore.WHITE}{log_path}{Style.RESET_ALL}")
         
     except Exception as e:
         logger.error(f"{Fore.RED}❌ Error starting tunnel: {str(e)}{Style.RESET_ALL}")
@@ -3663,11 +3864,10 @@ def start_tunnel():
 
 def build_debug_snapshot() -> dict:
     store_id = env_store_id()
-    store_source = 'env'
+    store_source = 'windows_registry' if os.name == 'nt' else 'environment'
     config_path = resolve_resource('config.yml')
     cloudflared_ver = get_cloudflared_version()
-    # preferir TUNNEL_NAME para o diagnóstico do túnel
-    tunnel_name_env = os.environ.get('TUNNEL_NAME')
+    tunnel_name_env = _windows_env('TUNNEL_NAME') or None
     tunnel = get_tunnel_status(tunnel_name_env)
     sub = check_external_subdomain(store_id)
     cfg_meta = read_config_metadata(config_path)
@@ -4086,6 +4286,11 @@ def signal_handler(signum, frame):
 def run_server() -> None:
     # Registrar função para parar o tunnel ao encerrar
     atexit.register(stop_tunnel)
+
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(line_buffering=True)
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(line_buffering=True)
     
     # Registrar handlers para sinais de interrupção
     signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
@@ -4118,6 +4323,10 @@ def run_server() -> None:
         env_sync = ensure_env_alignment()
         logger.info(f"{Fore.CYAN}📋 Environment: {Fore.WHITE}{env_sync.get('target')}{Style.RESET_ALL} (source: {env_sync.get('source')})")
         logger.info(f"{Fore.CYAN}🏪 STORE_ID (Windows): {Fore.WHITE}{store_id}{Style.RESET_ALL}")
+        if os.name == 'nt':
+            reg_store = _read_windows_registry_env('STORE_ID')
+            if reg_store:
+                logger.info(f"{Fore.CYAN}📌 STORE_ID no registro Windows: {Fore.WHITE}{reg_store.upper()}{Style.RESET_ALL}")
         env_file = load_local_env()
         if env_file:
             logger.info(f"{Fore.CYAN}📄 .env carregado: {Fore.WHITE}{env_file}{Style.RESET_ALL}")

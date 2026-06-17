@@ -113,7 +113,7 @@ def enforce_panel_auth():
         return None
     if path == '/api/heartbeat' and request.method == 'POST':
         return None
-    if path in ('/api/heartbeats', '/api/heartbeats/stream') and request.method == 'GET':
+    if path in ('/api/heartbeats', '/api/heartbeats/stream', '/api/catalog') and request.method == 'GET':
         return None
     if path in PUBLIC_API_PATHS:
         return None
@@ -254,6 +254,44 @@ def api_auth_logout():
         request,
     )
     return jsonify({'ok': True}), 200
+
+
+def catalog_stores_from_heartbeats() -> list[dict]:
+    with heartbeats_lock:
+        items = list(heartbeats.items())
+    stores = []
+    for store_id, entry in items:
+        payload = entry.get('payload') or {}
+        name = str(payload.get('store_name') or payload.get('name') or store_id.upper()).strip()
+        stores.append({'id': store_id, 'name': name or store_id.upper()})
+    stores.sort(key=lambda s: s['id'])
+    return stores
+
+
+def build_panel_catalog_payload() -> dict:
+    config = load_catalog()
+    payload = {k: v for k, v in config.items() if k != 'stores'}
+    payload['stores'] = catalog_stores_from_heartbeats()
+    return payload
+
+
+def catalog_json_response():
+    resp = jsonify(build_panel_catalog_payload())
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
+
+
+@app.route('/stores.json')
+def dynamic_stores_json():
+    """Catálogo dinâmico — lojas descobertas via heartbeat (substitui lista manual)."""
+    return catalog_json_response()
+
+
+@app.route('/api/catalog', methods=['GET'])
+def api_catalog():
+    """Config do painel + lojas descobertas automaticamente via heartbeat dos agentes."""
+    return catalog_json_response()
 
 
 @app.route('/api/heartbeat', methods=['POST', 'OPTIONS'])
@@ -515,8 +553,9 @@ def static_or_api(path: str):
     if path.startswith('api/'):
         return jsonify({'detail': 'Not found'}), 404
     target = FRONTEND / path
-    if target.is_file():
-        return send_from_directory(FRONTEND, path)
+    if target.is_file() and path != 'stores.json':
+        resp = send_from_directory(FRONTEND, path)
+        return resp
     if path.endswith('.html'):
         return send_from_directory(FRONTEND, path)
     return send_from_directory(FRONTEND, 'index.html')

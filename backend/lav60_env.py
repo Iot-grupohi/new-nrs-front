@@ -60,7 +60,7 @@ def env_file_candidates() -> list[Path]:
 
 
 def load_local_env() -> Path | None:
-    """Carrega o primeiro .env encontrado (não sobrescreve variáveis já definidas)."""
+    """Carrega .env (não sobrescreve variáveis já definidas no processo)."""
     global _LOADED_ENV_FILE, _ENV_LOAD_DONE
     if _ENV_LOAD_DONE:
         return _LOADED_ENV_FILE

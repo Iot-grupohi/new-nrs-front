@@ -4,16 +4,5 @@
   "heartbeat_interval_seconds": 15,
   "heartbeat_timeout_seconds": 60,
   "offline_display_delay_seconds": 120,
-  "refresh_concurrency": 20,
-  "stores": [
-    {
-      "id": "pb100",
-      "name": "PB100"
-    },
-    {
-      "id": "pb05",
-      "name": "PB05"
-    }
-  ]
+  "refresh_concurrency": 20
 }
-
