@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LAV60 — Gateway (redundância)</title>
-  <link rel="stylesheet" href="app.css?v=19">
+  <link rel="stylesheet" href="app.css?v=20">
 </head>
 <body class="page-dashboard page-store page-gateway auth-pending">
   <div class="app-shell">
@@ -67,7 +67,32 @@
         </div>
       </section>
 
-      <section class="devices-panel devices-panel--blocked" id="devicesPanel">
+      <section class="gateway-overview card" id="gatewayOverview">
+        <header class="gateway-overview__head">
+          <div>
+            <h2 class="gateway-overview__title">Gateways por loja</h2>
+            <p class="gateway-overview__meta" id="gatewayOverviewMeta">Verificação ESP8266 via POST led/on — resultados em cache por 5 min</p>
+          </div>
+          <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshGateways">Atualizar tudo</button>
+        </header>
+        <div class="stats-grid stats-grid--gateway" id="gatewayKpis">
+          <article class="stat-card stat-card--success">
+            <span class="stat-card__label">Gateway online</span>
+            <strong class="stat-card__value" id="kpiGatewayOnline">—</strong>
+          </article>
+          <article class="stat-card stat-card--danger">
+            <span class="stat-card__label">Gateway offline</span>
+            <strong class="stat-card__value" id="kpiGatewayOffline">—</strong>
+          </article>
+          <article class="stat-card stat-card--warn">
+            <span class="stat-card__label">Aguardando</span>
+            <strong class="stat-card__value" id="kpiGatewayPending">—</strong>
+          </article>
+        </div>
+        <div class="gateway-stores-grid" id="gatewayStoresGrid" role="list"></div>
+      </section>
+
+      <section class="devices-panel devices-panel--blocked hidden" id="devicesPanel">
         <div class="devices-panel__section">
           <header class="devices-panel__head">
             <h2 class="devices-panel__title">Lavadoras</h2>
@@ -121,6 +146,6 @@
 
   <script src="api.js"></script>
   <script src="auth.js"></script>
-  <script src="gateway.js?v=21"></script>
+  <script src="gateway.js?v=22"></script>
 </body>
 </html>

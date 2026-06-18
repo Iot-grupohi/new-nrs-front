@@ -29,6 +29,14 @@
   let probeGeneration = 0;
   let probeQueueRunner = null;
 
+  const GATEWAY_CACHE_KEY = 'lav60:gateway:v1';
+  const GATEWAY_CACHE_VERSION = 1;
+  const GATEWAY_TTL_MS = 5 * 60 * 1000;
+  const DEVICES_TTL_MS = 10 * 60 * 1000;
+
+  const storeOverviewStatus = Object.create(null);
+  let overviewScanRunning = false;
+
   function gatewayDebug(label, payload) {
     const ts = new Date().toISOString().slice(11, 23);
     if (payload !== undefined) console.log(`[LAV60 Gateway ${ts}] ${label}`, payload);
@@ -37,6 +45,278 @@
 
   function normalizeStoreId(value) {
     return String(value || '').trim().toLowerCase();
+  }
+
+  function isCacheFresh(checkedAt, ttlMs) {
+    return Number.isFinite(checkedAt) && Date.now() - checkedAt < ttlMs;
+  }
+
+  function formatCacheAge(checkedAt) {
+    if (!Number.isFinite(checkedAt)) return '';
+    const sec = Math.floor((Date.now() - checkedAt) / 1000);
+    if (sec < 45) return 'agora';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min === 1 ? 'há 1 min' : `há ${min} min`;
+    const hours = Math.floor(min / 60);
+    return hours === 1 ? 'há 1 h' : `há ${hours} h`;
+  }
+
+  function loadGatewayCacheRoot() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(GATEWAY_CACHE_KEY) || '{}');
+      if (raw.version !== GATEWAY_CACHE_VERSION) {
+        return { version: GATEWAY_CACHE_VERSION, stores: {} };
+      }
+      return { version: GATEWAY_CACHE_VERSION, stores: raw.stores || {} };
+    } catch {
+      return { version: GATEWAY_CACHE_VERSION, stores: {} };
+    }
+  }
+
+  function saveGatewayCacheRoot(root) {
+    try {
+      localStorage.setItem(GATEWAY_CACHE_KEY, JSON.stringify(root));
+    } catch {
+      /* quota ou modo privado */
+    }
+  }
+
+  function getStoreGatewayEntry(storeId) {
+    const sid = normalizeStoreId(storeId);
+    return loadGatewayCacheRoot().stores[sid]?.gateway || null;
+  }
+
+  function setStoreGatewayEntry(storeId, entry) {
+    const sid = normalizeStoreId(storeId);
+    if (!sid) return;
+    const root = loadGatewayCacheRoot();
+    if (!root.stores[sid]) root.stores[sid] = {};
+    const checkedAt = Date.now();
+    root.stores[sid].gateway = { online: Boolean(entry.online), error: entry.error || null, checkedAt };
+    saveGatewayCacheRoot(root);
+    storeOverviewStatus[sid] = { ...root.stores[sid].gateway, checking: false };
+  }
+
+  function getStoreDevicesEntry(storeId) {
+    const sid = normalizeStoreId(storeId);
+    return loadGatewayCacheRoot().stores[sid]?.devices || null;
+  }
+
+  function setStoreDevicesEntry(storeId, status) {
+    const sid = normalizeStoreId(storeId);
+    if (!sid || !status) return;
+    const root = loadGatewayCacheRoot();
+    if (!root.stores[sid]) root.stores[sid] = {};
+    root.stores[sid].devices = {
+      pingStatus: {
+        washers: { ...(status.washers || {}) },
+        dryers: { ...(status.dryers || {}) },
+        dosers: { ...(status.dosers || {}) },
+        ac: status.ac ?? null,
+      },
+      checkedAt: Date.now(),
+    };
+    saveGatewayCacheRoot(root);
+  }
+
+  function clonePingStatus(source) {
+    if (!source) return null;
+    return {
+      washers: { ...(source.washers || {}) },
+      dryers: { ...(source.dryers || {}) },
+      dosers: { ...(source.dosers || {}) },
+      ac: source.ac ?? null,
+    };
+  }
+
+  function hydrateOverviewFromCache() {
+    const root = loadGatewayCacheRoot();
+    Object.entries(root.stores || {}).forEach(([sid, block]) => {
+      if (block?.gateway) {
+        storeOverviewStatus[sid] = { ...block.gateway, checking: false };
+      }
+    });
+  }
+
+  function overviewStatusForStore(storeId) {
+    const sid = normalizeStoreId(storeId);
+    return storeOverviewStatus[sid] || getStoreGatewayEntry(sid) || null;
+  }
+
+  function overviewPillHtml(status) {
+    if (!status || status.checking) {
+      return '<span class="pill pill--warn">Verificando…</span>';
+    }
+    if (status.online === true) return '<span class="pill pill--on">Online</span>';
+    if (status.online === false) return '<span class="pill pill--off">Offline</span>';
+    return '<span class="pill pill--warn">Não verificado</span>';
+  }
+
+  function updateGatewayOverviewKpis() {
+    const stores = catalog?.stores || [];
+    let online = 0;
+    let offline = 0;
+    let pending = 0;
+    stores.forEach((meta) => {
+      const status = overviewStatusForStore(meta.id);
+      if (!status || status.checking || status.online == null) pending += 1;
+      else if (status.online) online += 1;
+      else offline += 1;
+    });
+    const onlineEl = $('kpiGatewayOnline');
+    const offlineEl = $('kpiGatewayOffline');
+    const pendingEl = $('kpiGatewayPending');
+    if (onlineEl) onlineEl.textContent = String(online);
+    if (offlineEl) offlineEl.textContent = String(offline);
+    if (pendingEl) pendingEl.textContent = String(pending);
+  }
+
+  function updateGatewayOverviewMeta(scanning = false) {
+    const el = $('gatewayOverviewMeta');
+    if (!el) return;
+    if (scanning) {
+      el.textContent = 'Verificando gateways (POST led/on)…';
+      return;
+    }
+    const ttlMin = Math.round(GATEWAY_TTL_MS / 60000);
+    el.textContent = `ESP8266 verificado via POST led/on — cache local por ${ttlMin} min (equipamentos por ${Math.round(DEVICES_TTL_MS / 60000)} min)`;
+  }
+
+  function renderGatewayStoreCard(meta) {
+    const grid = $('gatewayStoresGrid');
+    if (!grid || !meta) return;
+    const sid = normalizeStoreId(meta.id);
+    const status = overviewStatusForStore(sid);
+    let card = grid.querySelector(`[data-gateway-store="${sid}"]`);
+    if (!card) {
+      card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'gateway-store-card';
+      card.dataset.gatewayStore = sid;
+      card.setAttribute('role', 'listitem');
+      card.addEventListener('click', () => {
+        void applyStore(sid);
+        $('devicesPanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+      grid.appendChild(card);
+    }
+
+    card.classList.remove(
+      'gateway-store-card--online',
+      'gateway-store-card--offline',
+      'gateway-store-card--checking',
+      'gateway-store-card--active'
+    );
+    if (status?.checking) card.classList.add('gateway-store-card--checking');
+    else if (status?.online === true) card.classList.add('gateway-store-card--online');
+    else if (status?.online === false) card.classList.add('gateway-store-card--offline');
+    if (sid === currentStore) card.classList.add('gateway-store-card--active');
+
+    const code = sid.toUpperCase();
+    const name = meta.name ? escapeHtml(meta.name) : '';
+    const age = status?.checkedAt ? formatCacheAge(status.checkedAt) : '';
+    card.innerHTML = `
+      <span class="gateway-store-card__code">${escapeHtml(code)}</span>
+      ${name ? `<span class="gateway-store-card__name">${name}</span>` : ''}
+      <div class="gateway-store-card__foot">
+        ${overviewPillHtml(status)}
+        ${age ? `<span class="gateway-store-card__age">${escapeHtml(age)}</span>` : ''}
+      </div>
+    `;
+  }
+
+  function renderGatewayOverview() {
+    const grid = $('gatewayStoresGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    (catalog?.stores || []).forEach((meta) => renderGatewayStoreCard(meta));
+    updateGatewayOverviewKpis();
+    updateGatewayOverviewMeta(overviewScanRunning);
+  }
+
+  function refreshGatewayOverviewCards() {
+    (catalog?.stores || []).forEach((meta) => renderGatewayStoreCard(meta));
+    updateGatewayOverviewKpis();
+  }
+
+  async function postStoreLedOn(storeId) {
+    const sid = normalizeStoreId(storeId);
+    const res = await panelFetch(`/api/gateway/${encodeURIComponent(sid)}/led/on`, {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  function revertStoreLedTest(storeId) {
+    const sid = normalizeStoreId(storeId);
+    panelFetch(`/api/gateway/${encodeURIComponent(sid)}/led/off`, {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+    }).catch(() => {});
+  }
+
+  async function probeOverviewStoreGateway(storeId) {
+    const sid = normalizeStoreId(storeId);
+    storeOverviewStatus[sid] = { ...(storeOverviewStatus[sid] || {}), checking: true, online: null };
+    const meta = (catalog?.stores || []).find((s) => normalizeStoreId(s.id) === sid);
+    renderGatewayStoreCard(meta);
+
+    try {
+      const { ok, status, data } = await postStoreLedOn(sid);
+      if (ok) {
+        setStoreGatewayEntry(sid, { online: true, error: null });
+        revertStoreLedTest(sid);
+        gatewayDebug('Overview ESP online', { store: sid });
+      } else {
+        const error = formatStoreGatewayError(
+          sid,
+          data.detail || data.error || data.message || `HTTP ${status}`
+        );
+        setStoreGatewayEntry(sid, { online: false, error });
+        gatewayDebug('Overview ESP offline', { store: sid, status });
+      }
+    } catch (err) {
+      setStoreGatewayEntry(sid, { online: false, error: formatStoreGatewayError(sid, err.message) });
+    }
+
+    renderGatewayStoreCard(meta);
+    updateGatewayOverviewKpis();
+  }
+
+  async function scanAllStoreGateways({ force = false, skipStores = null } = {}) {
+    if (overviewScanRunning || !catalog) return;
+    overviewScanRunning = true;
+    updateGatewayOverviewMeta(true);
+    $('btnRefreshGateways')?.setAttribute('disabled', 'disabled');
+
+    const skip = new Set(
+      (Array.isArray(skipStores) ? skipStores : skipStores ? [skipStores] : [])
+        .map(normalizeStoreId)
+        .filter(Boolean)
+    );
+
+    const stores = catalog.stores || [];
+    try {
+      for (let i = 0; i < stores.length; i += 1) {
+        const sid = normalizeStoreId(stores[i].id);
+        if (!sid || skip.has(sid)) continue;
+        const cached = getStoreGatewayEntry(sid);
+        if (!force && cached && isCacheFresh(cached.checkedAt, GATEWAY_TTL_MS)) {
+          storeOverviewStatus[sid] = { ...cached, checking: false };
+          renderGatewayStoreCard(stores[i]);
+          continue;
+        }
+        await probeOverviewStoreGateway(sid);
+        if (i < stores.length - 1) await sleep(400);
+      }
+    } finally {
+      overviewScanRunning = false;
+      $('btnRefreshGateways')?.removeAttribute('disabled');
+      updateGatewayOverviewMeta(false);
+      updateGatewayOverviewKpis();
+    }
   }
 
   function escapeHtml(text) {
@@ -105,7 +385,9 @@
       el.textContent = 'Gateway loja: verificando…';
       el.classList.add('gateway-meta--warn');
     } else if (state === 'online') {
-      el.textContent = `Gateway loja: online (${currentStore.toUpperCase()})`;
+      const cached = getStoreGatewayEntry(currentStore);
+      const age = cached?.checkedAt ? ` · ${formatCacheAge(cached.checkedAt)}` : '';
+      el.textContent = `Gateway loja: online (${currentStore.toUpperCase()}${age})`;
       el.classList.add('gateway-meta--ok');
     } else if (state === 'offline') {
       el.textContent = detail || `Gateway loja: offline (${currentStore.toUpperCase()})`;
@@ -127,29 +409,49 @@
     return `Gateway da loja ${code} não está online. ${friendlyUserMessage(msg)}`;
   }
 
-  async function verifyStoreGateway(storeId) {
+  async function verifyStoreGateway(storeId, { force = false } = {}) {
     const gen = ++storeCheckGeneration;
     storeGatewayReady = false;
     storeGatewayError = null;
     hideStoreGatewayAlert();
+
+    const cached = getStoreGatewayEntry(storeId);
+    if (!force && cached && isCacheFresh(cached.checkedAt, GATEWAY_TTL_MS)) {
+      if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
+      if (cached.online) {
+        storeGatewayReady = true;
+        storeGatewayError = null;
+        updateStoreGatewayMeta('online');
+        hideStoreGatewayAlert();
+        setDevicesPanelBlocked(false);
+        gatewayDebug('ESP8266 em cache (online)', { store: storeId, age: formatCacheAge(cached.checkedAt) });
+        startBackgroundDeviceProbes({ force });
+        refreshGatewayOverviewCards();
+        renderDevices();
+        return true;
+      }
+      storeGatewayError = cached.error || formatStoreGatewayError(storeId, '');
+      showStoreGatewayAlert(storeGatewayError);
+      updateStoreGatewayMeta('offline');
+      setDevicesPanelBlocked(true);
+      refreshGatewayOverviewCards();
+      renderDevices();
+      return false;
+    }
+
     showStoreGatewayChecking(true);
     updateStoreGatewayMeta('checking');
     setDevicesPanelBlocked(true);
     renderDevices();
 
-    const ledOnUrl = `/api/gateway/${encodeURIComponent(storeId)}/led/on`;
-
     try {
       gatewayDebug('Verificando ESP8266', { store: storeId, method: 'POST', path: `${storeId}/led/on` });
 
-      const res = await panelFetch(ledOnUrl, {
-        method: 'POST',
-        headers: { Accept: 'application/json' },
-      });
-      const data = await res.json().catch(() => ({}));
+      const { ok, status, data } = await postStoreLedOn(storeId);
       if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
 
-      if (res.ok) {
+      if (ok) {
+        setStoreGatewayEntry(storeId, { online: true, error: null });
         storeGatewayReady = true;
         storeGatewayError = null;
         updateStoreGatewayMeta('online');
@@ -157,30 +459,29 @@
         setDevicesPanelBlocked(false);
         gatewayDebug('ESP8266 respondeu (led/on)', { store: storeId, data });
 
-        panelFetch(`/api/gateway/${encodeURIComponent(storeId)}/led/off`, {
-          method: 'POST',
-          headers: { Accept: 'application/json' },
-        }).catch(() => {});
-
-        startBackgroundDeviceProbes();
+        revertStoreLedTest(storeId);
+        startBackgroundDeviceProbes({ force });
+        refreshGatewayOverviewCards();
         return true;
       }
 
-      storeGatewayError = formatStoreGatewayError(
-        storeId,
-        data.detail || data.error || data.message || `HTTP ${res.status}`
-      );
+      const detail = data.detail || data.error || data.message || `HTTP ${status}`;
+      storeGatewayError = formatStoreGatewayError(storeId, detail);
+      setStoreGatewayEntry(storeId, { online: false, error: storeGatewayError });
       showStoreGatewayAlert(storeGatewayError);
       updateStoreGatewayMeta('offline');
       setDevicesPanelBlocked(true);
-      gatewayDebug('ESP8266 offline (led/on)', { store: storeId, status: res.status, data });
+      gatewayDebug('ESP8266 offline (led/on)', { store: storeId, status, data });
+      refreshGatewayOverviewCards();
       return false;
     } catch (err) {
       if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
       storeGatewayError = formatStoreGatewayError(storeId, err.message);
+      setStoreGatewayEntry(storeId, { online: false, error: storeGatewayError });
       showStoreGatewayAlert(storeGatewayError);
       updateStoreGatewayMeta('offline');
       setDevicesPanelBlocked(true);
+      refreshGatewayOverviewCards();
       return false;
     } finally {
       if (gen === storeCheckGeneration) {
@@ -557,6 +858,9 @@
 
     try {
       await probeQueueRunner;
+      if (generation === probeGeneration && currentStore && pingStatus) {
+        setStoreDevicesEntry(currentStore, pingStatus);
+      }
     } catch {
       /* fila cancelada ao trocar loja */
     } finally {
@@ -566,8 +870,20 @@
     }
   }
 
-  function startBackgroundDeviceProbes() {
+  function startBackgroundDeviceProbes({ force = false } = {}) {
     if (!currentStore || !gatewayConfig || !storeGatewayReady) return;
+
+    const cached = getStoreDevicesEntry(currentStore);
+    if (!force && cached?.pingStatus && isCacheFresh(cached.checkedAt, DEVICES_TTL_MS)) {
+      pingStatus = clonePingStatus(cached.pingStatus);
+      renderDevices();
+      gatewayDebug('Equipamentos em cache', {
+        store: currentStore,
+        age: formatCacheAge(cached.checkedAt),
+      });
+      return;
+    }
+
     probeGeneration += 1;
     const generation = probeGeneration;
     probingDevices.clear();
@@ -902,6 +1218,10 @@
     renderLed();
   }
 
+  function updateDevicesPanelVisibility() {
+    $('devicesPanel')?.classList.toggle('hidden', !currentStore);
+  }
+
   async function applyStore(next) {
     next = normalizeStoreId(next);
     probeGeneration += 1;
@@ -918,6 +1238,8 @@
       updateStoreGatewayMeta(null);
       setDevicesPanelBlocked(true);
       resetPingStatus();
+      updateDevicesPanelVisibility();
+      refreshGatewayOverviewCards();
       renderDevices();
       const url = new URL(window.location.href);
       url.searchParams.delete('store');
@@ -934,6 +1256,8 @@
     url.searchParams.set('store', next);
     window.history.replaceState({}, '', url);
     resetPingStatus();
+    updateDevicesPanelVisibility();
+    refreshGatewayOverviewCards();
     renderDevices();
     gatewayDebug('Loja selecionada — verificando gateway', { store: currentStore });
     await verifyStoreGateway(next);
@@ -964,22 +1288,31 @@
       await loadGatewayConfig();
       catalog = await loadCatalog();
       populateStoreSelect();
+      hydrateOverviewFromCache();
+      renderGatewayOverview();
       resetPingStatus();
       setDevicesPanelBlocked(true);
+      updateDevicesPanelVisibility();
       renderDevices();
+
+      const initial = normalizeStoreId(new URLSearchParams(window.location.search).get('store'));
+      scanAllStoreGateways({ force: false, skipStores: initial }).catch(() => {});
+      if (initial) {
+        $('storeSelect').value = initial;
+        void applyStore(initial);
+      }
     } catch (err) {
       showToast(err.message, false);
     }
 
     checkApiHealth().catch(() => {});
 
-    const initial = normalizeStoreId(new URLSearchParams(window.location.search).get('store'));
-    if (initial) {
-      $('storeSelect').value = initial;
-      void applyStore(initial);
-    }
-
     $('storeSelect').addEventListener('change', onStoreSelectChange);
+    $('btnRefreshGateways')?.addEventListener('click', () => {
+      void scanAllStoreGateways({ force: true }).then(() => {
+        if (currentStore) void verifyStoreGateway(currentStore, { force: true });
+      });
+    });
     $('btnClearLog').addEventListener('click', () => {
       $('responseLog').innerHTML = '';
     });
