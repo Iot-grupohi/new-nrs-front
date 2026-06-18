@@ -41,6 +41,8 @@ DEVICE_LABELS_PT: dict[str, str] = {
     'ac': 'ar-condicionado',
 }
 
+_AUTH_ACTIONS = frozenset({'auth_login', 'auth_logout', 'auth_login_failed'})
+
 
 def audit_collection() -> str:
     name = (
@@ -399,6 +401,93 @@ def list_audit_operator_stats(
         return ranked[:top_n], truncated, None
     except Exception as exc:
         return [], False, str(exc)[:400]
+
+
+def audit_dashboard_summary(
+    *,
+    hours: int = 24,
+) -> tuple[dict[str, Any], bool, str | None]:
+    """Resumo operacional das últimas N horas (exclui login/logout)."""
+    if not audit_logging_available():
+        return {}, False, 'audit_unavailable'
+
+    window_hours = min(max(int(hours or 24), 1), 168)
+    since_ms = int(datetime.now(timezone.utc).timestamp() * 1000) - window_hours * 3600 * 1000
+
+    try:
+        from firebase_admin import firestore
+
+        coll = firestore.client().collection(audit_collection())
+        query = (
+            coll.where('ts_ms', '>=', since_ms)
+            .order_by('ts_ms', direction=firestore.Query.DESCENDING)
+        )
+
+        total = 0
+        success_count = 0
+        failed_count = 0
+        operators: dict[str, dict[str, Any]] = {}
+        stores: dict[str, int] = {}
+        scanned = 0
+        truncated = False
+
+        for doc in query.stream():
+            scanned += 1
+            if scanned > _MAX_COUNT_SCAN:
+                truncated = True
+                break
+            data = doc.to_dict() or {}
+            action = str(data.get('action') or '')
+            if action in _AUTH_ACTIONS:
+                continue
+
+            total += 1
+            if bool(data.get('success')):
+                success_count += 1
+            else:
+                failed_count += 1
+
+            email = str(data.get('operator_email') or data.get('user_email') or '').strip().lower()
+            if email:
+                row = operators.get(email)
+                if not row:
+                    operators[email] = {
+                        'email': email,
+                        'name': str(data.get('operator_name') or email).strip(),
+                        'count': 0,
+                    }
+                operators[email]['count'] += 1
+
+            store_key = str(data.get('store') or '').strip().lower()
+            if store_key:
+                stores[store_key] = stores.get(store_key, 0) + 1
+
+        top_operator = None
+        if operators:
+            top_operator = max(
+                operators.values(),
+                key=lambda row: (-int(row['count']), row['name'].lower()),
+            )
+
+        top_store = None
+        if stores:
+            store_id = max(stores, key=lambda key: stores[key])
+            top_store = {'store': store_id, 'count': stores[store_id]}
+
+        success_rate = round((success_count / total) * 100) if total else None
+
+        return {
+            'hours': window_hours,
+            'since_ms': since_ms,
+            'total': total,
+            'success': success_count,
+            'failed': failed_count,
+            'success_rate': success_rate,
+            'top_operator': top_operator,
+            'top_store': top_store,
+        }, truncated, None
+    except Exception as exc:
+        return {}, False, str(exc)[:400]
 
 
 def list_audit_operators(limit_scan: int = 400) -> tuple[list[dict[str, str]], str | None]:

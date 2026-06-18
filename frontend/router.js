@@ -5,7 +5,7 @@
     dashboard: {
       nav: 'dashboard',
       title: 'LAV60 — Dashboard',
-      view: 'views/dashboard.html',
+      view: 'views/dashboard.html?v=2',
       pageClass: 'page-dashboard',
     },
     lojas: {
@@ -158,6 +158,14 @@
     }
 
     bindSidebarNav();
+
+    const appView = document.getElementById('appView');
+    appView?.addEventListener('click', (event) => {
+      const link = event.target.closest('a[data-route]');
+      if (!link) return;
+      event.preventDefault();
+      navigate(link.dataset.route);
+    });
 
     window.addEventListener('popstate', () => {
       navigate(parseRoute(), { replace: true, force: true });

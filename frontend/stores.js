@@ -51,7 +51,15 @@
       title: 'Dispositivos offline na rede',
       empty: 'Nenhum dispositivo fora da rede.',
     },
+    'stores-partial': {
+      title: 'Lojas parciais',
+      empty: 'Nenhuma loja com operação parcial.',
+    },
   };
+
+  let auditSummaryCache = null;
+  let auditSummaryLoadedAt = 0;
+  const AUDIT_SUMMARY_TTL_MS = 2 * 60 * 1000;
 
   const $ = (id) => document.getElementById(id);
 
@@ -413,6 +421,34 @@
       $('kpiDevicesOccupied').textContent = devices.occupied ?? '—';
       $('kpiDevicesAvailable').textContent = devices.available ?? '—';
       $('kpiDevicesOffline').textContent = devices.offline_network ?? '—';
+
+      const healthPct = devices.health_pct ?? 0;
+      const healthEl = $('kpiNetworkHealth');
+      const healthBar = $('kpiNetworkHealthBar');
+      if (healthEl) {
+        healthEl.textContent = devices.total ? `${healthPct}%` : '—';
+      }
+      if (healthBar) {
+        healthBar.style.width = devices.total ? `${healthPct}%` : '0%';
+      }
+
+      const onlineTotalEl = $('kpiDevicesOnlineTotal');
+      if (onlineTotalEl) {
+        onlineTotalEl.textContent = devices.total
+          ? `${devices.online ?? 0}/${devices.total}`
+          : '—';
+      }
+      const onlineSubEl = $('kpiDevicesOnlineSub');
+      if (onlineSubEl) {
+        onlineSubEl.textContent = devices.total
+          ? `${devices.online ?? 0} operacionais de ${devices.total} cadastrados`
+          : 'Aguardando dados das lojas';
+      }
+
+      const partialEl = $('kpiStoresPartial');
+      if (partialEl) partialEl.textContent = stores.partial ?? '—';
+
+      renderOfflineLongestList(lastDashboardEvents);
     }
 
     updatePageSubtitle({ dashboard, ...payload });
@@ -479,6 +515,121 @@
       .join('');
   }
 
+  function renderStorePartialEvents(items) {
+    if (!items?.length) return '';
+    return `<ul class="kpi-event-list kpi-event-list--stores">
+      ${items
+        .map(
+          (entry) => `
+        <li class="kpi-event-item">
+          <a class="kpi-event-item__store" href="${storePageHref(entry.store)}">${escapeHtml(storeDisplayName(entry))}</a>
+          <span class="kpi-event-item__sub">${entry.summary_online} de ${entry.summary_total} online · ${entry.health_pct}%</span>
+        </li>`
+        )
+        .join('')}
+    </ul>`;
+  }
+
+  function renderOfflineLongestList(events) {
+    const listEl = $('dashboardOfflineList');
+    const metaEl = $('dashboardOfflineMeta');
+    if (!listEl) return;
+
+    const items = events?.stores_offline_longest || [];
+    if (metaEl) {
+      metaEl.textContent = items.length
+        ? `${items.length} loja(s) com agente offline`
+        : 'Nenhuma loja offline no momento';
+    }
+
+    if (!items.length) {
+      listEl.innerHTML = '<li class="dashboard-list__empty">Todas as lojas estão acessíveis.</li>';
+      return;
+    }
+
+    listEl.innerHTML = items
+      .map((entry) => {
+        const dur = entry.offline_since ? formatOfflineDuration(entry.offline_since) : '';
+        const durText = dur ? `Offline há ${dur}` : 'Offline';
+        return `
+          <li class="dashboard-list__item">
+            <span class="dashboard-list__name">${escapeHtml(storeDisplayName(entry))}</span>
+            <span class="dashboard-list__meta">${escapeHtml(durText)}</span>
+          </li>`;
+      })
+      .join('');
+  }
+
+  function operatorDisplayName(op) {
+    if (!op) return '—';
+    const name = String(op.name || '').trim();
+    const email = String(op.email || '').trim();
+    if (name && email && name.toLowerCase() !== email.toLowerCase()) return name;
+    return email || name || '—';
+  }
+
+  function renderAuditSummary(data) {
+    const totalEl = $('dashboardAuditTotal');
+    if (!totalEl) return;
+
+    if (!data?.available && data?.detail === 'audit_unavailable') {
+      $('dashboardAuditMeta').textContent = 'Auditoria indisponível';
+      totalEl.textContent = '—';
+      $('dashboardAuditSuccessRate').textContent = '—';
+      $('dashboardAuditTopOperator').textContent = '—';
+      $('dashboardAuditTopStore').textContent = '—';
+      return;
+    }
+
+    const hours = data?.hours ?? 24;
+    const truncated = data?.truncated ? ' · amostra limitada' : '';
+    $('dashboardAuditMeta').textContent = `Últimas ${hours}h${truncated}`;
+
+    totalEl.textContent = Number(data?.total ?? 0).toLocaleString('pt-BR');
+    const rate = data?.success_rate;
+    $('dashboardAuditSuccessRate').textContent =
+      rate != null ? `${rate}%` : '—';
+
+    const topOp = data?.top_operator;
+    $('dashboardAuditTopOperator').textContent = topOp
+      ? `${operatorDisplayName(topOp)} · ${Number(topOp.count).toLocaleString('pt-BR')} ops`
+      : '—';
+
+    const topStore = data?.top_store;
+    $('dashboardAuditTopStore').textContent = topStore?.store
+      ? `${topStore.store.toUpperCase()} · ${Number(topStore.count).toLocaleString('pt-BR')} ops`
+      : '—';
+  }
+
+  async function loadAuditDashboardSummary({ force = false } = {}) {
+    if (!$('dashboardAuditTotal')) return;
+
+    if (
+      !force &&
+      auditSummaryCache &&
+      Date.now() - auditSummaryLoadedAt <= AUDIT_SUMMARY_TTL_MS
+    ) {
+      renderAuditSummary(auditSummaryCache);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/audit/dashboard-summary?hours=24', {
+        credentials: 'same-origin',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        renderAuditSummary({ detail: data.detail || 'audit_unavailable' });
+        return;
+      }
+      auditSummaryCache = { ...data, available: true };
+      auditSummaryLoadedAt = Date.now();
+      renderAuditSummary(auditSummaryCache);
+    } catch {
+      renderAuditSummary({ detail: 'audit_unavailable' });
+    }
+  }
+
   function renderStoreOnlineEvents(items) {
     if (!items?.length) return '';
     return `<ul class="kpi-event-list kpi-event-list--stores">
@@ -528,6 +679,10 @@
       const items = events.stores_offline || [];
       count = items.length;
       html = renderStoreOfflineEvents(items);
+    } else if (kpiKey === 'stores-partial') {
+      const items = events.stores_partial || [];
+      count = items.length;
+      html = renderStorePartialEvents(items);
     } else if (kpiKey === 'devices-suspended') {
       const items = events.devices_suspended || [];
       count = items.length;
@@ -673,6 +828,10 @@
 
     if (mode === 'lojas') checkBlockedParam();
 
+    if (mode === 'dashboard') {
+      loadAuditDashboardSummary();
+    }
+
     if (storesBootstrapped && allStores.length) {
       renderDashboard(lastPayload?.dashboard || {}, lastPayload || {});
       filterAndRender();
@@ -684,6 +843,7 @@
       catalogConfig = await loadCatalog();
       await loadStores();
       storesBootstrapped = true;
+      if (mode === 'dashboard') loadAuditDashboardSummary();
     } catch (e) {
       const grid = $('storesGrid');
       if (grid) {

@@ -16,6 +16,7 @@ from lav60_env import env_value, load_local_env
 from panel_audit import (
     ACTION_LABELS_PT,
     DEVICE_LABELS_PT,
+    audit_dashboard_summary,
     audit_collection,
     audit_logging_available,
     count_audit_events,
@@ -706,6 +707,27 @@ def api_audit_operator_stats():
         'operators': operators,
         'truncated': truncated,
         'scan_limit': 10000,
+    }), 200
+
+
+@app.route('/api/audit/dashboard-summary', methods=['GET'])
+def api_audit_dashboard_summary():
+    if not audit_logging_available():
+        return jsonify({'detail': 'audit_unavailable'}), 503
+
+    try:
+        hours = int(request.args.get('hours', '24'))
+    except ValueError:
+        hours = 24
+
+    summary, truncated, err = audit_dashboard_summary(hours=hours)
+    if err:
+        return jsonify({'detail': err}), 500
+
+    return jsonify({
+        **summary,
+        'truncated': truncated,
+        'available': True,
     }), 200
 
 

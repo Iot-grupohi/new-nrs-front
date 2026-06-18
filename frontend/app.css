@@ -968,6 +968,128 @@ a.topbar__tool {
   margin-bottom: 0;
 }
 
+.stats-grid--secondary {
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 0.15rem;
+}
+
+.page-dashboard .stat-card--primary::before {
+  background: var(--primary);
+}
+
+.dashboard-insights {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 1rem;
+}
+
+.dashboard-panel {
+  padding: 1rem 1.1rem;
+  border-radius: 16px;
+  background: rgba(15, 20, 25, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.dashboard-panel__head {
+  margin-bottom: 0.85rem;
+}
+
+.dashboard-panel__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.dashboard-panel__meta {
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.dashboard-panel__link {
+  display: inline-block;
+  margin-top: 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.dashboard-panel__link:hover {
+  text-decoration: underline;
+}
+
+.dashboard-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.dashboard-list__item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.dashboard-list__name {
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.dashboard-list__meta {
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.dashboard-list__empty {
+  font-size: 0.82rem;
+  color: var(--muted);
+  padding: 0.35rem 0.1rem;
+}
+
+.dashboard-audit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.dashboard-audit-stat {
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.dashboard-audit-stat--wide {
+  grid-column: 1 / -1;
+}
+
+.dashboard-audit-stat__label {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.dashboard-audit-stat__value {
+  display: block;
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 .page-dashboard .stat-card {
   padding: 1rem 1.15rem;
   border-radius: 14px;
@@ -3085,6 +3207,14 @@ a.topbar__tool {
 
   .stats-grid--dashboard {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .stats-grid--secondary {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-insights {
+    grid-template-columns: 1fr;
   }
 
   .page-dashboard .stores-list {

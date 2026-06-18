@@ -33,6 +33,61 @@
     </article>
   </section>
 
+  <section class="stats-grid stats-grid--dashboard stats-grid--secondary" aria-label="Indicadores de rede">
+    <article class="stat-card stat-card--primary">
+      <span class="stat-card__label">Saúde da rede</span>
+      <strong class="stat-card__value" id="kpiNetworkHealth">—</strong>
+      <div class="stat-card__bar" aria-hidden="true"><div id="kpiNetworkHealthBar" style="width:0%"></div></div>
+      <span class="stat-card__sub" id="kpiNetworkHealthSub">Equipamentos operacionais na rede</span>
+    </article>
+    <article class="stat-card stat-card--primary">
+      <span class="stat-card__label">Equipamentos online</span>
+      <strong class="stat-card__value" id="kpiDevicesOnlineTotal">—</strong>
+      <span class="stat-card__sub" id="kpiDevicesOnlineSub">—</span>
+    </article>
+    <article class="stat-card stat-card--warn stat-card--clickable" data-kpi="stores-partial" tabindex="0" role="button" aria-expanded="false" aria-controls="kpiEventsPanel">
+      <span class="stat-card__label">Lojas parciais</span>
+      <strong class="stat-card__value" id="kpiStoresPartial">—</strong>
+      <span class="stat-card__sub">Parte dos equipamentos fora</span>
+    </article>
+  </section>
+
+  <section class="dashboard-insights" aria-label="Resumo operacional">
+    <article class="dashboard-panel">
+      <header class="dashboard-panel__head">
+        <h2 class="dashboard-panel__title">Lojas offline há mais tempo</h2>
+        <p class="dashboard-panel__meta" id="dashboardOfflineMeta">—</p>
+      </header>
+      <ul class="dashboard-list" id="dashboardOfflineList"></ul>
+    </article>
+
+    <article class="dashboard-panel">
+      <header class="dashboard-panel__head">
+        <h2 class="dashboard-panel__title">Operações (24h)</h2>
+        <p class="dashboard-panel__meta" id="dashboardAuditMeta">Auditoria do painel</p>
+      </header>
+      <div class="dashboard-audit-grid">
+        <div class="dashboard-audit-stat">
+          <span class="dashboard-audit-stat__label">Total</span>
+          <strong class="dashboard-audit-stat__value" id="dashboardAuditTotal">—</strong>
+        </div>
+        <div class="dashboard-audit-stat">
+          <span class="dashboard-audit-stat__label">Taxa de sucesso</span>
+          <strong class="dashboard-audit-stat__value" id="dashboardAuditSuccessRate">—</strong>
+        </div>
+        <div class="dashboard-audit-stat dashboard-audit-stat--wide">
+          <span class="dashboard-audit-stat__label">Operador mais ativo</span>
+          <strong class="dashboard-audit-stat__value" id="dashboardAuditTopOperator">—</strong>
+        </div>
+        <div class="dashboard-audit-stat dashboard-audit-stat--wide">
+          <span class="dashboard-audit-stat__label">Loja mais operada</span>
+          <strong class="dashboard-audit-stat__value" id="dashboardAuditTopStore">—</strong>
+        </div>
+      </div>
+      <a href="index.html#/registros" class="dashboard-panel__link" data-route="registros">Ver registros completos →</a>
+    </article>
+  </section>
+
   <section class="kpi-events-panel hidden" id="kpiEventsPanel" aria-labelledby="kpiEventsTitle">
     <header class="kpi-events-panel__head">
       <div>

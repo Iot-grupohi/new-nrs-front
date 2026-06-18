@@ -963,6 +963,7 @@
     const devicesAvailableEvents = [];
     const storesOnlineEvents = [];
     const storesOfflineEvents = [];
+    const storesPartialEvents = [];
     const typeLabels = {
       washers: 'Lavadora',
       dryers: 'Secadora',
@@ -980,12 +981,21 @@
         summary_total: card.summary?.total ?? 0,
       };
       if (card.accessible && (card.summary?.online ?? 0) > 0) {
+        const healthPct = card.summary?.total
+          ? Math.round(((card.summary?.online ?? 0) / card.summary.total) * 100)
+          : 0;
         storesOnlineEvents.push({
           ...storeEntry,
-          health_pct: card.summary?.total
-            ? Math.round(((card.summary?.online ?? 0) / card.summary.total) * 100)
-            : 0,
+          health_pct: healthPct,
         });
+        const on = card.summary?.online ?? 0;
+        const tot = card.summary?.total ?? 0;
+        if (on > 0 && tot > 0 && on < tot) {
+          storesPartialEvents.push({
+            ...storeEntry,
+            health_pct: healthPct,
+          });
+        }
       }
       if (!card.accessible) {
         storesOfflineEvents.push({
@@ -1076,6 +1086,11 @@
       events: {
         stores_online: storesOnlineEvents.sort((a, b) => a.store.localeCompare(b.store)),
         stores_offline: storesOfflineEvents.sort((a, b) => a.store.localeCompare(b.store)),
+        stores_partial: storesPartialEvents.sort((a, b) => a.store.localeCompare(b.store)),
+        stores_offline_longest: [...storesOfflineEvents]
+          .filter((entry) => entry.offline_since)
+          .sort((a, b) => (b.offline_since || 0) - (a.offline_since || 0))
+          .slice(0, 3),
         devices_suspended: devicesSuspendedEvents.sort((a, b) =>
           a.store.localeCompare(b.store) || String(a.id).localeCompare(String(b.id))
         ),
