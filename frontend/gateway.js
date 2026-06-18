@@ -581,6 +581,8 @@
   function setDryerLock(dryerId, minutes) {
     dryerLocks[String(dryerId)] = Date.now() + (Number(minutes) || 15) * 60 * 1000;
     saveDryerLocksToStorage();
+    const card = document.querySelector(`.device-card[data-dryer-id="${dryerId}"]`);
+    if (card) applyDryerLockUI(card, dryerId);
     scheduleDeviceLockTick();
   }
 
@@ -621,6 +623,8 @@
   function setWasherLock(washerId, minutes) {
     washerLocks[String(washerId)] = Date.now() + (Number(minutes) || 45) * 60 * 1000;
     saveWasherLocksToStorage();
+    const card = document.querySelector(`.device-card[data-washer-id="${washerId}"]`);
+    if (card) applyWasherLockUI(card, washerId);
     scheduleDeviceLockTick();
   }
 
@@ -877,9 +881,9 @@
     return result.data;
   }
 
-  function shouldRefreshDevicesAfterAction(audit) {
-    if (audit?.method === 'GET' || audit?.action === 'doser_consult') return false;
-    return true;
+  function shouldRefreshDevicesAfterAction(_audit) {
+    // Liberações não invalidam o ping já carregado; re-scan zera todos os cards.
+    return false;
   }
 
   function buildGatewayAudit(fields) {
@@ -966,7 +970,6 @@
         device_type: 'dryer',
         device_id: String(id),
       });
-      void startBackgroundDeviceProbes({ force: true });
     } catch (e) {
       await logGatewayAudit({
         action: 'dryer_release',
@@ -1006,7 +1009,6 @@
         device_type: 'washer',
         device_id: String(id),
       });
-      void startBackgroundDeviceProbes({ force: true });
     } catch (e) {
       await logGatewayAudit({
         action: 'washer_release',
