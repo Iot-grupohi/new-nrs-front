@@ -134,7 +134,7 @@
     if (!cfg.enabled) throw new Error('Login não configurado no servidor');
     await ensureFirebase();
     const credential = await firebase.auth().signInWithEmailAndPassword(email.trim(), password);
-    const idToken = await credential.user.getIdToken(true);
+    const idToken = await credential.user.getIdToken();
     await createServerSession(idToken);
     return currentUser;
   }
@@ -171,6 +171,32 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  async function mountSidebarUser(container) {
+    if (!container) return;
+    const enabled = await authEnabled();
+    if (!enabled) {
+      container.innerHTML = '';
+      return;
+    }
+    const session = await getSessionUser();
+    if (!session.authenticated) return;
+    const email = session.user?.email || '';
+    if (!email) return;
+
+    container.innerHTML = `
+      <div class="sidebar-user">
+        <span class="sidebar-user__label">Conectado como</span>
+        <span class="sidebar-user__email" title="${escapeHtml(email)}">${escapeHtml(email)}</span>
+        <button type="button" class="btn btn--sm btn--ghost sidebar-user__logout" id="sidebarLogout">Sair</button>
+      </div>`;
+
+    container.querySelector('#sidebarLogout')?.addEventListener('click', () => {
+      signOut().catch(() => {
+        window.location.href = 'login.html';
+      });
+    });
   }
 
   async function mountUserMenu(container) {
@@ -227,7 +253,9 @@
     authEnabled,
     getSessionUser,
     fetchAuthConfig,
+    ensureFirebase,
     panelFetch,
     mountUserMenu,
+    mountSidebarUser,
   };
 })();

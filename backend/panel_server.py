@@ -23,12 +23,14 @@ from panel_audit import (
     list_audit_operator_stats,
     list_audit_operators,
     log_audit_event,
+    log_audit_event_async,
 )
 from panel_auth import (
     auth_verify_mode,
     firebase_auth_enabled,
     firebase_init_error,
     firebase_public_config,
+    init_firebase_admin,
     service_account_configured,
     service_account_path,
     verify_firebase_id_token,
@@ -180,7 +182,7 @@ def api_auth_session():
     if request.method == 'DELETE':
         user = panel_user()
         session.clear()
-        log_audit_event(
+        log_audit_event_async(
             user,
             {
                 'action': 'auth_logout',
@@ -200,7 +202,7 @@ def api_auth_session():
     decoded, verify_error = verify_firebase_id_token(id_token)
     if not decoded:
         print(f'Login recusado: {verify_error or "token inválido"}')
-        log_audit_event(
+        log_audit_event_async(
             None,
             {
                 'action': 'auth_login_failed',
@@ -223,7 +225,7 @@ def api_auth_session():
     session['firebase_uid'] = uid
     session['email'] = email
     user = panel_user()
-    log_audit_event(
+    log_audit_event_async(
         user,
         {
             'action': 'auth_login',
@@ -245,7 +247,7 @@ def api_auth_logout():
         return '', 204
     user = panel_user()
     session.clear()
-    log_audit_event(
+    log_audit_event_async(
         user,
         {
             'action': 'auth_logout',
@@ -744,6 +746,7 @@ def main() -> None:
     if auth_on:
         mode = auth_verify_mode()
         if mode == 'service_account':
+            init_firebase_admin()
             print('Login Firebase: ativo (verificação via service account)')
         else:
             print('Login Firebase: ativo (verificação via FIREBASE_API_KEY — ok para uso interno)')

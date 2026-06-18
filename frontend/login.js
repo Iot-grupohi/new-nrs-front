@@ -66,6 +66,8 @@
         hintEl.classList.remove('hidden');
       }
 
+      Lav60Auth.ensureFirebase().catch(() => {});
+
       const session = await Lav60Auth.getSessionUser();
       if (session.authenticated) {
         window.location.replace(returnPath());

@@ -321,6 +321,7 @@
 
   function renderStoresList(stores) {
     const grid = $('storesGrid');
+    if (!grid) return;
     grid.innerHTML = '';
 
     if (!allStores.length) {
@@ -350,15 +351,16 @@
   }
 
   function filterAndRender() {
+    if (!$('storesGrid')) return;
     const filtered = allStores.filter((s) => matchesFilter(s) && matchesSearch(s));
     renderStoresList(filtered);
   }
 
-  function updateDashboardHeader(payload) {
+  function updatePageSubtitle(payload) {
     const dashboard = payload.dashboard || {};
     const stores = dashboard.stores || {};
     const devices = dashboard.devices || {};
-    const subtitle = $('dashboardSubtitle');
+    const subtitle = $('dashboardSubtitle') || $('lojasSubtitle');
     if (!subtitle) return;
 
     if (payload.fromCache && payload.live === false) {
@@ -399,22 +401,28 @@
     const devices = dashboard.devices || {};
     lastDashboardEvents = dashboard.events || null;
 
-    $('kpiStoresOnline').textContent = stores.online ?? '—';
-    $('kpiStoresOffline').textContent = stores.offline ?? '—';
-    $('kpiDevicesSuspended').textContent = devices.suspended ?? '—';
-    $('kpiDevicesOccupied').textContent = devices.occupied ?? '—';
-    $('kpiDevicesAvailable').textContent = devices.available ?? '—';
-    $('kpiDevicesOffline').textContent = devices.offline_network ?? '—';
-
-    updateDashboardHeader({ dashboard, ...payload });
-
-    let meta = formatTime(payload.timestamp);
-    if (payload.refreshing && payload.progress) {
-      meta = `Sincronizando ${payload.progress.done}/${payload.progress.total} · ${meta}`;
-    } else if (payload.fromCache && payload.live === false) {
-      meta = `Cache local · ${meta}`;
+    const hasKpis = Boolean($('kpiStoresOnline'));
+    if (hasKpis) {
+      $('kpiStoresOnline').textContent = stores.online ?? '—';
+      $('kpiStoresOffline').textContent = stores.offline ?? '—';
+      $('kpiDevicesSuspended').textContent = devices.suspended ?? '—';
+      $('kpiDevicesOccupied').textContent = devices.occupied ?? '—';
+      $('kpiDevicesAvailable').textContent = devices.available ?? '—';
+      $('kpiDevicesOffline').textContent = devices.offline_network ?? '—';
     }
-    $('storesMeta').textContent = meta;
+
+    updatePageSubtitle({ dashboard, ...payload });
+
+    const storesMeta = $('storesMeta');
+    if (storesMeta) {
+      let meta = formatTime(payload.timestamp);
+      if (payload.refreshing && payload.progress) {
+        meta = `Sincronizando ${payload.progress.done}/${payload.progress.total} · ${meta}`;
+      } else if (payload.fromCache && payload.live === false) {
+        meta = `Cache local · ${meta}`;
+      }
+      storesMeta.textContent = meta;
+    }
 
     if (activeKpiPanel) {
       renderKpiEventsPanel(activeKpiPanel);
@@ -592,6 +600,10 @@
     filterAndRender();
   }
 
+  function currentListPage() {
+    return window.location.pathname.split('/').pop() || 'index.html';
+  }
+
   async function loadStores(options = {}) {
     if (refreshInFlight && !options.force) return;
     refreshInFlight = true;
@@ -618,29 +630,32 @@
     const blocked = params.get('blocked');
     if (blocked) {
       showToast(noAgentMessage(blocked), false);
-      window.history.replaceState({}, '', 'index.html');
+      window.history.replaceState({}, '', currentListPage());
     }
   }
 
-  function initAuthUi() {
+  async function initAuthUi() {
     if (!window.Lav60Auth) return;
-    Lav60Auth.authEnabled().then(async (enabled) => {
-      if (!enabled) return;
-      await Lav60Auth.mountUserMenu($('headerUserMenu'));
-    });
+    const enabled = await Lav60Auth.authEnabled();
+    if (!enabled) return;
+    await Lav60Auth.mountSidebarUser($('sidebarUser'));
   }
 
   function initFilters() {
-    $('inputSearch').addEventListener('input', (e) => {
+    const search = $('inputSearch');
+    const chips = $('filterChips');
+    if (!search || !chips) return;
+
+    search.addEventListener('input', (e) => {
       searchQuery = e.target.value.trim();
       filterAndRender();
     });
 
-    $('filterChips').addEventListener('click', (e) => {
+    chips.addEventListener('click', (e) => {
       const chip = e.target.closest('[data-filter]');
       if (!chip) return;
       activeFilter = chip.dataset.filter;
-      $('filterChips').querySelectorAll('.chip').forEach((c) => c.classList.remove('chip--active'));
+      chips.querySelectorAll('.chip').forEach((c) => c.classList.remove('chip--active'));
       chip.classList.add('chip--active');
       filterAndRender();
     });
@@ -649,14 +664,17 @@
   async function init() {
     initFilters();
     initKpiEvents();
-    initAuthUi();
-    checkBlockedParam();
+    await initAuthUi();
+    if ($('storesGrid')) checkBlockedParam();
     await ensureDefaultAgentToken();
     try {
       catalogConfig = await loadCatalog();
       await loadStores();
     } catch (e) {
-      $('storesGrid').innerHTML = `<div class="stores-empty-state"><p>${escapeHtml(e.message)}</p></div>`;
+      const grid = $('storesGrid');
+      if (grid) {
+        grid.innerHTML = `<div class="stores-empty-state"><p>${escapeHtml(e.message)}</p></div>`;
+      }
       showToast(e.message, false);
     }
   }
@@ -666,6 +684,7 @@
       const ok = await Lav60Auth.guardPage();
       if (!ok) return;
     }
+    document.body.classList.remove('auth-pending');
     await init();
   })();
 })();

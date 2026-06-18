@@ -179,6 +179,9 @@ def build_audit_record(
     user: dict[str, Any] | None,
     body: dict[str, Any],
     req: Request | None = None,
+    *,
+    client_ip: str | None = None,
+    user_agent: str | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     store = str(body.get('store') or '').strip().lower()
@@ -225,18 +228,40 @@ def build_audit_record(
     if req:
         record['client_ip'] = (req.headers.get('X-Forwarded-For') or req.remote_addr or '').split(',')[0].strip()
         record['user_agent'] = _truncate(req.headers.get('User-Agent') or '', 400)
+    else:
+        if client_ip:
+            record['client_ip'] = client_ip
+        if user_agent:
+            record['user_agent'] = _truncate(user_agent, 400)
     return _strip_none_fields(record)
+
+
+def _request_client_meta(req: Request | None) -> tuple[str | None, str | None]:
+    if not req:
+        return None, None
+    ip = (req.headers.get('X-Forwarded-For') or req.remote_addr or '').split(',')[0].strip()
+    ua = _truncate(req.headers.get('User-Agent') or '', 400)
+    return ip or None, ua or None
 
 
 def log_audit_event(
     user: dict[str, Any] | None,
     body: dict[str, Any],
     req: Request | None = None,
+    *,
+    client_ip: str | None = None,
+    user_agent: str | None = None,
 ) -> tuple[bool, str | None]:
     """Grava evento no Firestore. Retorna (ok, erro)."""
     if not audit_logging_available():
         return False, 'audit_unavailable'
-    record = build_audit_record(user, body, req)
+    record = build_audit_record(
+        user,
+        body,
+        req,
+        client_ip=client_ip,
+        user_agent=user_agent,
+    )
     try:
         from firebase_admin import firestore
 
@@ -244,6 +269,32 @@ def log_audit_event(
         return True, None
     except Exception as exc:
         return False, str(exc)[:400]
+
+
+def log_audit_event_async(
+    user: dict[str, Any] | None,
+    body: dict[str, Any],
+    req: Request | None = None,
+) -> None:
+    """Grava auditoria em background — não bloqueia resposta HTTP (login/logout)."""
+    if not audit_logging_available():
+        return
+
+    import threading
+
+    client_ip, user_agent = _request_client_meta(req)
+    user_snapshot = dict(user) if isinstance(user, dict) else user
+    body_snapshot = dict(body)
+
+    def _worker() -> None:
+        log_audit_event(
+            user_snapshot,
+            body_snapshot,
+            client_ip=client_ip,
+            user_agent=user_agent,
+        )
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 
 def _serialize_audit_doc(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:

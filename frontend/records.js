@@ -731,18 +731,17 @@
     });
   }
 
-  function initAuthUi() {
+  async function initAuthUi() {
     if (!window.Lav60Auth) return;
-    Lav60Auth.authEnabled().then(async (enabled) => {
-      if (!enabled) return;
-      await Lav60Auth.mountUserMenu($('headerUserMenu'));
-    });
+    const enabled = await Lav60Auth.authEnabled();
+    if (!enabled) return;
+    await Lav60Auth.mountSidebarUser($('sidebarUser'));
   }
 
   async function init() {
     clearLegacyRecordsCache();
     initFilters();
-    initAuthUi();
+    await initAuthUi();
     restoreFiltersFromSession();
     syncRecordsView();
     try {

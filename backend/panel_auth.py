@@ -138,8 +138,7 @@ def verify_firebase_id_token(id_token: str) -> tuple[dict[str, Any] | None, str 
         user, err = _verify_with_service_account(token)
         if user:
             return user, None
-        if err:
-            errors.append(err)
+        return None, err or 'Token inválido ou expirado'
 
     user, err = _verify_with_api_key(token)
     if user:
