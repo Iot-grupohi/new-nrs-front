@@ -270,7 +270,10 @@
         device_id: audit?.device_id || null,
         meta: audit?.meta || null,
       });
-      await refreshStatus({ force: true });
+      const readOnly = audit?.method === 'GET' || audit?.action === 'doser_consult';
+      if (!readOnly) {
+        await refreshStatus({ force: true });
+      }
     } catch (e) {
       await logStoreAudit({
         action: audit?.action || 'operation',

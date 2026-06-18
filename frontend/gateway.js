@@ -861,6 +861,11 @@
     return result.data;
   }
 
+  function shouldRefreshDevicesAfterAction(audit) {
+    if (audit?.method === 'GET' || audit?.action === 'doser_consult') return false;
+    return true;
+  }
+
   async function runAction(label, fn, audit = null) {
     if (actionBusy) return;
     if (!storeSelected()) {
@@ -875,7 +880,9 @@
     try {
       const data = await fn();
       showActionConfirm(label, data);
-      void startBackgroundDeviceProbes({ force: true });
+      if (shouldRefreshDevicesAfterAction(audit)) {
+        void startBackgroundDeviceProbes({ force: true });
+      }
     } catch (e) {
       showToast(formatOperatorError(label, e.message), false);
     } finally {
