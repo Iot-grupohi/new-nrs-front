@@ -252,6 +252,104 @@ def _serialize_audit_doc(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def _aggregate_operators_by_scan(
+    coll: Any,
+    *,
+    store_key: str,
+    action_key: str,
+    success: bool | None,
+    query_text: str,
+) -> tuple[dict[str, dict[str, Any]], bool]:
+    from firebase_admin import firestore
+
+    query = coll.order_by('ts_ms', direction=firestore.Query.DESCENDING)
+    if store_key:
+        query = query.where('store', '==', store_key)
+
+    counts: dict[str, dict[str, Any]] = {}
+    scanned = 0
+    truncated = False
+    last_doc = None
+    batch_size = 500
+
+    while scanned < _MAX_COUNT_SCAN:
+        batch = query.limit(batch_size)
+        if last_doc is not None:
+            batch = batch.start_after(last_doc)
+        docs = list(batch.stream())
+        if not docs:
+            break
+        for doc in docs:
+            scanned += 1
+            data = doc.to_dict() or {}
+            if not _audit_row_matches(
+                data,
+                action_key=action_key,
+                operator_key='',
+                success=success,
+                query_text=query_text,
+            ):
+                continue
+            email = str(data.get('operator_email') or data.get('user_email') or '').strip().lower()
+            if not email:
+                email = '__unknown__'
+            row = counts.get(email)
+            if not row:
+                name = str(data.get('operator_name') or email).strip()
+                if email == '__unknown__':
+                    name = 'Operador desconhecido'
+                counts[email] = {'email': email, 'name': name, 'count': 0}
+            counts[email]['count'] += 1
+        if len(docs) < batch_size:
+            break
+        last_doc = docs[-1]
+        if scanned >= _MAX_COUNT_SCAN:
+            truncated = True
+            break
+
+    return counts, truncated
+
+
+def list_audit_operator_stats(
+    *,
+    store: str | None = None,
+    action: str | None = None,
+    success: bool | None = None,
+    q: str | None = None,
+    limit: int = 5,
+) -> tuple[list[dict[str, Any]], bool, str | None]:
+    """Ranking de operadores por volume de registros (respeita filtros exceto operador)."""
+    if not audit_logging_available():
+        return [], False, 'audit_unavailable'
+
+    store_key = str(store or '').strip().lower()
+    action_key = str(action or '').strip()
+    query_text = str(q or '').strip().lower()
+    top_n = min(max(int(limit or 5), 1), 20)
+
+    try:
+        from firebase_admin import firestore
+
+        coll = firestore.client().collection(audit_collection())
+        counts, truncated = _aggregate_operators_by_scan(
+            coll,
+            store_key=store_key,
+            action_key=action_key,
+            success=success,
+            query_text=query_text,
+        )
+        ranked = sorted(
+            counts.values(),
+            key=lambda row: (-int(row['count']), row['name'].lower()),
+        )
+        for row in ranked:
+            if row['email'] == '__unknown__':
+                row['email'] = ''
+        return ranked[:top_n], truncated, None
+    except Exception as exc:
+        return [], False, str(exc)[:400]
+
+
 def list_audit_operators(limit_scan: int = 400) -> tuple[list[dict[str, str]], str | None]:
     """Operadores distintos nos registros mais recentes (para filtro do painel)."""
     if not audit_logging_available():

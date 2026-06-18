@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LAV60 — Registros</title>
-  <link rel="stylesheet" href="app.css?v=7">
+  <link rel="stylesheet" href="app.css?v=8">
 </head>
 <body class="page-dashboard page-records auth-pending">
   <div class="app-shell">
@@ -32,6 +32,15 @@
     </header>
 
     <main class="main-content">
+      <section class="records-stats" id="recordsStats" aria-label="Ranking de operadores">
+        <article class="records-stat-card records-stat-card--leader">
+          <span class="records-stat-card__label">Operador mais ativo</span>
+          <strong class="records-stat-card__value" id="recordsTopOperator">—</strong>
+          <span class="records-stat-card__meta" id="recordsTopOperatorMeta"></span>
+        </article>
+        <ol class="records-ranking" id="recordsOperatorRanking" aria-label="Top operadores"></ol>
+      </section>
+
       <section class="records-panel panel">
         <div class="records-panel__toolbar">
           <div class="records-panel__head">
@@ -119,6 +128,6 @@
 
   <script src="auth.js?v=4"></script>
   <script src="api.js?v=4"></script>
-  <script src="records.js?v=12"></script>
+  <script src="records.js?v=13"></script>
 </body>
 </html>

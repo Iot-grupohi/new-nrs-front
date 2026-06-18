@@ -2,16 +2,19 @@
   'use strict';
 
   const PAGE_SIZE = 20;
-  const CACHE_VERSION = '9';
+  const CACHE_VERSION = '10';
   const CACHE_TTL_MS = 5 * 60 * 1000;
   const CACHE_PREFIX = `lav60:records:v${CACHE_VERSION}:`;
   const FILTERS_KEY = `${CACHE_PREFIX}filters`;
   const OPERATORS_KEY = `${CACHE_PREFIX}operators`;
+  const OPERATOR_STATS_KEY = `${CACHE_PREFIX}operator-stats`;
 
   let actionLabels = {};
   let deviceLabels = {};
   let catalogStores = [];
   let operatorOptions = [];
+  let operatorStats = [];
+  let operatorStatsTruncated = false;
   let items = [];
   let hasMore = false;
   let loading = false;
@@ -146,6 +149,89 @@
     const mins = payload.minutes ?? response.minutes;
     if (mins == null || mins === '') return '—';
     return `${mins} min`;
+  }
+
+  function statsFilters() {
+    const filters = currentFilters();
+    return {
+      store: filters.store,
+      action: filters.action,
+      success: filters.success,
+    };
+  }
+
+  function statsCacheKey(filters) {
+    return `${OPERATOR_STATS_KEY}:${filtersSignature(filters)}`;
+  }
+
+  function operatorDisplayName(op) {
+    const name = String(op?.name || '').trim();
+    const email = String(op?.email || '').trim();
+    if (name && email && name.toLowerCase() !== email.toLowerCase()) {
+      return name;
+    }
+    return email || name || 'Operador desconhecido';
+  }
+
+  function operatorSubtitle(op) {
+    const email = String(op?.email || '').trim();
+    const name = operatorDisplayName(op);
+    if (email && name.toLowerCase() !== email.toLowerCase()) return email;
+    return '';
+  }
+
+  function formatOperationCount(count) {
+    const n = Number(count);
+    if (!Number.isFinite(n) || n <= 0) return '0 operações';
+    const label = n === 1 ? 'operação' : 'operações';
+    return `${n.toLocaleString('pt-BR')} ${label}`;
+  }
+
+  function renderOperatorStats() {
+    const leader = operatorStats[0];
+    const topEl = $('recordsTopOperator');
+    const metaEl = $('recordsTopOperatorMeta');
+    const listEl = $('recordsOperatorRanking');
+
+    if (topEl) {
+      topEl.textContent = leader ? operatorDisplayName(leader) : '—';
+    }
+    if (metaEl) {
+      if (!leader) {
+        metaEl.textContent = 'Sem registros para os filtros atuais';
+      } else {
+        const parts = [formatOperationCount(leader.count)];
+        const subtitle = operatorSubtitle(leader);
+        if (subtitle) parts.unshift(subtitle);
+        if (operatorStatsTruncated) parts.push('amostra limitada a 10.000 registros');
+        metaEl.textContent = parts.join(' · ');
+      }
+    }
+
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    if (operatorStats.length <= 1) {
+      listEl.classList.add('hidden');
+      return;
+    }
+
+    const maxCount = Math.max(...operatorStats.map((row) => Number(row.count) || 0), 1);
+    operatorStats.forEach((row, index) => {
+      const li = document.createElement('li');
+      li.className = 'records-ranking__item';
+      const pct = Math.max(8, Math.round(((Number(row.count) || 0) / maxCount) * 100));
+      li.innerHTML = `
+        <span class="records-ranking__rank">${index + 1}º</span>
+        <div class="records-ranking__body">
+          <div class="records-ranking__head">
+            <span class="records-ranking__name">${escapeHtml(operatorDisplayName(row))}</span>
+            <span class="records-ranking__count">${escapeHtml(formatOperationCount(row.count))}</span>
+          </div>
+          <div class="records-ranking__bar" aria-hidden="true"><span style="width:${pct}%"></span></div>
+        </div>`;
+      listEl.appendChild(li);
+    });
+    listEl.classList.remove('hidden');
   }
 
   function currentFilters() {
@@ -526,6 +612,51 @@
     populateStoreFilter();
   }
 
+  async function loadOperatorStats({ force = false } = {}) {
+    const filters = statsFilters();
+
+    if (!force) {
+      const cached = readSessionJson(statsCacheKey(filters));
+      if (cached?.operators && Date.now() - (cached.at || 0) <= CACHE_TTL_MS) {
+        operatorStats = cached.operators;
+        operatorStatsTruncated = Boolean(cached.truncated);
+        renderOperatorStats();
+        return;
+      }
+    }
+
+    try {
+      const params = new URLSearchParams();
+      params.set('limit', '5');
+      if (filters.store) params.set('store', filters.store);
+      if (filters.action) params.set('action', filters.action);
+      if (filters.success === 'true') params.set('success', 'true');
+      if (filters.success === 'false') params.set('success', 'false');
+
+      const res = await fetch(`/api/audit/operator-stats?${params}`, { credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        operatorStats = [];
+        operatorStatsTruncated = false;
+        renderOperatorStats();
+        return;
+      }
+
+      operatorStats = Array.isArray(data.operators) ? data.operators : [];
+      operatorStatsTruncated = Boolean(data.truncated);
+      writeSessionJson(statsCacheKey(filters), {
+        at: Date.now(),
+        operators: operatorStats,
+        truncated: operatorStatsTruncated,
+      });
+      renderOperatorStats();
+    } catch {
+      operatorStats = [];
+      operatorStatsTruncated = false;
+      renderOperatorStats();
+    }
+  }
+
   async function loadOperators({ force = false } = {}) {
     if (!force) {
       const cached = readSessionJson(OPERATORS_KEY);
@@ -569,6 +700,7 @@
   function onFiltersChanged() {
     resetPagination();
     items = [];
+    loadOperatorStats({ force: true });
     fetchLogs({ page: 1, force: true });
   }
 
@@ -581,6 +713,7 @@
     bindClick('btnRefresh', () => {
       resetPagination();
       loadOperators({ force: true });
+      loadOperatorStats({ force: true });
       fetchLogs({ page: 1, force: true });
     });
 
@@ -615,6 +748,7 @@
     try {
       await loadCatalog();
       await loadOperators();
+      await loadOperatorStats();
       await fetchLogs({ page: 1 });
     } catch (e) {
       recordsReady = true;

@@ -3183,6 +3183,124 @@ a.topbar__tool {
   flex-direction: column;
   min-height: 0;
   padding: 1.25rem 1.75rem 1.5rem;
+  gap: 1rem;
+}
+
+.records-stats {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.records-stat-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem 1.1rem;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+.records-stat-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: #a78bfa;
+}
+
+.records-stat-card__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.records-stat-card__value {
+  font-size: 1.35rem;
+  line-height: 1.2;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.records-stat-card__meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.records-ranking {
+  list-style: none;
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.records-ranking__item {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.records-ranking__rank {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+}
+
+.records-ranking__body {
+  min-width: 0;
+}
+
+.records-ranking__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.records-ranking__name {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.records-ranking__count {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.records-ranking__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+  overflow: hidden;
+}
+
+.records-ranking__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8b5cf6, #a78bfa);
 }
 
 .records-panel {
@@ -3454,6 +3572,10 @@ a.topbar__tool {
 }
 
 @media (max-width: 960px) {
+  .records-stats {
+    grid-template-columns: 1fr;
+  }
+
   .records-panel__controls {
     width: 100%;
   }

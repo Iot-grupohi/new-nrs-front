@@ -20,6 +20,7 @@ from panel_audit import (
     audit_logging_available,
     count_audit_events,
     list_audit_events,
+    list_audit_operator_stats,
     list_audit_operators,
     log_audit_event,
 )
@@ -667,6 +668,43 @@ def api_audit_operators():
     if err:
         return jsonify({'detail': err, 'operators': []}), 500
     return jsonify({'operators': operators}), 200
+
+
+@app.route('/api/audit/operator-stats', methods=['GET'])
+def api_audit_operator_stats():
+    if not audit_logging_available():
+        return jsonify({'detail': 'audit_unavailable', 'operators': []}), 503
+
+    store = request.args.get('store', '').strip().lower() or None
+    action = request.args.get('action', '').strip() or None
+    q = request.args.get('q', '').strip() or None
+    success_raw = request.args.get('success', '').strip().lower()
+    success = None
+    if success_raw in ('1', 'true', 'ok', 'yes'):
+        success = True
+    elif success_raw in ('0', 'false', 'fail', 'no'):
+        success = False
+
+    try:
+        limit = int(request.args.get('limit', '5'))
+    except ValueError:
+        limit = 5
+
+    operators, truncated, err = list_audit_operator_stats(
+        store=store,
+        action=action,
+        success=success,
+        q=q,
+        limit=limit,
+    )
+    if err:
+        return jsonify({'detail': err, 'operators': []}), 500
+
+    return jsonify({
+        'operators': operators,
+        'truncated': truncated,
+        'scan_limit': 10000,
+    }), 200
 
 
 @app.route('/api/panel/health', methods=['GET'])
