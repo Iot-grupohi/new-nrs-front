@@ -14,6 +14,7 @@
   let statusLoading = false;
   let actionBusy = false;
   const washerAm = {};
+  const probingDevices = new Set();
 
   function normalizeStoreId(value) {
     return String(value || '').trim().toLowerCase();
@@ -141,6 +142,89 @@
     return isOperable(online) ? '' : ' disabled';
   }
 
+  function renderPingButton(deviceType, machine, options = {}) {
+    const key = machine ? `${deviceType}:${machine}` : deviceType;
+    const loading = probingDevices.has(key);
+    const machineAttr = machine ? ` data-machine="${escapeHtml(machine)}"` : '';
+    const text = loading ? 'Verificando…' : (options.label || 'Verificar online');
+    return `<button type="button" class="btn btn--sm btn--ghost device-card__ping" data-action="device-ping" data-device-type="${escapeHtml(deviceType)}"${machineAttr}${loading ? ' disabled aria-busy="true"' : ''}>${escapeHtml(text)}</button>`;
+  }
+
+  function ensureStatusData() {
+    if (statusData) return;
+    statusData = {
+      store: currentStore,
+      esp_online: null,
+      esp_error: null,
+      washers: Object.fromEntries((gatewayConfig?.washers || []).map((id) => [id, null])),
+      dryers: Object.fromEntries((gatewayConfig?.dryers || []).map((id) => [id, null])),
+      dosers: Object.fromEntries((gatewayConfig?.dosers || []).map((id) => [id, null])),
+      ac: null,
+    };
+  }
+
+  function extractOnlineFromProbeResult(result) {
+    const data = result.data || {};
+    if (typeof data.online === 'boolean') return data.online;
+    if (result.ok) return true;
+    if (result.status >= 400) return false;
+    return null;
+  }
+
+  function devicePingLabel(deviceType, machine) {
+    const names = { washer: 'Lavadora', dryer: 'Secadora', doser: 'Dosadora', ac: 'Ar-condicionado' };
+    const name = names[deviceType] || deviceType;
+    return machine ? `${name} ${machine}` : name;
+  }
+
+  async function probeDeviceOnline(deviceType, machine) {
+    if (!currentStore) {
+      showToast('Selecione uma loja', false);
+      return;
+    }
+    const key = machine ? `${deviceType}:${machine}` : deviceType;
+    if (probingDevices.has(key)) return;
+
+    const paths = {
+      washer: `status/washer/${machine}`,
+      dryer: `status/dryer/${machine}`,
+      doser: `status/doser/${machine}`,
+      ac: 'status/ac',
+    };
+    const path = paths[deviceType];
+    if (!path) return;
+
+    const label = devicePingLabel(deviceType, machine);
+    probingDevices.add(key);
+    renderDevices();
+
+    try {
+      const result = await gatewayRequest('GET', path, undefined, { allowHttpError: true });
+      const online = extractOnlineFromProbeResult(result);
+      ensureStatusData();
+
+      if (deviceType === 'ac') {
+        statusData.ac = online;
+      } else {
+        statusData[`${deviceType}s`][machine] = online;
+      }
+
+      if (online === true) {
+        statusData.esp_online = true;
+        statusData.esp_error = null;
+      }
+
+      appendLog(`Ping ${label}`, online === true, result.data);
+      showToast(online === true ? `${label} — online` : `${label} — offline`, online === true);
+    } catch (err) {
+      showToast(`Ping ${label}: ${friendlyUserMessage(err.message)}`, false);
+      appendLog(`Ping ${label}`, false, err.payload || err.message);
+    } finally {
+      probingDevices.delete(key);
+      renderDevices();
+    }
+  }
+
   function formatEspError(raw) {
     if (!raw) return 'Gateway ESP8266 não respondeu via MQTT.';
     const text = String(raw);
@@ -227,6 +311,7 @@
             </div>
             ${online === false ? '<p class="device-card__hint">Offline — comando bloqueado</p>' : ''}
           </div>
+          <div class="device-card__ping-row">${renderPingButton('washer', id)}</div>
           <div class="device-card__actions device-card__actions--washer">
             <select class="device-card__select" data-am-for="${escapeHtml(id)}" aria-label="Dosagem AM"${disabledAttr(online)}>
               <option value="">Sem AM</option>
@@ -261,6 +346,7 @@
             </div>
             ${online === false ? '<p class="device-card__hint">Offline — comando bloqueado</p>' : ''}
           </div>
+          <div class="device-card__ping-row">${renderPingButton('dryer', id)}</div>
           <div class="device-card__actions device-card__actions--dryer">${btns}</div>
         </article>`;
       })
@@ -282,6 +368,7 @@
             </div>
             ${online === false ? '<p class="device-card__hint">Offline — consulta e comandos bloqueados</p>' : ''}
           </div>
+          <div class="device-card__ping-row">${renderPingButton('doser', id)}</div>
           <div class="device-card__actions device-card__actions--doser">
             <div class="device-card__action-grid device-card__action-grid--3">
               <button type="button" class="btn btn--ghost" data-action="doser-rele" data-machine="${escapeHtml(id)}" data-type="rele1on"${disabledAttr(online)}>Sabão</button>
@@ -314,6 +401,7 @@
         </div>
         ${online === false ? '<p class="device-card__hint">Offline — comando bloqueado</p>' : ''}
       </div>
+      <div class="device-card__ping-row">${renderPingButton('ac')}</div>
       <div class="device-card__actions device-card__actions--ac">
         ${temps
           .map(
@@ -461,6 +549,11 @@
 
     const action = btn.dataset.action;
     const machine = btn.dataset.machine;
+
+    if (action === 'device-ping') {
+      await probeDeviceOnline(btn.dataset.deviceType, machine || null);
+      return;
+    }
 
     if (action === 'washer-release') {
       if (!ensureDeviceOnline('washer', machine)) {

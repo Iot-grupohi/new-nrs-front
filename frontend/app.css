@@ -4171,3 +4171,13 @@ a.topbar__tool {
   50% { opacity: 0.45; }
 }
 
+.page-gateway .device-card__ping-row {
+  margin: 0.35rem 0 0.65rem;
+}
+
+.page-gateway .device-card__ping {
+  width: 100%;
+  justify-content: center;
+  font-size: 0.78rem;
+}
+
