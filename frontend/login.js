@@ -23,11 +23,7 @@
   function friendlyLoginError(err) {
     const msg = String(err?.message || err || 'Falha no login');
     if (/unauthorized-domain/i.test(msg)) {
-      return (
-        'Este endereço não está autorizado no Firebase. ' +
-        'Acesse via localhost (painel local) ou configure um domínio no Firebase Console ' +
-        '(Authentication → Settings → Authorized domains). Login por IP público não funciona.'
-      );
+      return 'Login indisponível neste endereço. Contacte o suporte técnico.';
     }
     if (/network|failed to fetch|load/i.test(msg)) {
       return 'Sem conexão com o servidor ou com o Firebase. Verifique a rede e se o painel está rodando.';
@@ -62,7 +58,7 @@
       }
 
       if (cfg.verify_mode === 'none') {
-        hintEl.textContent = 'Login indisponível — verifique FIREBASE_API_KEY no .env.';
+        hintEl.textContent = 'Login indisponível. Contacte o suporte técnico.';
         hintEl.classList.remove('hidden');
       }
 
@@ -73,7 +69,6 @@
         window.location.replace(returnPath());
       }
     } catch (e) {
-      console.error('[LAV60 login] boot:', e);
       showError(friendlyLoginError(e));
     }
   }
@@ -92,7 +87,6 @@
       await Lav60Auth.signInWithEmail(email, password);
       window.location.replace(returnPath());
     } catch (e) {
-      console.error('[LAV60 login] submit:', e);
       showError(friendlyLoginError(e));
     } finally {
       setLoading(false);

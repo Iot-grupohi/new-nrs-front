@@ -340,7 +340,7 @@
   function ensureTokenIfRequired() {
     if (!config?.token_required) return true;
     if (agentToken) return true;
-    showToast('Agente exige token — configure API_TOKEN no .env do servidor', false);
+    showToast('Autenticação do agente indisponível. Contacte o suporte.', false);
     return false;
   }
 
@@ -1501,7 +1501,7 @@
       lav60Debug('store', 'ready — staying on store page');
 
       if (config?.token_required && !agentToken?.trim()) {
-        showToast('Agente exige token — configure API_TOKEN no .env do servidor', false);
+        showToast('Autenticação do agente indisponível. Contacte o suporte.', false);
       }
 
       if (heartbeatAlive) {

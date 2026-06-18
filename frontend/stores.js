@@ -164,14 +164,12 @@
     const parts = [dev.id, dev.online ? 'Rede: online' : 'Rede: offline'];
     const meta = {
       machine_type_label: dev.machine_type_label,
-      address: dev.address,
       status_label: dev.status_label,
       capacity: dev.capacity,
       liter_capacity: dev.liter_capacity,
       waiting_minutes: dev.waiting_minutes,
       store_code: dev.store_code,
       time_dosage: dev.time_dosage,
-      port: dev.port,
     };
     const apiTitle = machineMetaTitle(meta);
     if (apiTitle) parts.push(apiTitle);
@@ -438,7 +436,7 @@
 
     if (payload.fromCache && payload.live === false) {
       const count = payload.stores?.length || dashboard.stores?.total || 0;
-      subtitle.textContent = `${count} loja(s) no cache local · sincronizando heartbeat…`;
+      subtitle.textContent = `${count} loja(s) · sincronizando…`;
       return;
     }
 
@@ -617,10 +615,10 @@
     const gatewayLoading = gatewayState?.loading;
     const gatewayOnline = gatewayState?.online === true;
     const gatewayDetail = gatewayLoading
-      ? 'Verificando ESP8266 (POST led/on)…'
+      ? 'Verificando redundância…'
       : gatewayOnline
-        ? `Gateway central online${gatewayState.checkedAt ? ` · ${formatGatewayCacheAge(gatewayState.checkedAt)}` : ''}`
-        : gatewayState?.error || 'Gateway offline ou não configurado';
+        ? `Redundância disponível${gatewayState.checkedAt ? ` · ${formatGatewayCacheAge(gatewayState.checkedAt)}` : ''}`
+        : gatewayState?.error || 'Redundância indisponível';
 
     options.innerHTML = [
       buildChannelOptionHtml('agent', {
@@ -687,9 +685,9 @@
 
     const agent = agentChannelSummary(store);
     if (agent.ready) {
-      $('storeChannelSubtitle').textContent = 'Agente local disponível — gateway verificado';
+      $('storeChannelSubtitle').textContent = 'Agente local disponível — redundância verificada';
     } else if (gatewayState.online) {
-      $('storeChannelSubtitle').textContent = 'Agente indisponível — use o gateway de redundância';
+      $('storeChannelSubtitle').textContent = 'Agente indisponível — use a redundância';
     } else {
       $('storeChannelSubtitle').textContent = 'Nenhum canal operacional no momento';
     }

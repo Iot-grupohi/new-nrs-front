@@ -5,7 +5,6 @@
   const { guardPage, mountUserMenu, panelFetch } = window.Lav60Auth;
 
   const $ = (id) => document.getElementById(id);
-  const MAX_LOG = 10;
 
   const TEMPO_LABELS = { sabao: 'Sabão', floral: 'Floral', sport: 'Sport' };
   const DOSER_TYPE_LABELS = { rele1on: 'Sabão', rele2on: 'Floral', rele3on: 'Sport' };
@@ -34,11 +33,7 @@
   const GATEWAY_TTL_MS = 5 * 60 * 1000;
   const DEVICES_TTL_MS = 10 * 60 * 1000;
 
-  function gatewayDebug(label, payload) {
-    const ts = new Date().toISOString().slice(11, 23);
-    if (payload !== undefined) console.log(`[LAV60 Gateway ${ts}] ${label}`, payload);
-    else console.log(`[LAV60 Gateway ${ts}] ${label}`);
-  }
+  function gatewayDebug() {}
 
   function normalizeStoreId(value) {
     return String(value || '').trim().toLowerCase();
@@ -164,19 +159,7 @@
     showToast._t = setTimeout(() => el.classList.add('hidden'), 4500);
   }
 
-  function appendLog(label, ok, payload) {
-    const list = $('responseLog');
-    if (!list) return;
-    const item = document.createElement('li');
-    item.className = `gateway-log__item ${ok ? 'gateway-log__item--ok' : 'gateway-log__item--err'}`;
-    const preview =
-      typeof payload === 'string' ? payload : JSON.stringify(payload, null, 0).slice(0, 320);
-    item.innerHTML = `<time>${new Date().toLocaleTimeString('pt-BR')}</time>
-      <strong>${escapeHtml(label)}</strong>
-      <code>${escapeHtml(preview)}</code>`;
-    list.prepend(item);
-    while (list.children.length > MAX_LOG) list.removeChild(list.lastChild);
-  }
+  function appendLog() {}
 
   function storeSelected() {
     return Boolean(currentStore && storeGatewayReady);
@@ -206,22 +189,20 @@
     if (!el) return;
     el.className = 'gateway-meta';
     if (!currentStore || !state) {
-      el.textContent = 'Gateway loja: —';
+      el.textContent = 'Gateway: —';
       return;
     }
     if (state === 'checking') {
-      el.textContent = 'Gateway loja: verificando…';
+      el.textContent = 'Gateway: verificando…';
       el.classList.add('gateway-meta--warn');
     } else if (state === 'online') {
-      const cached = getStoreGatewayEntry(currentStore);
-      const age = cached?.checkedAt ? ` · ${formatCacheAge(cached.checkedAt)}` : '';
-      el.textContent = `Gateway loja: online (${currentStore.toUpperCase()}${age})`;
+      el.textContent = `Gateway: online (${currentStore.toUpperCase()})`;
       el.classList.add('gateway-meta--ok');
     } else if (state === 'offline') {
-      el.textContent = detail || `Gateway loja: offline (${currentStore.toUpperCase()})`;
+      el.textContent = detail || `Gateway: offline (${currentStore.toUpperCase()})`;
       el.classList.add('gateway-meta--err');
     } else {
-      el.textContent = 'Gateway loja: —';
+      el.textContent = 'Gateway: —';
     }
   }
 
@@ -229,12 +210,12 @@
     const code = String(storeId || '').toUpperCase();
     const msg = String(detail || '').trim();
     if (!msg) {
-      return `A loja ${code} não possui gateway online no momento. Apenas lojas com ESP8266 ativo no gateway central podem ser operadas por aqui.`;
+      return `A loja ${code} não possui redundância disponível no momento.`;
     }
     if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
-      return `A loja ${code} não está cadastrada no gateway central ou o ESP8266 não está configurado.`;
+      return `A loja ${code} não está disponível na redundância.`;
     }
-    return `Gateway da loja ${code} não está online. ${friendlyUserMessage(msg)}`;
+    return `Redundância da loja ${code} indisponível. ${friendlyUserMessage(msg)}`;
   }
 
   async function verifyStoreGateway(storeId, { force = false } = {}) {
@@ -333,8 +314,6 @@
     if (!res.ok) throw new Error('Configuração do gateway indisponível');
     gatewayConfig = await res.json();
     gatewayConfig.washer_dosage_options = WASHER_DOSAGE_OPTIONS;
-    const base = gatewayConfig.base_url || 'https://gateway.lav60.com';
-    $('gatewayBaseUrl').textContent = base.replace(/^https?:\/\//, '');
     $('tokenAlert').classList.toggle('hidden', Boolean(gatewayConfig.token_configured));
     return gatewayConfig;
   }
@@ -374,20 +353,13 @@
   }
 
   async function checkApiHealth() {
-    $('apiHealthMeta').textContent = 'API: verificando…';
     try {
       const res = await panelFetch('/api/gateway/health');
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-      $('apiHealthMeta').textContent = `API: online (${data.message || 'OK'})`;
-      $('apiHealthMeta').className = 'gateway-meta gateway-meta--ok';
-      appendLog('Health API', true, data);
       return data;
-    } catch (err) {
-      $('apiHealthMeta').textContent = `API: offline — ${err.message}`;
-      $('apiHealthMeta').className = 'gateway-meta gateway-meta--err';
-      appendLog('Health API', false, err.message);
-      throw err;
+    } catch {
+      return null;
     }
   }
 
@@ -557,14 +529,7 @@
     return releaseBtn;
   }
 
-  function appendEndpointHint(container, deviceType, machine) {
-    const path = deviceEndpointPath(deviceType, machine);
-    if (!currentStore || !path) return;
-    const p = document.createElement('p');
-    p.className = 'device-card__endpoint';
-    p.innerHTML = `<code>GET ${escapeHtml(fullGatewayPath(path))}</code>`;
-    container.appendChild(p);
-  }
+  function appendEndpointHint() {}
 
   function createDeviceShell(id, online, fillContent, { probing = false } = {}) {
     const card = document.createElement('article');
@@ -1015,11 +980,6 @@
     const disabled = !storeSelected();
 
     const card = createDeviceShell('LED', null, (shell) => {
-      const p = document.createElement('p');
-      p.className = 'device-card__endpoint';
-      p.innerHTML = `<code>POST ${escapeHtml(currentStore ? `${currentStore}/led/on` : '{loja}/led/on')}</code>`;
-      shell.appendChild(p);
-
       const actions = document.createElement('div');
       actions.className = 'device-card__actions';
       const onBtn = btn('Ligar', 'btn--success', () => {
@@ -1145,16 +1105,10 @@
     checkApiHealth().catch(() => {});
 
     $('storeSelect').addEventListener('change', onStoreSelectChange);
-    $('btnClearLog').addEventListener('click', () => {
-      $('responseLog').innerHTML = '';
-    });
   }
 
   init().catch((err) => {
     document.body.classList.remove('auth-pending');
-    gatewayDebug('init erro', err.message);
     showToast(err.message || 'Erro ao iniciar', false);
   });
-
-  gatewayDebug('gateway.js carregado — verificação automática por equipamento');
 })();

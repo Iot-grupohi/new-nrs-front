@@ -581,7 +581,6 @@
   function machineMetaFacts(meta) {
     if (!meta) return [];
     const facts = [];
-    if (meta.address) facts.push(meta.address);
     if (meta.liter_capacity != null && meta.liter_capacity !== '') {
       facts.push(`${meta.liter_capacity} L`);
     }
@@ -590,9 +589,6 @@
     }
     if (displayMachineValue(meta.time_dosage)) {
       facts.push(displayMachineValue(meta.time_dosage));
-    }
-    if (displayMachineValue(meta.port)) {
-      facts.push(`porta ${meta.port}`);
     }
     return facts;
   }
@@ -635,15 +631,12 @@
     if (!meta) return [];
     return [
       ['Tipo', meta.machine_type_label || meta.machine_type],
-      ['IP', meta.address],
       ['Status', meta.status_label],
       ['Capacidade', meta.capacity && meta.capacity !== '—' ? meta.capacity : null],
       ['Litros', meta.liter_capacity != null && meta.liter_capacity !== '' ? `${meta.liter_capacity} L` : null],
       ['Espera', meta.waiting_minutes != null && meta.waiting_minutes !== '' ? `${meta.waiting_minutes} min` : null],
       ['Dosagem', displayMachineValue(meta.time_dosage)],
-      ['Porta', displayMachineValue(meta.port)],
       ['Loja', meta.store_code],
-      ['Endpoint', meta.endpoints?.release || meta.endpoints?.status || null],
     ].filter(([, v]) => v);
   }
 
@@ -1268,10 +1261,10 @@
     const code = String(storeId || '').toUpperCase();
     const msg = String(detail || '').trim();
     if (!msg) {
-      return `A loja ${code} não possui gateway online no momento. Apenas lojas com ESP8266 ativo no gateway central podem ser operadas por aqui.`;
+      return `A loja ${code} não possui redundância disponível no momento.`;
     }
     if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
-      return `A loja ${code} não está cadastrada no gateway central ou o ESP8266 não está configurado.`;
+      return `A loja ${code} não está disponível na redundância.`;
     }
     return friendlyUserMessage(msg);
   }

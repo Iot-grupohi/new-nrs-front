@@ -5,7 +5,7 @@
     dashboard: {
       nav: 'dashboard',
       title: 'LAV60 — Dashboard',
-      view: 'views/dashboard.html?v=6',
+      view: 'views/dashboard.html?v=7',
       pageClass: 'page-dashboard',
     },
     lojas: {
@@ -120,7 +120,6 @@
       await initRouteModule(routeName);
     } catch (e) {
       appView.innerHTML = `<div class="stores-empty-state"><p>${String(e.message || e)}</p></div>`;
-      console.error('[LAV60 router]', e);
     } finally {
       appView.classList.remove('app-view--loading');
       navigating = false;

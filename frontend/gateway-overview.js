@@ -15,7 +15,7 @@
   const GATEWAY_KPI_CONFIG = {
     'gateway-online': {
       title: 'Gateways online',
-      empty: 'Nenhuma loja com ESP8266 online no gateway central.',
+      empty: 'Nenhuma loja com redundância disponível.',
     },
     'gateway-offline': {
       title: 'Gateways offline',
@@ -102,7 +102,7 @@
       ${items
         .map((entry) => {
           const age = entry.checkedAt ? formatGatewayCacheAge(entry.checkedAt) : '';
-          const sub = age ? `ESP8266 online · ${age}` : 'ESP8266 online';
+          const sub = age ? `Online · ${age}` : 'Online';
           return `
         <li class="kpi-event-item">
           <button type="button" class="kpi-event-item__store kpi-event-item__store--action" data-gateway-store="${escapeHtml(entry.store)}">${escapeHtml(storeDisplayName(entry))}</button>
@@ -136,7 +136,7 @@
     return `<ul class="kpi-event-list kpi-event-list--stores">
       ${items
         .map((entry) => {
-          const sub = entry.checking ? 'Verificando ESP8266…' : 'Aguardando verificação';
+          const sub = entry.checking ? 'Verificando…' : 'Aguardando verificação';
           return `
         <li class="kpi-event-item">
           <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
@@ -221,11 +221,10 @@
     const el = $('gatewayOverviewMeta');
     if (!el) return;
     if (scanning) {
-      el.textContent = 'Verificando gateways (POST led/on)…';
+      el.textContent = 'Verificando gateways…';
       return;
     }
-    const ttlMin = Math.round(GATEWAY_TTL_MS / 60000);
-    el.textContent = `Redundância via gateway.lav60.com · cache ${ttlMin} min`;
+    el.textContent = 'Status do gateway de redundância por loja';
   }
 
   function render() {

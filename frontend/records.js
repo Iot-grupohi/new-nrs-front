@@ -334,7 +334,7 @@
     syncRecordsView();
 
     const banner = $('recordsAuditBanner');
-    const hint = auditUnavailable.hint || 'Configure FIREBASE_SERVICE_ACCOUNT_FILE no .env do VPS.';
+    const hint = auditUnavailable.hint || 'Auditoria indisponível. Contacte o suporte técnico.';
     if (banner) {
       banner.classList.remove('hidden');
       banner.innerHTML = `<strong>Auditoria indisponível</strong><p>${escapeHtml(hint)}</p>`;
