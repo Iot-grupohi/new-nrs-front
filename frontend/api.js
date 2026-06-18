@@ -839,18 +839,25 @@
     return normalizeMachineStatus(dev?.status) === 'occupied';
   }
 
+  function isDeviceAvailable(dev) {
+    if (!dev?.online) return false;
+    return normalizeMachineStatus(dev?.status) === 'available';
+  }
+
   function countDeviceStates(devices) {
     let suspended = 0;
     let offlineNetwork = 0;
     let occupied = 0;
+    let available = 0;
     ['washers', 'dryers', 'dosers', 'ac'].forEach((key) => {
       (devices?.[key] || []).forEach((dev) => {
         if (isDeviceSuspended(dev)) suspended += 1;
         else if (isDeviceOccupied(dev)) occupied += 1;
+        else if (isDeviceAvailable(dev)) available += 1;
         else if (!dev.online) offlineNetwork += 1;
       });
     });
-    return { suspended, offlineNetwork, occupied };
+    return { suspended, offlineNetwork, occupied, available };
   }
 
   function summaryFromDevices(devices) {
@@ -949,9 +956,11 @@
     let devicesSuspended = 0;
     let devicesOfflineNetwork = 0;
     let devicesOccupied = 0;
+    let devicesAvailable = 0;
     const devicesSuspendedEvents = [];
     const devicesOfflineNetworkEvents = [];
     const devicesOccupiedEvents = [];
+    const devicesAvailableEvents = [];
     const storesOnlineEvents = [];
     const storesOfflineEvents = [];
     const typeLabels = {
@@ -1005,6 +1014,7 @@
       devicesSuspended += stateCounts.suspended;
       devicesOfflineNetwork += stateCounts.offlineNetwork;
       devicesOccupied += stateCounts.occupied;
+      devicesAvailable += stateCounts.available;
       Object.entries(typeLabels).forEach(([group, label]) => {
         (card.devices?.[group] || []).forEach((dev) => {
           if (isDeviceSuspended(dev)) {
@@ -1022,6 +1032,14 @@
               type_label: label,
               id: dev.id,
               status_label: dev.status_label || 'Ocupada',
+            });
+          } else if (isDeviceAvailable(dev)) {
+            devicesAvailableEvents.push({
+              store: card.id,
+              store_name: card.name || card.id.toUpperCase(),
+              type_label: label,
+              id: dev.id,
+              status_label: dev.status_label || 'Disponível',
             });
           } else if (!dev.online) {
             devicesOfflineNetworkEvents.push({
@@ -1051,6 +1069,7 @@
         offline: devicesSuspended + devicesOfflineNetwork,
         suspended: devicesSuspended,
         occupied: devicesOccupied,
+        available: devicesAvailable,
         offline_network: devicesOfflineNetwork,
         health_pct: devicesTotal ? Math.round((devicesOnline / devicesTotal) * 100) : 0,
       },
@@ -1061,6 +1080,9 @@
           a.store.localeCompare(b.store) || String(a.id).localeCompare(String(b.id))
         ),
         devices_occupied: devicesOccupiedEvents.sort((a, b) =>
+          a.store.localeCompare(b.store) || String(a.id).localeCompare(String(b.id))
+        ),
+        devices_available: devicesAvailableEvents.sort((a, b) =>
           a.store.localeCompare(b.store) || String(a.id).localeCompare(String(b.id))
         ),
         devices_offline_network: devicesOfflineNetworkEvents.sort((a, b) =>
