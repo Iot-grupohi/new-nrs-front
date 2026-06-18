@@ -486,6 +486,70 @@ def agent_proxy_response(resp: requests.Response):
     return jsonify(payload), resp.status_code
 
 
+def parse_upstream_gateway_json(resp: requests.Response) -> dict:
+    try:
+        data = resp.json()
+        return data if isinstance(data, dict) else {'detail': resp.text or resp.reason}
+    except Exception:
+        return {'detail': resp.text or resp.reason or f'HTTP {resp.status_code}'}
+
+
+def extract_online_from_probe(data: dict) -> bool | None:
+    if not isinstance(data, dict):
+        return None
+    if 'online' in data:
+        return bool(data['online'])
+    for key in ('devices', 'statuses'):
+        items = data.get(key)
+        if isinstance(items, list) and items:
+            values = [bool(item.get('online')) for item in items if isinstance(item, dict) and 'online' in item]
+            if values:
+                return any(values)
+    return None
+
+
+def probe_central_device_online(store_id: str, subpath: str) -> bool | None:
+    path = f'/{store_id}/{subpath.lstrip("/")}'
+    try:
+        resp = forward_central_gateway('GET', path, timeout=20)
+        data = parse_upstream_gateway_json(resp)
+        online = extract_online_from_probe(data)
+        if online is not None:
+            return online
+        if resp.status_code == 200:
+            return True
+        if resp.status_code >= 400:
+            return False
+    except Exception:
+        return None
+    return None
+
+
+def build_default_status_summary(store_id: str) -> dict:
+    return {
+        'store': store_id,
+        'esp_online': None,
+        'esp_error': None,
+        'washers': {mid: None for mid in CENTRAL_GATEWAY_MACHINES['washers']},
+        'dryers': {mid: None for mid in CENTRAL_GATEWAY_MACHINES['dryers']},
+        'dosers': {mid: None for mid in CENTRAL_GATEWAY_MACHINES['dosers']},
+        'ac': None,
+        'checked_at': datetime.utcnow().isoformat() + 'Z',
+    }
+
+
+def merge_aggregate_gateway_status(data: dict, summary: dict) -> None:
+    for key in ('washers', 'dryers', 'dosers'):
+        block = data.get(key)
+        if isinstance(block, dict):
+            for mid, val in block.items():
+                mid_str = str(mid)
+                if mid_str in summary[key]:
+                    summary[key][mid_str] = bool(val)
+    if 'ac' in data:
+        summary['ac'] = bool(data['ac'])
+
+
 @app.route('/api/stores/<store_id>/agent/config', methods=['GET', 'OPTIONS'])
 def api_store_agent_config(store_id: str):
     if request.method == 'OPTIONS':
@@ -552,6 +616,52 @@ def api_gateway_health():
         return jsonify({'detail': str(exc)}), 503
     except requests.RequestException as exc:
         return jsonify({'detail': str(exc)}), 502
+
+
+@app.route('/api/gateway/<store_id>/status-summary', methods=['GET'])
+def api_gateway_status_summary(store_id: str):
+    """Agrega status da API central; sempre HTTP 200 com online/offline por equipamento."""
+    sid = normalize_store_id(store_id)
+    if not sid:
+        return jsonify({'detail': 'Invalid store id'}), 400
+
+    summary = build_default_status_summary(sid)
+
+    try:
+        resp = forward_central_gateway('GET', f'/{sid}/status', timeout=30)
+        data = parse_upstream_gateway_json(resp)
+        if resp.status_code == 200 and isinstance(data.get('washers'), dict):
+            summary['esp_online'] = True
+            merge_aggregate_gateway_status(data, summary)
+            return jsonify(summary), 200
+
+        detail = str(data.get('detail') or data.get('error') or data.get('message') or '').strip()
+        summary['esp_error'] = detail or f'HTTP {resp.status_code}'
+        summary['esp_online'] = False
+    except ValueError as exc:
+        return jsonify({'detail': str(exc)}), 503
+    except requests.RequestException as exc:
+        summary['esp_error'] = str(exc)
+        summary['esp_online'] = False
+
+    for mid in CENTRAL_GATEWAY_MACHINES['washers']:
+        summary['washers'][mid] = probe_central_device_online(sid, f'status/washer/{mid}')
+    for mid in CENTRAL_GATEWAY_MACHINES['dryers']:
+        summary['dryers'][mid] = probe_central_device_online(sid, f'status/dryer/{mid}')
+    for mid in CENTRAL_GATEWAY_MACHINES['dosers']:
+        summary['dosers'][mid] = probe_central_device_online(sid, f'status/doser/{mid}')
+    summary['ac'] = probe_central_device_online(sid, 'status/ac')
+
+    any_online = any(
+        value is True
+        for block in (summary['washers'], summary['dryers'], summary['dosers'])
+        for value in block.values()
+    ) or summary['ac'] is True
+    if any_online and summary['esp_online'] is False:
+        summary['esp_online'] = True
+        summary['esp_error'] = None
+
+    return jsonify(summary), 200
 
 
 @app.route('/api/gateway/<store_id>/<path:subpath>', methods=['GET', 'POST', 'OPTIONS'])

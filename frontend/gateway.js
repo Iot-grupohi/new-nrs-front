@@ -66,30 +66,36 @@
     return gatewayConfig;
   }
 
-  async function gatewayRequest(method, subpath, body) {
+  function readGatewayError(data, status) {
+    if (!data) return `HTTP ${status}`;
+    return data.detail || data.error || data.message || `HTTP ${status}`;
+  }
+
+  async function gatewayRequest(method, subpath, body, options = {}) {
     if (!currentStore) throw new Error('Selecione uma loja');
     const url = `/api/gateway/${encodeURIComponent(currentStore)}/${subpath.replace(/^\//, '')}`;
-    const options = {
+    const fetchOptions = {
       method,
       headers: { Accept: 'application/json' },
     };
     if (body !== undefined) {
-      options.headers['Content-Type'] = 'application/json';
-      options.body = JSON.stringify(body);
+      fetchOptions.headers['Content-Type'] = 'application/json';
+      fetchOptions.body = JSON.stringify(body);
     }
-    const res = await panelFetch(url, options);
+    const res = await panelFetch(url, fetchOptions);
     let data;
     try {
       data = await res.json();
     } catch {
       data = { detail: `HTTP ${res.status}` };
     }
-    if (!res.ok) {
-      const err = new Error(data.detail || data.message || `HTTP ${res.status}`);
+    if (!res.ok && !options.allowHttpError) {
+      const err = new Error(readGatewayError(data, res.status));
       err.payload = data;
+      err.httpStatus = res.status;
       throw err;
     }
-    return data;
+    return { data, ok: res.ok, status: res.status };
   }
 
   async function checkApiHealth() {
@@ -113,7 +119,47 @@
   function onlinePill(online) {
     if (online === true) return '<span class="device-card__status pill pill--on">Online</span>';
     if (online === false) return '<span class="device-card__status pill pill--off">Offline</span>';
-    return '<span class="device-card__status pill pill--warn">—</span>';
+    return '<span class="device-card__status pill pill--warn">Desconhecido</span>';
+  }
+
+  function isOperable(online) {
+    return online === true;
+  }
+
+  function cardBlockedClass(online) {
+    return online === false ? ' device-card--blocked' : '';
+  }
+
+  function disabledAttr(online) {
+    return isOperable(online) ? '' : ' disabled';
+  }
+
+  function updateEspStatus() {
+    const meta = $('espStatusMeta');
+    const alert = $('espAlert');
+    if (!meta || !alert) return;
+
+    if (!statusData) {
+      meta.textContent = 'ESP8266: —';
+      meta.className = 'gateway-meta';
+      alert.classList.add('hidden');
+      alert.textContent = '';
+      return;
+    }
+
+    if (statusData.esp_online === true) {
+      meta.textContent = 'ESP8266: online (MQTT)';
+      meta.className = 'gateway-meta gateway-meta--ok';
+      alert.classList.add('hidden');
+      alert.textContent = '';
+      return;
+    }
+
+    meta.textContent = 'ESP8266: offline ou sem resposta';
+    meta.className = 'gateway-meta gateway-meta--err';
+    const msg = statusData.esp_error || 'Gateway ESP8266 não respondeu via MQTT.';
+    alert.textContent = msg;
+    alert.classList.remove('hidden');
   }
 
   function renderSummary() {
@@ -154,19 +200,20 @@
           (v) =>
             `<option value="${escapeHtml(v)}"${am === v ? ' selected' : ''}>${escapeHtml(v)}</option>`
         );
-        return `<article class="device-card device-card--tile">
+        return `<article class="device-card device-card--tile${cardBlockedClass(online)}">
           <div class="device-card__head">
             <div class="device-card__title-row">
               <span class="device-card__id">${escapeHtml(id)}</span>
               ${onlinePill(online)}
             </div>
+            ${online === false ? '<p class="device-card__hint">Offline — comando bloqueado</p>' : ''}
           </div>
           <div class="device-card__actions device-card__actions--washer">
-            <select class="device-card__select" data-am-for="${escapeHtml(id)}" aria-label="Dosagem AM">
+            <select class="device-card__select" data-am-for="${escapeHtml(id)}" aria-label="Dosagem AM"${disabledAttr(online)}>
               <option value="">Sem AM</option>
               ${amOptions.join('')}
             </select>
-            <button type="button" class="btn btn--primary device-card__release-btn" data-action="washer-release" data-machine="${escapeHtml(id)}">Liberar</button>
+            <button type="button" class="btn btn--primary device-card__release-btn" data-action="washer-release" data-machine="${escapeHtml(id)}"${disabledAttr(online)}>Liberar</button>
           </div>
         </article>`;
       })
@@ -184,15 +231,16 @@
         const btns = minutes
           .map(
             (m) =>
-              `<button type="button" class="btn btn--warning" data-action="dryer-start" data-machine="${escapeHtml(id)}" data-minutes="${m}">${m} min</button>`
+              `<button type="button" class="btn btn--warning" data-action="dryer-start" data-machine="${escapeHtml(id)}" data-minutes="${m}"${disabledAttr(online)}>${m} min</button>`
           )
           .join('');
-        return `<article class="device-card device-card--tile">
+        return `<article class="device-card device-card--tile${cardBlockedClass(online)}">
           <div class="device-card__head">
             <div class="device-card__title-row">
               <span class="device-card__id">${escapeHtml(id)}</span>
               ${onlinePill(online)}
             </div>
+            ${online === false ? '<p class="device-card__hint">Offline — comando bloqueado</p>' : ''}
           </div>
           <div class="device-card__actions device-card__actions--dryer">${btns}</div>
         </article>`;
@@ -207,26 +255,27 @@
     grid.innerHTML = ids
       .map((id) => {
         const online = statusData?.dosers?.[id];
-        return `<article class="device-card device-card--tile device-card--doser">
+        return `<article class="device-card device-card--tile device-card--doser${cardBlockedClass(online)}">
           <div class="device-card__head">
             <div class="device-card__title-row">
               <span class="device-card__id">${escapeHtml(id)}</span>
               ${onlinePill(online)}
             </div>
+            ${online === false ? '<p class="device-card__hint">Offline — consulta e comandos bloqueados</p>' : ''}
           </div>
           <div class="device-card__actions device-card__actions--doser">
             <div class="device-card__action-grid device-card__action-grid--3">
-              <button type="button" class="btn btn--ghost" data-action="doser-rele" data-machine="${escapeHtml(id)}" data-type="rele1on">Sabão</button>
-              <button type="button" class="btn btn--ghost" data-action="doser-rele" data-machine="${escapeHtml(id)}" data-type="rele2on">Floral</button>
-              <button type="button" class="btn btn--ghost" data-action="doser-rele" data-machine="${escapeHtml(id)}" data-type="rele3on">Sport</button>
+              <button type="button" class="btn btn--ghost" data-action="doser-rele" data-machine="${escapeHtml(id)}" data-type="rele1on"${disabledAttr(online)}>Sabão</button>
+              <button type="button" class="btn btn--ghost" data-action="doser-rele" data-machine="${escapeHtml(id)}" data-type="rele2on"${disabledAttr(online)}>Floral</button>
+              <button type="button" class="btn btn--ghost" data-action="doser-rele" data-machine="${escapeHtml(id)}" data-type="rele3on"${disabledAttr(online)}>Sport</button>
             </div>
             <div class="device-card__action-row">
-              <button type="button" class="btn btn--primary device-card__action-wide" data-action="doser-consulta" data-machine="${escapeHtml(id)}">Consulta tempos</button>
+              <button type="button" class="btn btn--primary device-card__action-wide" data-action="doser-consulta" data-machine="${escapeHtml(id)}"${disabledAttr(online)}>Consulta tempos</button>
             </div>
             <div class="device-card__action-grid device-card__action-grid--3">
-              <button type="button" class="btn btn--success" data-action="doser-amaciante" data-machine="${escapeHtml(id)}">Amaciante</button>
-              <button type="button" class="btn btn--success" data-action="doser-dosagem" data-machine="${escapeHtml(id)}">Dosagem</button>
-              <button type="button" class="btn btn--ghost" data-action="doser-device-status" data-machine="${escapeHtml(id)}">HTTP status</button>
+              <button type="button" class="btn btn--success" data-action="doser-amaciante" data-machine="${escapeHtml(id)}"${disabledAttr(online)}>Amaciante</button>
+              <button type="button" class="btn btn--success" data-action="doser-dosagem" data-machine="${escapeHtml(id)}"${disabledAttr(online)}>Dosagem</button>
+              <button type="button" class="btn btn--ghost" data-action="doser-device-status" data-machine="${escapeHtml(id)}"${disabledAttr(online)}>HTTP status</button>
             </div>
           </div>
         </article>`;
@@ -238,18 +287,19 @@
     const temps = gatewayConfig?.ac_temperatures || ['18', '22', 'off'];
     const online = statusData?.ac;
     const labels = { 18: '18°C', 22: '22°C', off: 'Desligar' };
-    $('acGrid').innerHTML = `<article class="device-card device-card--tile">
+    $('acGrid').innerHTML = `<article class="device-card device-card--tile${cardBlockedClass(online)}">
       <div class="device-card__head">
         <div class="device-card__title-row">
           <span class="device-card__id">AC</span>
           ${onlinePill(online)}
         </div>
+        ${online === false ? '<p class="device-card__hint">Offline — comando bloqueado</p>' : ''}
       </div>
       <div class="device-card__actions device-card__actions--ac">
         ${temps
           .map(
             (t) =>
-              `<button type="button" class="btn btn--primary" data-action="ac-set" data-temp="${escapeHtml(t)}">${escapeHtml(labels[t] || t)}</button>`
+              `<button type="button" class="btn btn--primary" data-action="ac-set" data-temp="${escapeHtml(t)}"${disabledAttr(online)}>${escapeHtml(labels[t] || t)}</button>`
           )
           .join('')}
       </div>
@@ -257,15 +307,18 @@
   }
 
   function renderLed() {
-    $('ledGrid').innerHTML = `<article class="device-card device-card--tile">
+    const espOk = statusData?.esp_online === true;
+    $('ledGrid').innerHTML = `<article class="device-card device-card--tile${espOk ? '' : ' device-card--blocked'}">
       <div class="device-card__head">
         <div class="device-card__title-row">
           <span class="device-card__id">LED</span>
+          ${onlinePill(espOk)}
         </div>
+        ${!espOk ? '<p class="device-card__hint">ESP8266 offline — LED bloqueado</p>' : ''}
       </div>
       <div class="device-card__actions">
-        <button type="button" class="btn btn--success" data-action="led-on">Ligar</button>
-        <button type="button" class="btn btn--ghost" data-action="led-off">Desligar</button>
+        <button type="button" class="btn btn--success" data-action="led-on"${disabledAttr(espOk)}>Ligar</button>
+        <button type="button" class="btn btn--ghost" data-action="led-off"${disabledAttr(espOk)}>Desligar</button>
       </div>
     </article>`;
   }
@@ -277,6 +330,7 @@
     renderAc();
     renderLed();
     renderSummary();
+    updateEspStatus();
   }
 
   async function refreshStatus() {
@@ -287,19 +341,46 @@
     $('statusTime').textContent = 'Status: carregando…';
     setBusy(true);
     try {
-      statusData = await gatewayRequest('GET', 'status');
+      const res = await panelFetch(`/api/gateway/${encodeURIComponent(currentStore)}/status-summary`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(readGatewayError(data, res.status));
+      statusData = data;
       $('statusTime').textContent = `Status: ${new Date().toLocaleTimeString('pt-BR')}`;
       renderDevices();
       appendLog(`Status ${currentStore}`, true, statusData);
+      if (statusData.esp_online === false) {
+        showToast(statusData.esp_error || 'ESP8266 offline via MQTT', false);
+      }
     } catch (err) {
       statusData = null;
       $('statusTime').textContent = 'Status: erro';
       renderDevices();
       showToast(err.message, false);
-      appendLog(`Status ${currentStore}`, false, err.payload || err.message);
+      appendLog(`Status ${currentStore}`, false, err.message);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function runGatewayAction(label, subpath, method = 'POST', body) {
+    const result = await gatewayRequest(method, subpath, body);
+    if (!result.ok) {
+      const err = new Error(readGatewayError(result.data, result.status));
+      err.payload = result.data;
+      throw err;
+    }
+    return result.data;
+  }
+
+  function ensureDeviceOnline(type, machine) {
+    if (!statusData) return true;
+    if (type === 'ac') return isOperable(statusData.ac);
+    if (type === 'esp') return statusData.esp_online === true;
+    const block = statusData[`${type}s`] || statusData[type];
+    if (typeof block === 'object' && block && machine in block) {
+      return isOperable(block[machine]);
+    }
+    return true;
   }
 
   async function runAction(label, fn) {
@@ -316,7 +397,7 @@
       await refreshStatus().catch(() => {});
       return data;
     } catch (err) {
-      showToast(`${label}: ${err.message}`, false);
+      showToast(`${label}: ${friendlyUserMessage(err.message)}`, false);
       appendLog(label, false, err.payload || err.message);
     } finally {
       setBusy(false);
@@ -365,78 +446,114 @@
     const machine = btn.dataset.machine;
 
     if (action === 'washer-release') {
+      if (!ensureDeviceOnline('washer', machine)) {
+        showToast(`Lavadora ${machine} offline`, false);
+        return;
+      }
       const am = washerAm[machine] || '';
       const label = am ? `Lavadora ${machine} + ${am}` : `Lavadora ${machine}`;
       if (!confirm(`Confirmar liberação da lavadora ${machine}?`)) return;
       await runAction(label, () =>
-        gatewayRequest('POST', `washer/${machine}`, am ? { am } : undefined)
+        runGatewayAction(label, `washer/${machine}`, 'POST', am ? { am } : undefined)
       );
       return;
     }
 
     if (action === 'dryer-start') {
+      if (!ensureDeviceOnline('dryer', machine)) {
+        showToast(`Secadora ${machine} offline`, false);
+        return;
+      }
       const minutes = Number(btn.dataset.minutes);
       if (!confirm(`Iniciar secadora ${machine} por ${minutes} min?`)) return;
       await runAction(`Secadora ${machine} ${minutes}min`, () =>
-        gatewayRequest('POST', `dryer/${machine}`, { minutes })
+        runGatewayAction(`Secadora ${machine}`, `dryer/${machine}`, 'POST', { minutes })
       );
       return;
     }
 
     if (action === 'ac-set') {
+      if (!ensureDeviceOnline('ac')) {
+        showToast('Ar-condicionado offline', false);
+        return;
+      }
       const temp = btn.dataset.temp;
       const label = temp === 'off' ? 'AC desligar' : `AC ${temp}°C`;
       if (!confirm(`Confirmar ${label}?`)) return;
-      await runAction(label, () => gatewayRequest('POST', 'ac', { temperature: temp }));
+      await runAction(label, () => runGatewayAction(label, 'ac', 'POST', { temperature: temp }));
       return;
     }
 
     if (action === 'doser-rele') {
+      if (!ensureDeviceOnline('doser', machine)) {
+        showToast(`Dosadora ${machine} offline`, false);
+        return;
+      }
       const type = btn.dataset.type;
       if (!confirm(`Acionar ${type} na dosadora ${machine}?`)) return;
       await runAction(`Dosador ${machine} ${type}`, () =>
-        gatewayRequest('POST', `doser/${machine}`, { type })
+        runGatewayAction(`Dosador ${machine}`, `doser/${machine}`, 'POST', { type })
       );
       return;
     }
 
     if (action === 'doser-consulta') {
+      if (!ensureDeviceOnline('doser', machine)) {
+        showToast(`Dosadora ${machine} offline — consulta indisponível`, false);
+        return;
+      }
       await runAction(`Consulta ${machine}`, () =>
-        gatewayRequest('GET', `doser/${machine}/consulta`)
+        runGatewayAction(`Consulta ${machine}`, `doser/${machine}/consulta`, 'GET')
       );
       return;
     }
 
     if (action === 'doser-amaciante') {
+      if (!ensureDeviceOnline('doser', machine)) {
+        showToast(`Dosadora ${machine} offline`, false);
+        return;
+      }
       if (!confirm(`Amaciante na dosadora ${machine}?`)) return;
       await runAction(`Amaciante ${machine}`, () =>
-        gatewayRequest('POST', `doser/${machine}/amaciante`)
+        runGatewayAction(`Amaciante ${machine}`, `doser/${machine}/amaciante`, 'POST')
       );
       return;
     }
 
     if (action === 'doser-dosagem') {
+      if (!ensureDeviceOnline('doser', machine)) {
+        showToast(`Dosadora ${machine} offline`, false);
+        return;
+      }
       if (!confirm(`Dosagem na dosadora ${machine}?`)) return;
       await runAction(`Dosagem ${machine}`, () =>
-        gatewayRequest('POST', `doser/${machine}/dosagem`)
+        runGatewayAction(`Dosagem ${machine}`, `doser/${machine}/dosagem`, 'POST')
       );
       return;
     }
 
     if (action === 'doser-device-status') {
       await runAction(`Device status ${machine}`, () =>
-        gatewayRequest('GET', `doser/${machine}/device-status`)
+        runGatewayAction(`Device status ${machine}`, `doser/${machine}/device-status`, 'GET')
       );
       return;
     }
 
     if (action === 'led-on') {
-      await runAction('LED ligar', () => gatewayRequest('POST', 'led/on'));
+      if (!ensureDeviceOnline('esp')) {
+        showToast('ESP8266 offline — LED indisponível', false);
+        return;
+      }
+      await runAction('LED ligar', () => runGatewayAction('LED ligar', 'led/on', 'POST'));
       return;
     }
 
     if (action === 'led-off') {
-      await runAction('LED desligar', () => gatewayRequest('POST', 'led/off'));
+      if (!ensureDeviceOnline('esp')) {
+        showToast('ESP8266 offline — LED indisponível', false);
+        return;
+      }
+      await runAction('LED desligar', () => runGatewayAction('LED desligar', 'led/off', 'POST'));
     }
   }
 

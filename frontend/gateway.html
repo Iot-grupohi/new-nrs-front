@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LAV60 — Gateway (redundância)</title>
-  <link rel="stylesheet" href="app.css?v=14">
+  <link rel="stylesheet" href="app.css?v=15">
 </head>
 <body class="page-dashboard page-store page-gateway auth-pending">
   <div class="app-shell">
@@ -42,6 +42,8 @@
         Token da API central não configurado no servidor. Defina <code>GATEWAY_API_TOKEN</code> ou <code>API_TOKEN</code> no <code>.env</code> do painel.
       </section>
 
+      <section class="gateway-alert hidden" id="espAlert" role="alert"></section>
+
       <section class="gateway-toolbar card">
         <div class="gateway-toolbar__row">
           <label class="gateway-field">
@@ -60,6 +62,7 @@
         </div>
         <div class="gateway-toolbar__meta">
           <span class="gateway-meta" id="apiHealthMeta">API: —</span>
+          <span class="gateway-meta" id="espStatusMeta">ESP8266: —</span>
           <span class="gateway-meta" id="storeMeta">Loja: —</span>
           <span class="gateway-meta" id="statusTime">Status: —</span>
         </div>
