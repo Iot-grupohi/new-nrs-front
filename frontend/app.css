@@ -818,6 +818,49 @@ select.btn {
   min-width: 0;
 }
 
+.store-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin: 0 1rem 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(100, 116, 139, 0.28);
+  background: rgba(100, 116, 139, 0.1);
+}
+
+.store-banner--suspended {
+  border-color: rgba(100, 116, 139, 0.35);
+}
+
+.store-banner__icon {
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.22);
+  color: #cbd5e1;
+  font-weight: 800;
+  font-size: 0.85rem;
+}
+
+.store-banner__title {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #cbd5e1;
+  margin-bottom: 0.15rem;
+}
+
+.store-banner__message {
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 .topbar__metrics {
   display: flex;
   align-items: center;
@@ -1277,6 +1320,10 @@ a.topbar__tool {
   color: #fca5a5;
 }
 
+.kpi-event-item--suspended .kpi-event-item__store {
+  color: #94a3b8;
+}
+
 .kpi-event-item__store {
   font-weight: 600;
   font-size: 0.82rem;
@@ -1313,6 +1360,22 @@ a.topbar__tool {
   gap: 0.85rem;
   border-left: 3px solid #60a5fa;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.stores-panel__link {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.stores-panel__link:hover {
+  text-decoration: underline;
 }
 
 .page-dashboard .stores-panel__title {
@@ -1830,6 +1893,10 @@ a.topbar__tool {
   background: linear-gradient(90deg, var(--warning), #fbbf24);
 }
 
+.store-card--suspended .store-card__accent {
+  background: linear-gradient(90deg, #64748b, #94a3b8);
+}
+
 .store-card--offline .store-card__accent,
 .store-card--unreachable .store-card__accent {
   background: linear-gradient(90deg, var(--danger), #f87171);
@@ -1850,6 +1917,33 @@ a.topbar__tool {
 .store-card--offline,
 .store-card--unreachable {
   border-left-color: transparent;
+}
+
+.store-card--suspended {
+  border-left-color: transparent;
+}
+
+.store-card--suspended.store-card--clickable:hover {
+  border-color: rgba(100, 116, 139, 0.35);
+}
+
+.store-card--suspended .store-card__health-fill {
+  background: linear-gradient(90deg, #64748b, #94a3b8);
+}
+
+.store-card__body--suspended {
+  border-top: 1px solid rgba(100, 116, 139, 0.12);
+}
+
+.store-card__health-label--suspended {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.store-card__health-label--suspended .store-card__health-stats {
+  color: var(--muted);
+  font-size: 0.68rem;
 }
 
 @keyframes store-offline-pulse {
@@ -2382,6 +2476,7 @@ a.topbar__tool {
 
 .pill--ok { background: rgba(34, 197, 94, 0.15); color: var(--success); }
 .pill--partial { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+.pill--suspended { background: rgba(100, 116, 139, 0.18); color: #94a3b8; }
 .pill--offline,
 .pill--unreachable,
 .pill--noagent { background: rgba(239, 68, 68, 0.12); color: var(--danger); }

@@ -55,6 +55,10 @@
       title: 'Lojas parciais',
       empty: 'Nenhuma loja com operação parcial.',
     },
+    'stores-suspended': {
+      title: 'Lojas suspensas no Lav60',
+      empty: 'Nenhuma loja suspensa com agente online.',
+    },
   };
 
   let auditSummaryCache = null;
@@ -68,6 +72,7 @@
     partial: 'Parcial',
     offline: 'Sem equipamentos',
     unreachable: 'Offline',
+    suspended: 'Suspensa',
     unknown: 'Aguardando',
   };
 
@@ -109,14 +114,25 @@
     return tot ? Math.round((on / tot) * 100) : 0;
   }
 
+  function isStoreSuspended(store) {
+    return Boolean(
+      store?.storeSuspended ||
+        store?.lav60Status === 'suspended' ||
+        store?.lav60_status === 'suspended' ||
+        store?.state === 'suspended'
+    );
+  }
+
   function matchesFilter(store) {
     if (activeFilter === 'all') return true;
+    if (activeFilter === 'suspended') return isStoreSuspended(store);
     if (activeFilter === 'unreachable') {
       return (
-        store.state === 'unreachable' ||
-        store.state === 'offline' ||
-        store.agentUnavailable ||
-        isAgentUnavailableError(store.error)
+        !isStoreSuspended(store) &&
+        (store.state === 'unreachable' ||
+          store.state === 'offline' ||
+          store.agentUnavailable ||
+          isAgentUnavailableError(store.error))
       );
     }
     return store.state === activeFilter;
@@ -195,29 +211,59 @@
     return `<span class="store-card__health-label--offline">${reason}${durHtml}</span>`;
   }
 
-  function renderStoreCardBody(store, { accessible, online, total, pct }) {
-    const healthLabel = accessible
-      ? `<span><strong>${online}</strong> de ${total} online · ${formatTime(store.timestamp)}</span>`
-      : renderOfflineHealthLabel(store);
-    const healthPct = accessible ? `${pct}%` : '—';
-    const healthFill = accessible ? pct : 0;
-    const devicesClass = accessible
-      ? 'store-card__devices'
-      : 'store-card__devices store-card__devices--stale';
+  function renderSuspendedHealthLabel(store) {
+    const note = store.storeNotice || 'Loja suspensa no sistema Lav60 — operação local permitida';
+    const stats =
+      store.summary?.total > 0
+        ? `<span class="store-card__health-stats"><strong>${store.summary.online ?? 0}</strong> de ${store.summary.total} na rede · ${formatTime(store.timestamp)}</span>`
+        : '';
+    return `<span class="store-card__health-label--suspended">${escapeHtml(note)}${stats ? `<br>${stats}` : ''}</span>`;
+  }
 
-    const ctaHtml = accessible
-      ? `<div class="store-card__cta">
-          <span>Abrir painel da loja</span>
+  function renderStoreCardBody(store, { accessible, online, total, pct }) {
+    const suspended = isStoreSuspended(store);
+    const operable = accessible && !store.loading;
+
+    let healthLabel;
+    if (suspended && operable) {
+      healthLabel = renderSuspendedHealthLabel(store);
+    } else if (operable) {
+      healthLabel = `<span><strong>${online}</strong> de ${total} online · ${formatTime(store.timestamp)}</span>`;
+    } else if (suspended) {
+      healthLabel = renderSuspendedHealthLabel(store);
+    } else {
+      healthLabel = renderOfflineHealthLabel(store);
+    }
+
+    const healthPct = operable && !suspended ? `${pct}%` : suspended && total ? `${pct}%` : '—';
+    const healthFill = operable || (suspended && total) ? pct : 0;
+    const devicesClass =
+      operable || (suspended && total)
+        ? 'store-card__devices'
+        : 'store-card__devices store-card__devices--stale';
+
+    const ctaHtml =
+      operable
+        ? `<div class="store-card__cta">
+          <span>${suspended ? 'Abrir e operar localmente' : 'Abrir painel da loja'}</span>
           <span class="store-card__cta-icon" aria-hidden="true">→</span>
         </div>`
-      : `<div class="store-card__cta store-card__cta--blocked">
-          <span>Sem conexão com a loja</span>
+        : `<div class="store-card__cta store-card__cta--blocked">
+          <span>${suspended ? 'Aguardando agente' : 'Sem conexão com a loja'}</span>
         </div>`;
 
+    const bodyClass = operable
+      ? suspended
+        ? ' store-card__body--suspended'
+        : ''
+      : suspended
+        ? ' store-card__body--suspended store-card__body--offline'
+        : ' store-card__body--offline';
+
     return `
-      <div class="store-card__body${accessible ? '' : ' store-card__body--offline'}">
+      <div class="store-card__body${bodyClass}">
         <div class="store-card__health">
-          <div class="store-card__health-track${accessible ? '' : ' store-card__health-track--offline'}" role="presentation">
+          <div class="store-card__health-track${operable || suspended ? '' : ' store-card__health-track--offline'}" role="presentation">
             <span class="store-card__health-fill" style="width:${healthFill}%"></span>
           </div>
           <div class="store-card__health-labels">
@@ -264,16 +310,20 @@
     const online = summary.online ?? 0;
     const total = summary.total ?? 0;
     const pct = healthPercent(summary);
+    const suspended = isStoreSuspended(store);
     const accessible = store.accessible === true && !store.loading;
-    const isOfflineAlert = !store.loading && !accessible;
+    const isOfflineAlert = !store.loading && !accessible && !suspended;
     const state = store.loading ? 'unknown' : store.state || 'unreachable';
-    const stateLabel = store.loading ? 'Carregando' : STATE_LABELS[state] || 'Offline';
+    const pillState = suspended ? 'suspended' : state;
+    const stateLabel = store.loading
+      ? 'Carregando'
+      : STATE_LABELS[pillState] || STATE_LABELS[state] || 'Offline';
 
     const card = document.createElement('article');
     card.className = [
       'store-card',
       'store-card--v2',
-      `store-card--${state}`,
+      `store-card--${suspended ? 'suspended' : state}`,
       accessible ? 'store-card--clickable' : 'store-card--blocked',
       isOfflineAlert ? 'store-card--offline-alert' : '',
       store.loading ? 'store-card--loading' : '',
@@ -282,7 +332,7 @@
       .join(' ');
 
     card.dataset.storeId = store.id;
-    card.dataset.state = state;
+    card.dataset.state = suspended ? 'suspended' : state;
     if (isOfflineAlert && store.offlineSince) {
       card.dataset.offlineSince = String(store.offlineSince);
     }
@@ -302,7 +352,7 @@
         <div class="store-card__identity">
           ${buildStoreHeading(store)}
         </div>
-        <span class="store-card__status pill pill--${state}">${stateLabel}</span>
+        <span class="store-card__status pill pill--${pillState}">${stateLabel}</span>
       </div>
       ${bodyHtml}
     `;
@@ -387,17 +437,19 @@
     }
 
     if (payload.timestamp) {
+      const storesSuspended = stores.suspended ?? 0;
       const suspended = devices.suspended ?? 0;
       const occupied = devices.occupied ?? 0;
       const available = devices.available ?? 0;
       const offlineNetwork = devices.offline_network ?? 0;
       const totalStores = stores.total ?? 0;
-      if (suspended > 0 || occupied > 0 || available > 0 || offlineNetwork > 0) {
+      if (storesSuspended > 0 || suspended > 0 || occupied > 0 || available > 0 || offlineNetwork > 0) {
         const parts = [];
+        if (storesSuspended > 0) parts.push(`${storesSuspended} loja(s) suspensa(s)`);
         if (available > 0) parts.push(`${available} disponível(is)`);
         if (offlineNetwork > 0) parts.push(`${offlineNetwork} offline na rede`);
         if (occupied > 0) parts.push(`${occupied} ocupada(s)`);
-        if (suspended > 0) parts.push(`${suspended} suspensa(s)`);
+        if (suspended > 0) parts.push(`${suspended} máq. suspensa(s)`);
         subtitle.textContent = `${parts.join(' · ')} · ${totalStores} loja(s) monitoradas`;
       } else {
         subtitle.textContent = `${totalStores} loja(s) monitoradas · rede estável`;
@@ -447,6 +499,9 @@
 
       const partialEl = $('kpiStoresPartial');
       if (partialEl) partialEl.textContent = stores.partial ?? '—';
+
+      const suspendedEl = $('kpiStoresSuspended');
+      if (suspendedEl) suspendedEl.textContent = stores.suspended ?? '—';
 
       renderOfflineLongestList(lastDashboardEvents);
     }
@@ -524,6 +579,21 @@
         <li class="kpi-event-item">
           <a class="kpi-event-item__store" href="${storePageHref(entry.store)}">${escapeHtml(storeDisplayName(entry))}</a>
           <span class="kpi-event-item__sub">${entry.summary_online} de ${entry.summary_total} online · ${entry.health_pct}%</span>
+        </li>`
+        )
+        .join('')}
+    </ul>`;
+  }
+
+  function renderStoreSuspendedEvents(items) {
+    if (!items?.length) return '';
+    return `<ul class="kpi-event-list kpi-event-list--stores">
+      ${items
+        .map(
+          (entry) => `
+        <li class="kpi-event-item kpi-event-item--suspended">
+          <a class="kpi-event-item__store" href="${storePageHref(entry.store)}">${escapeHtml(storeDisplayName(entry))}</a>
+          <span class="kpi-event-item__sub">${escapeHtml(entry.reason || 'Loja suspensa — operação local permitida')} · ${entry.summary_online} de ${entry.summary_total} online</span>
         </li>`
         )
         .join('')}
@@ -689,6 +759,10 @@
       const items = events.stores_partial || [];
       count = items.length;
       html = renderStorePartialEvents(items);
+    } else if (kpiKey === 'stores-suspended') {
+      const items = events.stores_suspended || [];
+      count = items.length;
+      html = renderStoreSuspendedEvents(items);
     } else if (kpiKey === 'devices-suspended') {
       const items = events.devices_suspended || [];
       count = items.length;
@@ -740,16 +814,16 @@
   }
 
   function initKpiEvents(signal) {
-    const dashboard = $('dashboard');
-    if (!dashboard) return;
+    const root = document.querySelector('.main-content--dashboard') || $('dashboard');
+    if (!root) return;
 
-    dashboard.addEventListener('click', (e) => {
+    root.addEventListener('click', (e) => {
       const card = e.target.closest('[data-kpi]');
       if (!card) return;
       toggleKpiEventsPanel(card.dataset.kpi);
     }, { signal });
 
-    dashboard.addEventListener('keydown', (e) => {
+    root.addEventListener('keydown', (e) => {
       const card = e.target.closest('[data-kpi]');
       if (!card || (e.key !== 'Enter' && e.key !== ' ')) return;
       e.preventDefault();

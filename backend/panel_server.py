@@ -14,7 +14,7 @@ import requests
 from flask import Flask, Response, jsonify, request, send_from_directory, session, stream_with_context
 
 from lav60_env import env_value, load_local_env
-from panel_stores import is_allowed_store, reject_store_detail
+from panel_stores import get_store_lav60_status, is_allowed_store, reject_store_detail, resolve_store_lav60_status
 from panel_audit import (
     ACTION_LABELS_PT,
     DEVICE_LABELS_PT,
@@ -365,13 +365,21 @@ def catalog_stores_from_heartbeats() -> list[dict]:
         stores_map[sid] = {
             'id': sid,
             'name': name or stores_map.get(sid, {}).get('name') or sid.upper(),
+            'lav60_status': resolve_store_lav60_status(sid, payload),
         }
 
     with known_stores_lock:
-        save_known_stores(stores_map)
+        save_known_stores({k: {'id': v['id'], 'name': v['name']} for k, v in stores_map.items()})
 
     return sorted(
-        [{'id': s['id'], 'name': s.get('name') or s['id'].upper()} for s in stores_map.values()],
+        [
+            {
+                'id': s['id'],
+                'name': s.get('name') or s['id'].upper(),
+                'lav60_status': s.get('lav60_status') or resolve_store_lav60_status(s['id'], None),
+            }
+            for s in stores_map.values()
+        ],
         key=lambda s: s['id'],
     )
 

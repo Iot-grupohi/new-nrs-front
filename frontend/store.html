@@ -35,6 +35,14 @@
       </div>
     </header>
 
+    <div class="store-banner store-banner--suspended hidden" id="storeSuspendedBanner" role="status">
+      <span class="store-banner__icon" aria-hidden="true">!</span>
+      <div class="store-banner__text">
+        <strong class="store-banner__title">Loja suspensa no Lav60</strong>
+        <p class="store-banner__message" id="storeSuspendedMessage">Operação local permitida enquanto o agente estiver online.</p>
+      </div>
+    </div>
+
     <main class="main-content">
       <section class="stats-grid stats-grid--store">
         <article class="stat-card stat-card--success">
@@ -123,8 +131,8 @@
 
   <script src="auth.js"></script>
   <script src="cache.js"></script>
-  <script src="api.js"></script>
+  <script src="api.js?v=2"></script>
   <script src="audit.js"></script>
-  <script src="store.js"></script>
+  <script src="store.js?v=2"></script>
 </body>
 </html>

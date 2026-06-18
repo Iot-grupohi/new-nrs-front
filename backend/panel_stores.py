@@ -13,9 +13,10 @@ MACHINES_API_URL = (
     or 'https://sistema.lavanderia60minutos.com.br/api/v1/machines'
 ).strip()
 
-_REGISTRY_CACHE: dict[str, tuple[bool, float]] = {}
+_STATUS_CACHE: dict[str, tuple[str, float]] = {}
 _CACHE_LOCK = threading.Lock()
 _CACHE_TTL_OK_SEC = 3600
+_CACHE_TTL_SUSPENDED_SEC = 600
 _CACHE_TTL_FAIL_SEC = 300
 
 
@@ -65,26 +66,47 @@ def parse_lav60_machines_api_status(response: requests.Response) -> str:
     return 'rejected'
 
 
-def store_registered_in_lav60_api(store_id: str) -> bool | None:
-    """True/False se consultou a API; None se token/API indisponível."""
-    token = machines_api_token()
-    if not token:
-        return None
+def _cache_ttl_for_status(status: str) -> int:
+    if status == 'ok':
+        return _CACHE_TTL_OK_SEC
+    if status == 'suspended':
+        return _CACHE_TTL_SUSPENDED_SEC
+    return _CACHE_TTL_FAIL_SEC
 
+
+def resolve_store_lav60_status(store_id: str, payload: dict | None = None) -> str:
+    """Prioriza agente (heartbeat) e API Lav60; suspended vence ok."""
+    agent = str((payload or {}).get('lav60_status') or '').strip().lower()
+    if (payload or {}).get('store_suspended') is True:
+        agent = 'suspended'
+    api = get_store_lav60_status(store_id)
+    if agent == 'suspended' or api == 'suspended':
+        return 'suspended'
+    if agent == 'ok' or api == 'ok':
+        return 'ok'
+    if agent and agent != 'unknown':
+        return agent
+    return api or 'unknown'
+
+
+def get_store_lav60_status(store_id: str) -> str:
+    """ok | suspended | not_found | rejected | unknown"""
+    token = machines_api_token()
     sid = normalize_store_id(store_id)
     if not sid:
-        return False
+        return 'rejected'
+    if not token:
+        return 'unknown'
 
     now = time.time()
     with _CACHE_LOCK:
-        cached = _REGISTRY_CACHE.get(sid)
+        cached = _STATUS_CACHE.get(sid)
         if cached:
-            ok, ts = cached
-            ttl = _CACHE_TTL_OK_SEC if ok else _CACHE_TTL_FAIL_SEC
-            if now - ts < ttl:
-                return ok
+            status, ts = cached
+            if now - ts < _cache_ttl_for_status(status):
+                return status
 
-    ok = False
+    status = 'rejected'
     try:
         response = requests.get(
             MACHINES_API_URL,
@@ -93,13 +115,21 @@ def store_registered_in_lav60_api(store_id: str) -> bool | None:
             timeout=12,
         )
         status = parse_lav60_machines_api_status(response)
-        ok = status in ('ok', 'suspended')
     except requests.RequestException:
-        ok = False
+        status = 'rejected'
 
     with _CACHE_LOCK:
-        _REGISTRY_CACHE[sid] = (ok, now)
-    return ok
+        _STATUS_CACHE[sid] = (status, now)
+    return status
+
+
+def store_registered_in_lav60_api(store_id: str) -> bool | None:
+    """True/False se consultou a API; None se token/API indisponível."""
+    token = machines_api_token()
+    if not token:
+        return None
+    status = get_store_lav60_status(store_id)
+    return status in ('ok', 'suspended')
 
 
 def is_allowed_store(store_id: str, catalog: dict | None = None) -> bool:

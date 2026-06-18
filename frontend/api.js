@@ -904,6 +904,81 @@
     return 'partial';
   }
 
+  const STORE_SUSPENDED_NOTICE =
+    'Loja suspensa no sistema Lav60 — operação local permitida';
+
+  function heartbeatPayload(hb) {
+    if (!hb) return {};
+    if (hb.payload && typeof hb.payload === 'object') return hb.payload;
+    if (hb.lav60_status || hb.network || hb.store) return hb;
+    return {};
+  }
+
+  function lav60StatusFromPayload(payload) {
+    if (!payload || typeof payload !== 'object') return null;
+    if (payload.lav60_status === 'suspended' || payload.store_suspended === true) {
+      return 'suspended';
+    }
+    const raw = typeof payload.lav60_status === 'string' ? payload.lav60_status.trim().toLowerCase() : '';
+    if (raw === 'suspended') return 'suspended';
+    if (raw === 'ok') return 'ok';
+    if (raw && raw !== 'unknown') return raw;
+    return null;
+  }
+
+  function resolveStoreLav60Status(meta, hb) {
+    const payload = heartbeatPayload(hb);
+    const fromAgent = lav60StatusFromPayload(payload);
+    const metaStatus =
+      typeof meta?.lav60_status === 'string' ? meta.lav60_status.trim().toLowerCase() : '';
+
+    if (fromAgent === 'suspended' || metaStatus === 'suspended') return 'suspended';
+    if (fromAgent === 'ok') return 'ok';
+    if (metaStatus === 'ok') return 'ok';
+    if (fromAgent) return fromAgent;
+    if (metaStatus && metaStatus !== 'unknown') return metaStatus;
+    return 'ok';
+  }
+
+  function isStoreLav60Suspended(meta, hb) {
+    return resolveStoreLav60Status(meta, hb) === 'suspended';
+  }
+
+  function finalizeStoreCard(card, meta, hb, catalog) {
+    if (!card || card.loading) return card;
+    if (!isStoreLav60Suspended(meta, hb)) return card;
+
+    const hbAlive = hb && isStoreHeartbeatAlive(hb, catalog);
+    const base = {
+      ...card,
+      lav60Status: 'suspended',
+      storeSuspended: true,
+    };
+
+    if (!hbAlive) {
+      return {
+        ...base,
+        state: 'suspended',
+        accessible: false,
+        storeNotice: STORE_SUSPENDED_NOTICE,
+      };
+    }
+
+    return {
+      ...base,
+      state: 'suspended',
+      accessible: true,
+      agentUnavailable: false,
+      loading: false,
+      error: null,
+      storeNotice: STORE_SUSPENDED_NOTICE,
+    };
+  }
+
+  function withStoreCardPolicy(card, meta, hb, catalog) {
+    return finalizeStoreCard(card, meta, hb, catalog);
+  }
+
   function buildStoreCard(meta, status, error, catalog, extra = {}) {
     const acId = catalog?.ac_id || '110';
     if (status) status = applyFrontendDeviceVisibility({ ...status }, acId);
@@ -943,7 +1018,10 @@
   function buildDashboard(cards) {
     const ready = cards.filter((c) => !c.loading);
     const connected = ready.filter((c) => c.accessible);
-    const operational = connected.filter((c) => (c.summary?.online ?? 0) > 0);
+    const operational = connected.filter(
+      (c) => !c.storeSuspended && (c.summary?.online ?? 0) > 0
+    );
+    const storesSuspendedCards = ready.filter((c) => c.storeSuspended && c.accessible);
     const allDevicesOffline = connected.filter((c) => (c.summary?.online ?? 0) <= 0);
     const unreachable = ready.filter((c) => !c.accessible);
     const partialCount = connected.filter((c) => {
@@ -964,6 +1042,7 @@
     const storesOnlineEvents = [];
     const storesOfflineEvents = [];
     const storesPartialEvents = [];
+    const storesSuspendedEvents = [];
     const typeLabels = {
       washers: 'Lavadora',
       dryers: 'Secadora',
@@ -980,7 +1059,13 @@
         summary_online: card.summary?.online ?? 0,
         summary_total: card.summary?.total ?? 0,
       };
-      if (card.accessible && (card.summary?.online ?? 0) > 0) {
+      if (card.storeSuspended && card.accessible) {
+        storesSuspendedEvents.push({
+          ...storeEntry,
+          reason: card.storeNotice || STORE_SUSPENDED_NOTICE,
+        });
+      }
+      if (card.accessible && !card.storeSuspended && (card.summary?.online ?? 0) > 0) {
         const healthPct = card.summary?.total
           ? Math.round(((card.summary?.online ?? 0) / card.summary.total) * 100)
           : 0;
@@ -1071,6 +1156,7 @@
         connected: connected.length,
         offline: unreachable.length + allDevicesOffline.length,
         partial: partialCount,
+        suspended: storesSuspendedCards.length,
         pending: cards.filter((c) => c.loading).length,
       },
       devices: {
@@ -1087,6 +1173,7 @@
         stores_online: storesOnlineEvents.sort((a, b) => a.store.localeCompare(b.store)),
         stores_offline: storesOfflineEvents.sort((a, b) => a.store.localeCompare(b.store)),
         stores_partial: storesPartialEvents.sort((a, b) => a.store.localeCompare(b.store)),
+        stores_suspended: storesSuspendedEvents.sort((a, b) => a.store.localeCompare(b.store)),
         stores_offline_longest: [...storesOfflineEvents]
           .filter((entry) => entry.offline_since)
           .sort((a, b) => (b.offline_since || 0) - (a.offline_since || 0))
@@ -1239,7 +1326,7 @@
       card.timestamp = status.timestamp || card.timestamp;
       card.machines = status.machines || card.machines || [];
     }
-    if (card.summary) {
+    if (card.summary && !card.storeSuspended && card.lav60Status !== 'suspended') {
       card.state = storeHealthState(card.summary, card.error);
     }
     card.fromCache = true;
@@ -1279,12 +1366,14 @@
 
   function buildCardsFromCache(catalog, cacheMap) {
     return (catalog.stores || []).map((meta) => {
-      const row = cacheMap[normalizeStoreId(meta.id)];
+      const id = normalizeStoreId(meta.id);
+      const row = cacheMap[id];
+      const hb = heartbeatState.get(id);
       if (row) {
         const card = cardFromCacheRow(meta, row, catalog);
-        if (card) return card;
+        if (card) return withStoreCardPolicy(card, meta, hb, catalog);
       }
-      return buildPlaceholderCard(meta, catalog);
+      return withStoreCardPolicy(buildPlaceholderCard(meta, catalog), meta, hb, catalog);
     });
   }
 
@@ -1365,9 +1454,14 @@
   function buildOnlineCardFromHeartbeat(meta, catalog, hb, status) {
     const id = normalizeStoreId(meta.id);
     heartbeatState.set(id, { ...hb, lastStatus: status });
-    return attachAgentUrlToCard(
-      buildStoreCard(meta, status, null, catalog, { fromHeartbeat: true }),
-      hb
+    return withStoreCardPolicy(
+      attachAgentUrlToCard(
+        buildStoreCard(meta, status, null, catalog, { fromHeartbeat: true }),
+        hb
+      ),
+      meta,
+      hb,
+      catalog
     );
   }
 
@@ -1383,23 +1477,38 @@
       lastStatus = { ...lastStatus, machines: mergeMachinesCatalog(lastStatus.machines, cachedMachines) };
     }
     if (lastStatus) {
-      return buildStoreCard(meta, lastStatus, 'Sem conexão com a loja', catalog, {
-        staleSnapshot: Boolean(lastStatus),
-      });
+      return withStoreCardPolicy(
+        buildStoreCard(meta, lastStatus, 'Sem conexão com a loja', catalog, {
+          staleSnapshot: Boolean(lastStatus),
+        }),
+        meta,
+        hb,
+        catalog
+      );
     }
     if (cachedRow) {
       const cached = cardFromCacheRow(meta, cachedRow, catalog);
       if (cached) {
-        return {
-          ...cached,
-          accessible: false,
-          staleSnapshot: true,
-          error: friendlyUserMessage('Sem conexão com a loja'),
-          state: 'unreachable',
-        };
+        return withStoreCardPolicy(
+          {
+            ...cached,
+            accessible: false,
+            staleSnapshot: true,
+            error: friendlyUserMessage('Sem conexão com a loja'),
+            state: 'unreachable',
+          },
+          meta,
+          hb,
+          catalog
+        );
       }
     }
-    return buildStoreCard(meta, null, 'Sem conexão com a loja', catalog);
+    return withStoreCardPolicy(
+      buildStoreCard(meta, null, 'Sem conexão com a loja', catalog),
+      meta,
+      hb,
+      catalog
+    );
   }
 
   function buildCardFromHeartbeat(meta, catalog, cacheMap = dashboardCacheMap) {
@@ -1432,18 +1541,23 @@
       if (now - heartbeatPageStartedAt < snapshotGraceMs) {
         const cached = fromCache();
         if (cached?.accessible) {
-          return {
-            ...cached,
-            accessible: false,
-            state: 'unreachable',
-            error: friendlyUserMessage('Sem conexão com a loja'),
-            staleSnapshot: true,
-          };
+          return withStoreCardPolicy(
+            {
+              ...cached,
+              accessible: false,
+              state: 'unreachable',
+              error: friendlyUserMessage('Sem conexão com a loja'),
+              staleSnapshot: true,
+            },
+            meta,
+            null,
+            catalog
+          );
         }
-        if (cached) return cached;
+        if (cached) return withStoreCardPolicy(cached, meta, null, catalog);
         return buildPlaceholderCard(meta, catalog);
       }
-      return offlineFromCacheOrEmpty();
+      return withStoreCardPolicy(offlineFromCacheOrEmpty(), meta, null, catalog);
     }
 
     if (!isStoreHeartbeatAlive(hb, catalog)) {
@@ -1456,8 +1570,8 @@
     }
 
     const cached = fromCache();
-    if (cached) return cached;
-    return buildPlaceholderCard(meta, catalog);
+    if (cached) return withStoreCardPolicy(cached, meta, hb, catalog);
+    return withStoreCardPolicy(buildPlaceholderCard(meta, catalog), meta, hb, catalog);
   }
 
   function buildPayloadFromHeartbeats(catalog, extra = {}) {
@@ -1586,7 +1700,11 @@
       const payload = entry.payload || entry;
       const status = statusFromHeartbeatPayload(null, payload, id);
       if (!status?.summary?.total) return;
-      onStatus(status, { live: true, receivedAt: entry.received_at || entry.receivedAt });
+      onStatus(status, {
+        live: true,
+        receivedAt: entry.received_at || entry.receivedAt,
+        payload,
+      });
     }
 
     async function bootstrap() {
@@ -1757,7 +1875,15 @@
     if (!id) return null;
     const payload = entry?.payload || entry || {};
     const name = String(payload.store_name || payload.name || id.toUpperCase()).trim();
-    return { id, name: name || id.toUpperCase() };
+    const lav60 =
+      lav60StatusFromPayload(payload) ||
+      (typeof entry?.lav60_status === 'string' ? entry.lav60_status.trim().toLowerCase() : null) ||
+      (typeof payload.lav60_status === 'string' ? payload.lav60_status.trim().toLowerCase() : null);
+    return {
+      id,
+      name: name || id.toUpperCase(),
+      ...(lav60 ? { lav60_status: lav60 } : {}),
+    };
   }
 
   function mergeCatalogStores(catalog, cacheMap) {
@@ -1792,7 +1918,12 @@
       const sid = normalizeStoreId(id);
       if (!sid) return;
       if (allowed.size && !allowed.has(sid)) return;
-      byId.set(sid, storeMetaFromId(id, { payload: hb.payload }));
+      const prev = byId.get(sid) || {};
+      const fromHb = storeMetaFromId(id, {
+        payload: hb.payload,
+        lav60_status: lav60StatusFromPayload(hb.payload) || prev.lav60_status,
+      });
+      byId.set(sid, { ...prev, ...fromHb });
     });
     Object.entries(cacheMap || {}).forEach(([id, row]) => {
       const sid = normalizeStoreId(id);
@@ -2225,6 +2356,9 @@
     syncConfigDevices,
     isDeviceVisibleInFrontend,
     applyFrontendDeviceVisibility,
+    resolveStoreLav60Status,
+    isStoreLav60Suspended,
+    lav60StatusFromPayload,
     buildStoreCard,
     findStoreInCatalog,
     storeMetaFromId,

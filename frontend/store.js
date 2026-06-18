@@ -33,6 +33,7 @@
     syncConfigDevices,
     isDeviceVisibleInFrontend,
     applyFrontendDeviceVisibility,
+    isStoreLav60Suspended,
   } = window.Lav60;
 
   const pageStore = normalizeStoreId(new URLSearchParams(window.location.search).get('store'));
@@ -290,6 +291,30 @@
     if (!map) return { on: 0, total: 0 };
     const vals = Object.values(map);
     return { on: vals.filter(Boolean).length, total: vals.length };
+  }
+
+  const STORE_SUSPENDED_NOTICE =
+    'Loja suspensa no sistema Lav60 — operação local permitida';
+
+  function updateStoreSuspendedBanner(meta, heartbeatEntry) {
+    const banner = $('storeSuspendedBanner');
+    if (!banner) return;
+
+    const payload = heartbeatEntry?.payload || heartbeatEntry || {};
+    const suspended = isStoreLav60Suspended(meta, { payload }) || meta?.lav60_status === 'suspended';
+
+    if (!suspended) {
+      banner.classList.add('hidden');
+      document.body.classList.remove('page-store--suspended');
+      return;
+    }
+
+    banner.classList.remove('hidden');
+    document.body.classList.add('page-store--suspended');
+    const msgEl = $('storeSuspendedMessage');
+    if (msgEl) {
+      msgEl.textContent = STORE_SUSPENDED_NOTICE;
+    }
   }
 
   function updateStoreHeader(status) {
@@ -1338,8 +1363,9 @@
     stopHeartbeatWatch = watchStoreHeartbeat(
       pageStore,
       catalog,
-      (status) => {
+      (status, hbMeta) => {
         applyStatus(status);
+        updateStoreSuspendedBanner(storeMeta, hbMeta);
         lav60Debug('store', 'status SSE (espelho do card)', status.summary);
       },
       { skipInitialBootstrap: true, skipInitialPoll: true }
@@ -1371,6 +1397,7 @@
     try {
       catalog = await loadCatalog();
       storeMeta = findStoreInCatalog(catalog, pageStore);
+      updateStoreSuspendedBanner(storeMeta, null);
 
       agentToken = await ensureDefaultAgentToken();
 
@@ -1397,6 +1424,7 @@
         if (status?.summary?.total) {
           config = configFromStatus(status);
           applyStatus(status, { render: false });
+          updateStoreSuspendedBanner(storeMeta, heartbeatEntry);
           lav60Debug('store', 'status from heartbeat', status.summary);
         }
       } catch (e) {

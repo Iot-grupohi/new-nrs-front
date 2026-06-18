@@ -222,6 +222,7 @@ last_network_status: dict = {}
 network_status_lock = threading.Lock()
 store_machines_catalog: dict | None = None
 store_machines_lock = threading.Lock()
+store_lav60_api_status: str = 'unknown'
 store_machines_last_refresh: float = 0.0
 tunnel_health_check_interval = 120  # segundos (aumentado para 2 minutos)
 last_tunnel_check = 0
@@ -1433,6 +1434,7 @@ def parse_machines_api_payload(payload: dict, store_code: str) -> dict:
 
 def fetch_store_machines_from_api(store_code: str) -> dict | None:
     """GET /api/v1/machines?store_code={STORE_ID}"""
+    global store_lav60_api_status
     if not MACHINES_API_URL:
         return None
     params = {'store_code': store_code.upper()}
@@ -1441,12 +1443,15 @@ def fetch_store_machines_from_api(store_code: str) -> dict | None:
     last_body = ''
 
     def log_machines_api_error(status: int, body: str) -> None:
+        global store_lav60_api_status
         if status == 400 and 'suspend' in (body or '').lower():
+            store_lav60_api_status = 'suspended'
             logger.info(
                 f"{Fore.YELLOW}🏭 Loja {store_code.upper()} suspensa no sistema Lav60 "
                 f"— operação local e heartbeat continuam{Style.RESET_ALL}"
             )
             return
+        store_lav60_api_status = 'rejected'
         logger.warning('API máquinas HTTP %s: %s', status, body)
 
     try:
@@ -1464,6 +1469,7 @@ def fetch_store_machines_from_api(store_code: str) -> dict | None:
             if response.status_code >= 400:
                 log_machines_api_error(response.status_code, last_body)
                 return None
+            store_lav60_api_status = 'ok'
             payload = response.json()
             return parse_machines_api_payload(payload, store_code)
 
@@ -2031,6 +2037,7 @@ def build_panel_heartbeat_payload() -> dict:
         'agent_url': agent_static_public_url(),
         'agent_local_url': 'http://127.0.0.1:8080',
         'timestamp': datetime.now().isoformat(),
+        'lav60_status': store_lav60_api_status or 'unknown',
         'network': filter_network_status_for_frontend(network),
         'machines': filter_machines_for_frontend(get_store_machines_list(), network),
     }
