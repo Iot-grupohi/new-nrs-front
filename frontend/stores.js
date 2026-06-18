@@ -391,7 +391,7 @@
         <div class="stores-empty-state">
           <p>Nenhuma loja conectada — aguardando heartbeat dos agentes</p>
         </div>`;
-      $('storesCount').classList.add('hidden');
+      $('storesCount')?.classList.add('hidden');
       return;
     }
 
@@ -407,8 +407,10 @@
     }
 
     const countEl = $('storesCount');
-    countEl.textContent = `Exibindo ${stores.length} de ${allStores.length} lojas`;
-    countEl.classList.remove('hidden');
+    if (countEl) {
+      countEl.textContent = `Exibindo ${stores.length} de ${allStores.length} lojas`;
+      countEl.classList.remove('hidden');
+    }
     setupOfflineDurationTick();
   }
 
@@ -902,6 +904,11 @@
     pageAbort = new AbortController();
     const { signal } = pageAbort;
     currentPageMode = mode;
+
+    if (mode === 'dashboard') {
+      activeFilter = 'all';
+      searchQuery = '';
+    }
 
     initFilters(signal);
     initKpiEvents(signal);
