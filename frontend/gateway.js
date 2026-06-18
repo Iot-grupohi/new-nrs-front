@@ -36,6 +36,22 @@
 
   const storeOverviewStatus = Object.create(null);
   let overviewScanRunning = false;
+  let activeGatewayKpi = null;
+
+  const GATEWAY_KPI_CONFIG = {
+    'gateway-online': {
+      title: 'Gateways online',
+      empty: 'Nenhuma loja com ESP8266 online no gateway central.',
+    },
+    'gateway-offline': {
+      title: 'Gateways offline',
+      empty: 'Nenhuma loja com gateway offline.',
+    },
+    'gateway-pending': {
+      title: 'Aguardando verificação',
+      empty: 'Todas as lojas já foram verificadas.',
+    },
+  };
 
   function gatewayDebug(label, payload) {
     const ts = new Date().toISOString().slice(11, 23);
@@ -143,13 +159,165 @@
     return storeOverviewStatus[sid] || getStoreGatewayEntry(sid) || null;
   }
 
-  function overviewPillHtml(status) {
-    if (!status || status.checking) {
-      return '<span class="pill pill--warn">Verificando…</span>';
+  function storeDisplayName(entry) {
+    const sid = normalizeStoreId(entry?.store || entry?.id);
+    const name = entry?.name;
+    if (name) return `${name} (${sid.toUpperCase()})`;
+    return sid.toUpperCase();
+  }
+
+  function buildGatewayEventLists() {
+    const online = [];
+    const offline = [];
+    const pending = [];
+    (catalog?.stores || []).forEach((meta) => {
+      const sid = normalizeStoreId(meta.id);
+      const status = overviewStatusForStore(sid);
+      const entry = {
+        store: sid,
+        name: meta.name,
+        checkedAt: status?.checkedAt,
+        error: status?.error,
+        checking: Boolean(status?.checking),
+      };
+      if (!status || status.checking || status.online == null) pending.push(entry);
+      else if (status.online) online.push(entry);
+      else offline.push(entry);
+    });
+    const sort = (a, b) => a.store.localeCompare(b.store);
+    online.sort(sort);
+    offline.sort(sort);
+    pending.sort(sort);
+    return { online, offline, pending };
+  }
+
+  function renderGatewayOnlineEvents(items) {
+    if (!items?.length) return '';
+    return `<ul class="kpi-event-list kpi-event-list--stores">
+      ${items
+        .map((entry) => {
+          const age = entry.checkedAt ? formatCacheAge(entry.checkedAt) : '';
+          const sub = age ? `ESP8266 online · ${age}` : 'ESP8266 online';
+          return `
+        <li class="kpi-event-item">
+          <button type="button" class="kpi-event-item__store kpi-event-item__store--action" data-gateway-store="${escapeHtml(entry.store)}">${escapeHtml(storeDisplayName(entry))}</button>
+          <span class="kpi-event-item__sub">${escapeHtml(sub)}</span>
+        </li>`;
+        })
+        .join('')}
+    </ul>`;
+  }
+
+  function renderGatewayOfflineEvents(items) {
+    if (!items?.length) return '';
+    return `<ul class="kpi-event-list kpi-event-list--stores">
+      ${items
+        .map((entry) => {
+          const age = entry.checkedAt ? formatCacheAge(entry.checkedAt) : '';
+          const reason = entry.error || 'Gateway offline';
+          const sub = age ? `${reason} · ${age}` : reason;
+          return `
+        <li class="kpi-event-item kpi-event-item--alert">
+          <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
+          <span class="kpi-event-item__sub">${escapeHtml(sub)}</span>
+        </li>`;
+        })
+        .join('')}
+    </ul>`;
+  }
+
+  function renderGatewayPendingEvents(items) {
+    if (!items?.length) return '';
+    return `<ul class="kpi-event-list kpi-event-list--stores">
+      ${items
+        .map((entry) => {
+          const sub = entry.checking ? 'Verificando ESP8266…' : 'Aguardando verificação';
+          return `
+        <li class="kpi-event-item">
+          <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
+          <span class="kpi-event-item__sub">${escapeHtml(sub)}</span>
+        </li>`;
+        })
+        .join('')}
+    </ul>`;
+  }
+
+  function renderGatewayKpiPanel(kpiKey) {
+    const panel = $('gatewayKpiPanel');
+    const config = GATEWAY_KPI_CONFIG[kpiKey];
+    const lists = buildGatewayEventLists();
+    if (!panel || !config) return;
+
+    let html = '';
+    let count = 0;
+
+    if (kpiKey === 'gateway-online') {
+      count = lists.online.length;
+      html = renderGatewayOnlineEvents(lists.online);
+    } else if (kpiKey === 'gateway-offline') {
+      count = lists.offline.length;
+      html = renderGatewayOfflineEvents(lists.offline);
+    } else if (kpiKey === 'gateway-pending') {
+      count = lists.pending.length;
+      html = renderGatewayPendingEvents(lists.pending);
     }
-    if (status.online === true) return '<span class="pill pill--on">Online</span>';
-    if (status.online === false) return '<span class="pill pill--off">Offline</span>';
-    return '<span class="pill pill--warn">Não verificado</span>';
+
+    $('gatewayKpiTitle').textContent = config.title;
+    $('gatewayKpiMeta').textContent = count > 0 ? `${count} loja(s)` : config.empty;
+    $('gatewayKpiBody').innerHTML =
+      html || `<p class="kpi-events-panel__empty">${escapeHtml(config.empty)}</p>`;
+
+    panel.classList.remove('hidden');
+    document.querySelectorAll('#gatewayKpis [data-kpi]').forEach((el) => {
+      const active = el.dataset.kpi === kpiKey;
+      el.classList.toggle('stat-card--active', active);
+      el.setAttribute('aria-expanded', active ? 'true' : 'false');
+    });
+  }
+
+  function closeGatewayKpiPanel() {
+    activeGatewayKpi = null;
+    $('gatewayKpiPanel')?.classList.add('hidden');
+    document.querySelectorAll('#gatewayKpis [data-kpi]').forEach((el) => {
+      el.classList.remove('stat-card--active');
+      el.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function toggleGatewayKpiPanel(kpiKey) {
+    if (activeGatewayKpi === kpiKey) {
+      closeGatewayKpiPanel();
+      return;
+    }
+    activeGatewayKpi = kpiKey;
+    renderGatewayKpiPanel(kpiKey);
+  }
+
+  function initGatewayKpiEvents() {
+    const root = $('gatewayOverview');
+    if (!root) return;
+
+    root.addEventListener('click', (e) => {
+      const storeBtn = e.target.closest('[data-gateway-store]');
+      if (storeBtn) {
+        void applyStore(storeBtn.dataset.gatewayStore);
+        closeGatewayKpiPanel();
+        $('devicesPanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      const card = e.target.closest('[data-kpi]');
+      if (!card) return;
+      toggleGatewayKpiPanel(card.dataset.kpi);
+    });
+
+    root.addEventListener('keydown', (e) => {
+      const card = e.target.closest('[data-kpi]');
+      if (!card || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      toggleGatewayKpiPanel(card.dataset.kpi);
+    });
+
+    $('gatewayKpiClose')?.addEventListener('click', closeGatewayKpiPanel);
   }
 
   function updateGatewayOverviewKpis() {
@@ -182,61 +350,14 @@
     el.textContent = `ESP8266 verificado via POST led/on — cache local por ${ttlMin} min (equipamentos por ${Math.round(DEVICES_TTL_MS / 60000)} min)`;
   }
 
-  function renderGatewayStoreCard(meta) {
-    const grid = $('gatewayStoresGrid');
-    if (!grid || !meta) return;
-    const sid = normalizeStoreId(meta.id);
-    const status = overviewStatusForStore(sid);
-    let card = grid.querySelector(`[data-gateway-store="${sid}"]`);
-    if (!card) {
-      card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'gateway-store-card';
-      card.dataset.gatewayStore = sid;
-      card.setAttribute('role', 'listitem');
-      card.addEventListener('click', () => {
-        void applyStore(sid);
-        $('devicesPanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-      grid.appendChild(card);
-    }
-
-    card.classList.remove(
-      'gateway-store-card--online',
-      'gateway-store-card--offline',
-      'gateway-store-card--checking',
-      'gateway-store-card--active'
-    );
-    if (status?.checking) card.classList.add('gateway-store-card--checking');
-    else if (status?.online === true) card.classList.add('gateway-store-card--online');
-    else if (status?.online === false) card.classList.add('gateway-store-card--offline');
-    if (sid === currentStore) card.classList.add('gateway-store-card--active');
-
-    const code = sid.toUpperCase();
-    const name = meta.name ? escapeHtml(meta.name) : '';
-    const age = status?.checkedAt ? formatCacheAge(status.checkedAt) : '';
-    card.innerHTML = `
-      <span class="gateway-store-card__code">${escapeHtml(code)}</span>
-      ${name ? `<span class="gateway-store-card__name">${name}</span>` : ''}
-      <div class="gateway-store-card__foot">
-        ${overviewPillHtml(status)}
-        ${age ? `<span class="gateway-store-card__age">${escapeHtml(age)}</span>` : ''}
-      </div>
-    `;
-  }
-
   function renderGatewayOverview() {
-    const grid = $('gatewayStoresGrid');
-    if (!grid) return;
-    grid.innerHTML = '';
-    (catalog?.stores || []).forEach((meta) => renderGatewayStoreCard(meta));
     updateGatewayOverviewKpis();
     updateGatewayOverviewMeta(overviewScanRunning);
+    if (activeGatewayKpi) renderGatewayKpiPanel(activeGatewayKpi);
   }
 
-  function refreshGatewayOverviewCards() {
-    (catalog?.stores || []).forEach((meta) => renderGatewayStoreCard(meta));
-    updateGatewayOverviewKpis();
+  function refreshGatewayOverview() {
+    renderGatewayOverview();
   }
 
   async function postStoreLedOn(storeId) {
@@ -260,8 +381,7 @@
   async function probeOverviewStoreGateway(storeId) {
     const sid = normalizeStoreId(storeId);
     storeOverviewStatus[sid] = { ...(storeOverviewStatus[sid] || {}), checking: true, online: null };
-    const meta = (catalog?.stores || []).find((s) => normalizeStoreId(s.id) === sid);
-    renderGatewayStoreCard(meta);
+    refreshGatewayOverview();
 
     try {
       const { ok, status, data } = await postStoreLedOn(sid);
@@ -281,8 +401,7 @@
       setStoreGatewayEntry(sid, { online: false, error: formatStoreGatewayError(sid, err.message) });
     }
 
-    renderGatewayStoreCard(meta);
-    updateGatewayOverviewKpis();
+    refreshGatewayOverview();
   }
 
   async function scanAllStoreGateways({ force = false, skipStores = null } = {}) {
@@ -305,7 +424,6 @@
         const cached = getStoreGatewayEntry(sid);
         if (!force && cached && isCacheFresh(cached.checkedAt, GATEWAY_TTL_MS)) {
           storeOverviewStatus[sid] = { ...cached, checking: false };
-          renderGatewayStoreCard(stores[i]);
           continue;
         }
         await probeOverviewStoreGateway(sid);
@@ -315,7 +433,7 @@
       overviewScanRunning = false;
       $('btnRefreshGateways')?.removeAttribute('disabled');
       updateGatewayOverviewMeta(false);
-      updateGatewayOverviewKpis();
+      refreshGatewayOverview();
     }
   }
 
@@ -426,7 +544,7 @@
         setDevicesPanelBlocked(false);
         gatewayDebug('ESP8266 em cache (online)', { store: storeId, age: formatCacheAge(cached.checkedAt) });
         startBackgroundDeviceProbes({ force });
-        refreshGatewayOverviewCards();
+        refreshGatewayOverview();
         renderDevices();
         return true;
       }
@@ -434,7 +552,7 @@
       showStoreGatewayAlert(storeGatewayError);
       updateStoreGatewayMeta('offline');
       setDevicesPanelBlocked(true);
-      refreshGatewayOverviewCards();
+      refreshGatewayOverview();
       renderDevices();
       return false;
     }
@@ -461,7 +579,7 @@
 
         revertStoreLedTest(storeId);
         startBackgroundDeviceProbes({ force });
-        refreshGatewayOverviewCards();
+        refreshGatewayOverview();
         return true;
       }
 
@@ -472,7 +590,7 @@
       updateStoreGatewayMeta('offline');
       setDevicesPanelBlocked(true);
       gatewayDebug('ESP8266 offline (led/on)', { store: storeId, status, data });
-      refreshGatewayOverviewCards();
+      refreshGatewayOverview();
       return false;
     } catch (err) {
       if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
@@ -481,7 +599,7 @@
       showStoreGatewayAlert(storeGatewayError);
       updateStoreGatewayMeta('offline');
       setDevicesPanelBlocked(true);
-      refreshGatewayOverviewCards();
+      refreshGatewayOverview();
       return false;
     } finally {
       if (gen === storeCheckGeneration) {
@@ -1239,7 +1357,7 @@
       setDevicesPanelBlocked(true);
       resetPingStatus();
       updateDevicesPanelVisibility();
-      refreshGatewayOverviewCards();
+      refreshGatewayOverview();
       renderDevices();
       const url = new URL(window.location.href);
       url.searchParams.delete('store');
@@ -1257,7 +1375,7 @@
     window.history.replaceState({}, '', url);
     resetPingStatus();
     updateDevicesPanelVisibility();
-    refreshGatewayOverviewCards();
+    refreshGatewayOverview();
     renderDevices();
     gatewayDebug('Loja selecionada — verificando gateway', { store: currentStore });
     await verifyStoreGateway(next);
@@ -1307,6 +1425,7 @@
 
     checkApiHealth().catch(() => {});
 
+    initGatewayKpiEvents();
     $('storeSelect').addEventListener('change', onStoreSelectChange);
     $('btnRefreshGateways')?.addEventListener('click', () => {
       void scanAllStoreGateways({ force: true }).then(() => {
