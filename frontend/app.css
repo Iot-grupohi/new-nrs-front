@@ -4211,3 +4211,15 @@ a.topbar__tool {
   font-size: 0.78rem;
 }
 
+.page-gateway .device-card__endpoint {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.page-gateway .device-card__endpoint code {
+  font-size: inherit;
+  color: #93c5fd;
+}
+
