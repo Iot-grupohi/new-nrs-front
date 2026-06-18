@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAV60 — Gateway (redundância)</title>
+  <link rel="stylesheet" href="app.css?v=14">
+</head>
+<body class="page-dashboard page-store page-gateway auth-pending">
+  <div class="app-shell">
+    <header class="topbar topbar--store topbar--gateway">
+      <div class="topbar__row">
+        <div class="topbar__brand">
+          <a href="index.html" class="topbar__back" aria-label="Voltar ao painel">‹</a>
+          <div class="topbar__logo" aria-hidden="true">L60</div>
+          <div class="topbar__identity">
+            <nav class="topbar__crumb" aria-label="Navegação">
+              <a href="index.html" class="topbar__crumb-link">Painel</a>
+              <span class="topbar__crumb-sep" aria-hidden="true">/</span>
+              <span class="topbar__code">Gateway</span>
+            </nav>
+            <h1 class="topbar__title">Console de redundância</h1>
+          </div>
+        </div>
+        <div class="topbar__toolbar">
+          <span class="gateway-badge" id="gatewayBadge">API central</span>
+          <div id="headerUserMenu" class="topbar__user-slot"></div>
+        </div>
+      </div>
+      <div class="topbar__meta">
+        <p class="topbar__subtitle">Canal alternativo via <code id="gatewayBaseUrl">gateway.lav60.com</code> — sem agente local</p>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <section class="gateway-banner" id="gatewayBanner" role="status">
+        <strong>Redundância operacional</strong>
+        <p>Use quando o agente local ou túnel estiver indisponível. As ações passam diretamente pela API MQTT central.</p>
+      </section>
+
+      <section class="gateway-alert hidden" id="tokenAlert" role="alert">
+        Token da API central não configurado no servidor. Defina <code>GATEWAY_API_TOKEN</code> ou <code>API_TOKEN</code> no <code>.env</code> do painel.
+      </section>
+
+      <section class="gateway-toolbar card">
+        <div class="gateway-toolbar__row">
+          <label class="gateway-field">
+            <span class="gateway-field__label">Loja</span>
+            <select id="storeSelect" class="gateway-field__select">
+              <option value="">Selecione…</option>
+            </select>
+          </label>
+          <label class="gateway-field gateway-field--compact">
+            <span class="gateway-field__label">ou código</span>
+            <input type="text" id="storeManual" class="gateway-field__input" placeholder="pb05" autocomplete="off" spellcheck="false">
+          </label>
+          <button type="button" class="btn btn--primary" id="btnApplyStore">Aplicar</button>
+          <button type="button" class="btn btn--ghost" id="btnApiHealth">Testar API</button>
+          <button type="button" class="btn btn--ghost" id="btnRefreshStatus">Atualizar status</button>
+        </div>
+        <div class="gateway-toolbar__meta">
+          <span class="gateway-meta" id="apiHealthMeta">API: —</span>
+          <span class="gateway-meta" id="storeMeta">Loja: —</span>
+          <span class="gateway-meta" id="statusTime">Status: —</span>
+        </div>
+      </section>
+
+      <section class="stats-grid stats-grid--store" id="summaryGrid">
+        <article class="stat-card stat-card--success">
+          <span class="stat-card__label">Online</span>
+          <strong class="stat-card__value" id="summaryOnline">—</strong>
+          <span class="stat-card__sub" id="summaryTotal">de — total</span>
+        </article>
+        <article class="stat-card">
+          <span class="stat-card__label">Saúde</span>
+          <strong class="stat-card__value" id="summaryHealth">—</strong>
+          <div class="stat-card__bar"><div id="summaryHealthBar" style="width:0%"></div></div>
+        </article>
+        <article class="stat-card stat-card--primary">
+          <span class="stat-card__label">Canal</span>
+          <strong class="stat-card__value stat-card__value--sm">Redundância</strong>
+        </article>
+      </section>
+
+      <section class="devices-panel" id="devicesPanel">
+        <div class="devices-panel__section">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Lavadoras</h2>
+            <span class="devices-panel__count" id="washersCount">—</span>
+          </header>
+          <div class="device-list" id="washersGrid"></div>
+        </div>
+
+        <div class="devices-panel__section">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Secadoras</h2>
+            <span class="devices-panel__count" id="dryersCount">—</span>
+          </header>
+          <div class="device-list" id="dryersGrid"></div>
+        </div>
+
+        <div class="devices-panel__section devices-panel__section--wide">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Dosadoras</h2>
+            <span class="devices-panel__count" id="dosersCount">—</span>
+          </header>
+          <div class="device-list" id="dosersGrid"></div>
+        </div>
+
+        <div class="devices-panel__section">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Ar condicionado</h2>
+          </header>
+          <div class="device-list" id="acGrid"></div>
+        </div>
+
+        <div class="devices-panel__section">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Gateway ESP8266</h2>
+          </header>
+          <div class="device-list" id="ledGrid"></div>
+        </div>
+      </section>
+
+      <section class="gateway-log card">
+        <header class="gateway-log__head">
+          <h2 class="gateway-log__title">Últimas respostas</h2>
+          <button type="button" class="btn btn--sm btn--ghost" id="btnClearLog">Limpar</button>
+        </header>
+        <ol class="gateway-log__list" id="responseLog"></ol>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script src="api.js"></script>
+  <script src="auth.js"></script>
+  <script src="gateway.js"></script>
+</body>
+</html>

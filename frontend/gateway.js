@@ -1,0 +1,492 @@
+(() => {
+  'use strict';
+
+  const { loadCatalog, friendlyUserMessage } = window.Lav60;
+  const { guardPage, mountUserMenu, panelFetch } = window.Lav60Auth;
+
+  const $ = (id) => document.getElementById(id);
+  const MAX_LOG = 10;
+
+  let gatewayConfig = null;
+  let catalog = null;
+  let currentStore = '';
+  let statusData = null;
+  let busy = false;
+  const washerAm = {};
+
+  function normalizeStoreId(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function escapeHtml(text) {
+    return String(text ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function showToast(message, ok = true) {
+    const el = $('toast');
+    el.textContent = friendlyUserMessage(message);
+    el.className = `toast ${ok ? 'toast--ok' : 'toast--err'}`;
+    el.classList.remove('hidden');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => el.classList.add('hidden'), 4500);
+  }
+
+  function setBusy(value) {
+    busy = value;
+    document.body.classList.toggle('gateway-busy', value);
+  }
+
+  function appendLog(label, ok, payload) {
+    const list = $('responseLog');
+    if (!list) return;
+    const item = document.createElement('li');
+    item.className = `gateway-log__item ${ok ? 'gateway-log__item--ok' : 'gateway-log__item--err'}`;
+    const preview =
+      typeof payload === 'string'
+        ? payload
+        : JSON.stringify(payload, null, 0).slice(0, 280);
+    item.innerHTML = `<time>${new Date().toLocaleTimeString('pt-BR')}</time>
+      <strong>${escapeHtml(label)}</strong>
+      <code>${escapeHtml(preview)}</code>`;
+    list.prepend(item);
+    while (list.children.length > MAX_LOG) list.removeChild(list.lastChild);
+  }
+
+  async function loadGatewayConfig() {
+    const res = await panelFetch('/api/gateway/config');
+    if (!res.ok) throw new Error('Configuração do gateway indisponível');
+    gatewayConfig = await res.json();
+    const base = gatewayConfig.base_url || 'https://gateway.lav60.com';
+    $('gatewayBaseUrl').textContent = base.replace(/^https?:\/\//, '');
+    $('tokenAlert').classList.toggle('hidden', Boolean(gatewayConfig.token_configured));
+    return gatewayConfig;
+  }
+
+  async function gatewayRequest(method, subpath, body) {
+    if (!currentStore) throw new Error('Selecione uma loja');
+    const url = `/api/gateway/${encodeURIComponent(currentStore)}/${subpath.replace(/^\//, '')}`;
+    const options = {
+      method,
+      headers: { Accept: 'application/json' },
+    };
+    if (body !== undefined) {
+      options.headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(body);
+    }
+    const res = await panelFetch(url, options);
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      data = { detail: `HTTP ${res.status}` };
+    }
+    if (!res.ok) {
+      const err = new Error(data.detail || data.message || `HTTP ${res.status}`);
+      err.payload = data;
+      throw err;
+    }
+    return data;
+  }
+
+  async function checkApiHealth() {
+    $('apiHealthMeta').textContent = 'API: verificando…';
+    try {
+      const res = await panelFetch('/api/gateway/health');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+      $('apiHealthMeta').textContent = `API: online (${data.message || 'OK'})`;
+      $('apiHealthMeta').className = 'gateway-meta gateway-meta--ok';
+      appendLog('Health API', true, data);
+      return data;
+    } catch (err) {
+      $('apiHealthMeta').textContent = `API: offline — ${err.message}`;
+      $('apiHealthMeta').className = 'gateway-meta gateway-meta--err';
+      appendLog('Health API', false, err.message);
+      throw err;
+    }
+  }
+
+  function onlinePill(online) {
+    if (online === true) return '<span class="device-card__status pill pill--on">Online</span>';
+    if (online === false) return '<span class="device-card__status pill pill--off">Offline</span>';
+    return '<span class="device-card__status pill pill--warn">—</span>';
+  }
+
+  function renderSummary() {
+    const washers = gatewayConfig?.washers || [];
+    const dryers = gatewayConfig?.dryers || [];
+    const dosers = gatewayConfig?.dosers || [];
+    const ids = [...washers, ...dryers, ...dosers];
+    let online = 0;
+    let total = ids.length + 1;
+
+    washers.forEach((id) => {
+      if (statusData?.washers?.[id] === true) online += 1;
+    });
+    dryers.forEach((id) => {
+      if (statusData?.dryers?.[id] === true) online += 1;
+    });
+    dosers.forEach((id) => {
+      if (statusData?.dosers?.[id] === true) online += 1;
+    });
+    if (statusData?.ac === true) online += 1;
+
+    const pct = total ? Math.round((online / total) * 100) : 0;
+    $('summaryOnline').textContent = String(online);
+    $('summaryTotal').textContent = `de ${total} total`;
+    $('summaryHealth').textContent = `${pct}%`;
+    $('summaryHealthBar').style.width = `${pct}%`;
+  }
+
+  function renderWashers() {
+    const grid = $('washersGrid');
+    const ids = gatewayConfig?.washers || [];
+    $('washersCount').textContent = String(ids.length);
+    grid.innerHTML = ids
+      .map((id) => {
+        const online = statusData?.washers?.[id];
+        const am = washerAm[id] || '';
+        const amOptions = (gatewayConfig?.washer_am_options || []).map(
+          (v) =>
+            `<option value="${escapeHtml(v)}"${am === v ? ' selected' : ''}>${escapeHtml(v)}</option>`
+        );
+        return `<article class="device-card device-card--tile">
+          <div class="device-card__head">
+            <div class="device-card__title-row">
+              <span class="device-card__id">${escapeHtml(id)}</span>
+              ${onlinePill(online)}
+            </div>
+          </div>
+          <div class="device-card__actions device-card__actions--washer">
+            <select class="device-card__select" data-am-for="${escapeHtml(id)}" aria-label="Dosagem AM">
+              <option value="">Sem AM</option>
+              ${amOptions.join('')}
+            </select>
+            <button type="button" class="btn btn--primary device-card__release-btn" data-action="washer-release" data-machine="${escapeHtml(id)}">Liberar</button>
+          </div>
+        </article>`;
+      })
+      .join('');
+  }
+
+  function renderDryers() {
+    const grid = $('dryersGrid');
+    const ids = gatewayConfig?.dryers || [];
+    const minutes = gatewayConfig?.dryer_minutes || [15, 30, 45];
+    $('dryersCount').textContent = String(ids.length);
+    grid.innerHTML = ids
+      .map((id) => {
+        const online = statusData?.dryers?.[id];
+        const btns = minutes
+          .map(
+            (m) =>
+              `<button type="button" class="btn btn--warning" data-action="dryer-start" data-machine="${escapeHtml(id)}" data-minutes="${m}">${m} min</button>`
+          )
+          .join('');
+        return `<article class="device-card device-card--tile">
+          <div class="device-card__head">
+            <div class="device-card__title-row">
+              <span class="device-card__id">${escapeHtml(id)}</span>
+              ${onlinePill(online)}
+            </div>
+          </div>
+          <div class="device-card__actions device-card__actions--dryer">${btns}</div>
+        </article>`;
+      })
+      .join('');
+  }
+
+  function renderDosers() {
+    const grid = $('dosersGrid');
+    const ids = gatewayConfig?.dosers || [];
+    $('dosersCount').textContent = String(ids.length);
+    grid.innerHTML = ids
+      .map((id) => {
+        const online = statusData?.dosers?.[id];
+        return `<article class="device-card device-card--tile device-card--doser">
+          <div class="device-card__head">
+            <div class="device-card__title-row">
+              <span class="device-card__id">${escapeHtml(id)}</span>
+              ${onlinePill(online)}
+            </div>
+          </div>
+          <div class="device-card__actions device-card__actions--doser">
+            <div class="device-card__action-grid device-card__action-grid--3">
+              <button type="button" class="btn btn--ghost" data-action="doser-rele" data-machine="${escapeHtml(id)}" data-type="rele1on">Sabão</button>
+              <button type="button" class="btn btn--ghost" data-action="doser-rele" data-machine="${escapeHtml(id)}" data-type="rele2on">Floral</button>
+              <button type="button" class="btn btn--ghost" data-action="doser-rele" data-machine="${escapeHtml(id)}" data-type="rele3on">Sport</button>
+            </div>
+            <div class="device-card__action-row">
+              <button type="button" class="btn btn--primary device-card__action-wide" data-action="doser-consulta" data-machine="${escapeHtml(id)}">Consulta tempos</button>
+            </div>
+            <div class="device-card__action-grid device-card__action-grid--3">
+              <button type="button" class="btn btn--success" data-action="doser-amaciante" data-machine="${escapeHtml(id)}">Amaciante</button>
+              <button type="button" class="btn btn--success" data-action="doser-dosagem" data-machine="${escapeHtml(id)}">Dosagem</button>
+              <button type="button" class="btn btn--ghost" data-action="doser-device-status" data-machine="${escapeHtml(id)}">HTTP status</button>
+            </div>
+          </div>
+        </article>`;
+      })
+      .join('');
+  }
+
+  function renderAc() {
+    const temps = gatewayConfig?.ac_temperatures || ['18', '22', 'off'];
+    const online = statusData?.ac;
+    const labels = { 18: '18°C', 22: '22°C', off: 'Desligar' };
+    $('acGrid').innerHTML = `<article class="device-card device-card--tile">
+      <div class="device-card__head">
+        <div class="device-card__title-row">
+          <span class="device-card__id">AC</span>
+          ${onlinePill(online)}
+        </div>
+      </div>
+      <div class="device-card__actions device-card__actions--ac">
+        ${temps
+          .map(
+            (t) =>
+              `<button type="button" class="btn btn--primary" data-action="ac-set" data-temp="${escapeHtml(t)}">${escapeHtml(labels[t] || t)}</button>`
+          )
+          .join('')}
+      </div>
+    </article>`;
+  }
+
+  function renderLed() {
+    $('ledGrid').innerHTML = `<article class="device-card device-card--tile">
+      <div class="device-card__head">
+        <div class="device-card__title-row">
+          <span class="device-card__id">LED</span>
+        </div>
+      </div>
+      <div class="device-card__actions">
+        <button type="button" class="btn btn--success" data-action="led-on">Ligar</button>
+        <button type="button" class="btn btn--ghost" data-action="led-off">Desligar</button>
+      </div>
+    </article>`;
+  }
+
+  function renderDevices() {
+    renderWashers();
+    renderDryers();
+    renderDosers();
+    renderAc();
+    renderLed();
+    renderSummary();
+  }
+
+  async function refreshStatus() {
+    if (!currentStore) {
+      showToast('Selecione uma loja', false);
+      return;
+    }
+    $('statusTime').textContent = 'Status: carregando…';
+    setBusy(true);
+    try {
+      statusData = await gatewayRequest('GET', 'status');
+      $('statusTime').textContent = `Status: ${new Date().toLocaleTimeString('pt-BR')}`;
+      renderDevices();
+      appendLog(`Status ${currentStore}`, true, statusData);
+    } catch (err) {
+      statusData = null;
+      $('statusTime').textContent = 'Status: erro';
+      renderDevices();
+      showToast(err.message, false);
+      appendLog(`Status ${currentStore}`, false, err.payload || err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runAction(label, fn) {
+    if (busy) return;
+    if (!currentStore) {
+      showToast('Selecione uma loja', false);
+      return;
+    }
+    setBusy(true);
+    try {
+      const data = await fn();
+      showToast(`${label} — OK`);
+      appendLog(label, true, data);
+      await refreshStatus().catch(() => {});
+      return data;
+    } catch (err) {
+      showToast(`${label}: ${err.message}`, false);
+      appendLog(label, false, err.payload || err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function applyStore(fromUser = true) {
+    const manual = normalizeStoreId($('storeManual').value);
+    const selected = normalizeStoreId($('storeSelect').value);
+    const next = manual || selected;
+    if (!next) {
+      if (fromUser) showToast('Informe o código da loja', false);
+      return;
+    }
+    currentStore = next;
+    const meta = (catalog?.stores || []).find((s) => s.id === next);
+    const title = meta?.name ? `${meta.name} (${next.toUpperCase()})` : next.toUpperCase();
+    $('storeMeta').textContent = `Loja: ${title}`;
+    $('storeSelect').value = next;
+    $('storeManual').value = next;
+    const url = new URL(window.location.href);
+    url.searchParams.set('store', next);
+    window.history.replaceState({}, '', url);
+    statusData = null;
+    renderDevices();
+    refreshStatus().catch(() => {});
+  }
+
+  function populateStoreSelect() {
+    const select = $('storeSelect');
+    const stores = catalog?.stores || [];
+    select.innerHTML = '<option value="">Selecione…</option>';
+    stores.forEach((s) => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.name ? `${s.name} (${s.id.toUpperCase()})` : s.id.toUpperCase();
+      select.appendChild(opt);
+    });
+  }
+
+  async function handlePanelClick(event) {
+    const btn = event.target.closest('[data-action]');
+    if (!btn || busy) return;
+
+    const action = btn.dataset.action;
+    const machine = btn.dataset.machine;
+
+    if (action === 'washer-release') {
+      const am = washerAm[machine] || '';
+      const label = am ? `Lavadora ${machine} + ${am}` : `Lavadora ${machine}`;
+      if (!confirm(`Confirmar liberação da lavadora ${machine}?`)) return;
+      await runAction(label, () =>
+        gatewayRequest('POST', `washer/${machine}`, am ? { am } : undefined)
+      );
+      return;
+    }
+
+    if (action === 'dryer-start') {
+      const minutes = Number(btn.dataset.minutes);
+      if (!confirm(`Iniciar secadora ${machine} por ${minutes} min?`)) return;
+      await runAction(`Secadora ${machine} ${minutes}min`, () =>
+        gatewayRequest('POST', `dryer/${machine}`, { minutes })
+      );
+      return;
+    }
+
+    if (action === 'ac-set') {
+      const temp = btn.dataset.temp;
+      const label = temp === 'off' ? 'AC desligar' : `AC ${temp}°C`;
+      if (!confirm(`Confirmar ${label}?`)) return;
+      await runAction(label, () => gatewayRequest('POST', 'ac', { temperature: temp }));
+      return;
+    }
+
+    if (action === 'doser-rele') {
+      const type = btn.dataset.type;
+      if (!confirm(`Acionar ${type} na dosadora ${machine}?`)) return;
+      await runAction(`Dosador ${machine} ${type}`, () =>
+        gatewayRequest('POST', `doser/${machine}`, { type })
+      );
+      return;
+    }
+
+    if (action === 'doser-consulta') {
+      await runAction(`Consulta ${machine}`, () =>
+        gatewayRequest('GET', `doser/${machine}/consulta`)
+      );
+      return;
+    }
+
+    if (action === 'doser-amaciante') {
+      if (!confirm(`Amaciante na dosadora ${machine}?`)) return;
+      await runAction(`Amaciante ${machine}`, () =>
+        gatewayRequest('POST', `doser/${machine}/amaciante`)
+      );
+      return;
+    }
+
+    if (action === 'doser-dosagem') {
+      if (!confirm(`Dosagem na dosadora ${machine}?`)) return;
+      await runAction(`Dosagem ${machine}`, () =>
+        gatewayRequest('POST', `doser/${machine}/dosagem`)
+      );
+      return;
+    }
+
+    if (action === 'doser-device-status') {
+      await runAction(`Device status ${machine}`, () =>
+        gatewayRequest('GET', `doser/${machine}/device-status`)
+      );
+      return;
+    }
+
+    if (action === 'led-on') {
+      await runAction('LED ligar', () => gatewayRequest('POST', 'led/on'));
+      return;
+    }
+
+    if (action === 'led-off') {
+      await runAction('LED desligar', () => gatewayRequest('POST', 'led/off'));
+    }
+  }
+
+  async function init() {
+    const ok = await guardPage({ returnPath: `gateway.html${window.location.search}` });
+    if (!ok) return;
+    await mountUserMenu($('headerUserMenu'));
+
+    try {
+      await loadGatewayConfig();
+      catalog = await loadCatalog();
+      populateStoreSelect();
+    } catch (err) {
+      showToast(err.message, false);
+    }
+
+    renderDevices();
+    checkApiHealth().catch(() => {});
+
+    const initial = normalizeStoreId(new URLSearchParams(window.location.search).get('store'));
+    if (initial) {
+      $('storeManual').value = initial;
+      $('storeSelect').value = initial;
+      applyStore(false);
+    }
+
+    $('btnApplyStore').addEventListener('click', () => applyStore(true));
+    $('storeSelect').addEventListener('change', () => {
+      $('storeManual').value = $('storeSelect').value;
+    });
+    $('storeManual').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') applyStore(true);
+    });
+    $('btnRefreshStatus').addEventListener('click', () => refreshStatus());
+    $('btnApiHealth').addEventListener('click', () => checkApiHealth().catch(() => {}));
+    $('btnClearLog').addEventListener('click', () => {
+      $('responseLog').innerHTML = '';
+    });
+    $('devicesPanel').addEventListener('click', handlePanelClick);
+    $('ledGrid').addEventListener('click', handlePanelClick);
+    $('acGrid').addEventListener('click', handlePanelClick);
+    $('devicesPanel').addEventListener('change', (e) => {
+      const sel = e.target.closest('[data-am-for]');
+      if (!sel) return;
+      washerAm[sel.dataset.amFor] = sel.value;
+    });
+  }
+
+  init().catch((err) => {
+    document.body.classList.remove('auth-pending');
+    showToast(err.message || 'Erro ao iniciar', false);
+  });
+})();

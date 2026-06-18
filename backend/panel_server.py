@@ -412,6 +412,43 @@ def build_agent_config_from_heartbeat(store_id: str) -> dict | None:
     }
 
 
+CENTRAL_GATEWAY_MACHINES = {
+    'washers': ['321', '432', '543', '654'],
+    'dryers': ['765', '876', '987', '210'],
+    'dosers': ['321', '432', '543', '654'],
+}
+
+
+def central_gateway_base_url() -> str:
+    return (env_value('GATEWAY_API_URL') or 'https://gateway.lav60.com').rstrip('/')
+
+
+def central_gateway_token() -> str:
+    return (env_value('GATEWAY_API_TOKEN') or env_value('API_TOKEN') or '').strip()
+
+
+def forward_central_gateway(method: str, path: str, timeout: int = 60):
+    """Encaminha requisição à API MQTT central (sem depender de heartbeat/agente)."""
+    base = central_gateway_base_url()
+    token = central_gateway_token()
+    clean_path = path if path.startswith('/') else f'/{path}'
+    if clean_path != '/' and not token:
+        raise ValueError('GATEWAY_API_TOKEN (ou API_TOKEN) não configurado no servidor')
+
+    headers = {'Accept': 'application/json'}
+    if token:
+        headers['X-Token'] = token
+
+    json_body = None
+    if method in ('POST', 'PUT', 'PATCH'):
+        json_body = request.get_json(silent=True)
+        if json_body is not None:
+            headers['Content-Type'] = 'application/json'
+
+    url = f'{base}{clean_path}'
+    return requests.request(method, url, headers=headers, json=json_body, timeout=timeout)
+
+
 def forward_agent_request(store_id: str, method: str, agent_path: str, timeout: int = 45):
     """Encaminha requisição ao agente da loja (server-side — evita CORS no browser)."""
     headers = {'Accept': 'application/json'}
@@ -482,6 +519,55 @@ def api_store_agent_gateway(store_id: str, subpath: str):
         resp = forward_agent_request(sid, request.method, agent_path, timeout=60)
         return agent_proxy_response(resp)
     except ConnectionError as exc:
+        return jsonify({'detail': str(exc)}), 502
+
+
+@app.route('/api/gateway/config', methods=['GET'])
+def api_gateway_config():
+    return jsonify({
+        'base_url': central_gateway_base_url(),
+        'token_configured': bool(central_gateway_token()),
+        'washers': CENTRAL_GATEWAY_MACHINES['washers'],
+        'dryers': CENTRAL_GATEWAY_MACHINES['dryers'],
+        'dosers': CENTRAL_GATEWAY_MACHINES['dosers'],
+        'washer_am_options': ['am01-1', 'am01-2', 'am02-1', 'am02-2'],
+        'dryer_minutes': [15, 30, 45],
+        'ac_temperatures': ['18', '22', 'off'],
+        'doser_types': [
+            'softener0', 'softener1', 'softener2', 'softener3',
+            'am01-1', 'am01-2', 'am02-1', 'am02-2',
+            'rele1on', 'rele2on', 'rele3on', 'status',
+        ],
+    }), 200
+
+
+@app.route('/api/gateway/health', methods=['GET', 'OPTIONS'])
+def api_gateway_health():
+    if request.method == 'OPTIONS':
+        return '', 204
+    try:
+        resp = forward_central_gateway('GET', '/', timeout=15)
+        return agent_proxy_response(resp)
+    except ValueError as exc:
+        return jsonify({'detail': str(exc)}), 503
+    except requests.RequestException as exc:
+        return jsonify({'detail': str(exc)}), 502
+
+
+@app.route('/api/gateway/<store_id>/<path:subpath>', methods=['GET', 'POST', 'OPTIONS'])
+def api_central_gateway_proxy(store_id: str, subpath: str):
+    if request.method == 'OPTIONS':
+        return '', 204
+    sid = normalize_store_id(store_id)
+    if not sid:
+        return jsonify({'detail': 'Invalid store id'}), 400
+    path = f'/{sid}/{subpath.lstrip("/")}'
+    try:
+        resp = forward_central_gateway(request.method, path, timeout=60)
+        return agent_proxy_response(resp)
+    except ValueError as exc:
+        return jsonify({'detail': str(exc)}), 503
+    except requests.RequestException as exc:
         return jsonify({'detail': str(exc)}), 502
 
 
