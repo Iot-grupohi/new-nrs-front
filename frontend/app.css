@@ -515,6 +515,7 @@ select.btn {
 }
 
 .page-panel {
+  --sidebar-width: 248px;
   background: var(--bg);
   background-image:
     radial-gradient(ellipse 80% 50% at 50% -20%, rgba(231, 236, 243, 0.04), transparent),
@@ -523,12 +524,11 @@ select.btn {
 }
 
 .app-layout {
-  display: flex;
   min-height: 100vh;
 }
 
 .app-main {
-  flex: 1;
+  margin-left: var(--sidebar-width);
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -536,11 +536,18 @@ select.btn {
 }
 
 .sidebar {
-  width: 248px;
-  flex-shrink: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 200;
+  width: var(--sidebar-width);
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   padding: 1rem 0.75rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: rgba(26, 35, 50, 0.98);
   border-right: 1px solid rgba(148, 163, 184, 0.16);
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
@@ -634,18 +641,10 @@ select.btn {
 .sidebar-user {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.5rem;
   padding: 0.65rem 0.75rem;
   border-radius: 12px;
   background: rgba(15, 20, 25, 0.55);
-}
-
-.sidebar-user__label {
-  font-size: 0.65rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
 }
 
 .sidebar-user__email {
@@ -3768,14 +3767,16 @@ a.topbar__tool {
 }
 
 @media (max-width: 960px) {
+  .page-panel {
+    --sidebar-width: 76px;
+  }
+
   .sidebar {
-    width: 76px;
     padding: 1rem 0.45rem;
   }
 
   .sidebar__identity,
-  .sidebar__label,
-  .sidebar-user__label {
+  .sidebar__label {
     display: none;
   }
 

@@ -187,7 +187,6 @@
 
     container.innerHTML = `
       <div class="sidebar-user">
-        <span class="sidebar-user__label">Conectado como</span>
         <span class="sidebar-user__email" title="${escapeHtml(email)}">${escapeHtml(email)}</span>
         <button type="button" class="btn btn--sm btn--ghost sidebar-user__logout" id="sidebarLogout">Sair</button>
       </div>`;
