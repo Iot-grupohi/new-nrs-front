@@ -419,6 +419,10 @@ CENTRAL_GATEWAY_MACHINES = {
     'dosers': ['321', '432', '543', '654'],
 }
 
+GATEWAY_STATUS_TIMEOUT = int(env_value('GATEWAY_STATUS_TIMEOUT') or '25')
+GATEWAY_PROBE_TIMEOUT = int(env_value('GATEWAY_PROBE_TIMEOUT') or '8')
+GATEWAY_PROBE_TIMEOUT_FAST = int(env_value('GATEWAY_PROBE_TIMEOUT_FAST') or '6')
+
 
 def central_gateway_base_url() -> str:
     return (env_value('GATEWAY_API_URL') or 'https://gateway.lav60.com').rstrip('/')
@@ -426,6 +430,21 @@ def central_gateway_base_url() -> str:
 
 def central_gateway_token() -> str:
     return (env_value('GATEWAY_API_TOKEN') or env_value('API_TOKEN') or '').strip()
+
+
+def friendly_gateway_transport_error(exc: Exception) -> str:
+    msg = str(exc or '').strip()
+    lower = msg.lower()
+    if 'read timed out' in lower or 'timed out' in lower:
+        return (
+            'Gateway MQTT demorou para responder. '
+            'ESP8266 da loja pode estar offline ou fora do broker.'
+        )
+    if 'connection refused' in lower or 'failed to establish' in lower:
+        return 'Sem conexão com gateway.lav60.com.'
+    if 'name or service not known' in lower or 'getaddrinfo failed' in lower:
+        return 'Host gateway.lav60.com não encontrado.'
+    return msg[:500] if msg else 'Erro de comunicação com gateway.lav60.com.'
 
 
 def forward_central_gateway(method: str, path: str, timeout: int = 60):
@@ -551,7 +570,8 @@ def merge_aggregate_gateway_status(data: dict, summary: dict) -> None:
         summary['ac'] = bool(data['ac'])
 
 
-def fill_status_summary_probes(store_id: str, summary: dict) -> None:
+def fill_status_summary_probes(store_id: str, summary: dict, timeout: int | None = None) -> None:
+    probe_timeout = timeout if timeout is not None else GATEWAY_PROBE_TIMEOUT
     probes: list[tuple[str, str | None, str]] = []
     for mid in CENTRAL_GATEWAY_MACHINES['washers']:
         probes.append(('washers', mid, f'status/washer/{mid}'))
@@ -565,7 +585,7 @@ def fill_status_summary_probes(store_id: str, summary: dict) -> None:
 
     def run_probe(item: tuple[str, str | None, str]) -> tuple[str, str | None, bool | None]:
         key, mid, subpath = item
-        return key, mid, probe_central_device_online(store_id, subpath)
+        return key, mid, probe_central_device_online(store_id, subpath, timeout=probe_timeout)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(run_probe, item) for item in probes]
@@ -653,9 +673,10 @@ def api_gateway_status_summary(store_id: str):
         return jsonify({'detail': 'Invalid store id'}), 400
 
     summary = build_default_status_summary(sid)
+    probe_timeout = GATEWAY_PROBE_TIMEOUT
 
     try:
-        resp = forward_central_gateway('GET', f'/{sid}/status', timeout=15)
+        resp = forward_central_gateway('GET', f'/{sid}/status', timeout=GATEWAY_STATUS_TIMEOUT)
         data = parse_upstream_gateway_json(resp)
         if resp.status_code == 200 and isinstance(data.get('washers'), dict):
             summary['esp_online'] = True
@@ -667,11 +688,17 @@ def api_gateway_status_summary(store_id: str):
         summary['esp_online'] = False
     except ValueError as exc:
         return jsonify({'detail': str(exc)}), 503
-    except requests.RequestException as exc:
-        summary['esp_error'] = str(exc)
+    except requests.Timeout as exc:
+        summary['esp_error'] = friendly_gateway_transport_error(exc)
         summary['esp_online'] = False
+        probe_timeout = GATEWAY_PROBE_TIMEOUT_FAST
+    except requests.RequestException as exc:
+        summary['esp_error'] = friendly_gateway_transport_error(exc)
+        summary['esp_online'] = False
+        if 'timed out' in str(exc).lower():
+            probe_timeout = GATEWAY_PROBE_TIMEOUT_FAST
 
-    fill_status_summary_probes(sid, summary)
+    fill_status_summary_probes(sid, summary, timeout=probe_timeout)
 
     any_online = any(
         value is True

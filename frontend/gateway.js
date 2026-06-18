@@ -141,6 +141,19 @@
     return isOperable(online) ? '' : ' disabled';
   }
 
+  function formatEspError(raw) {
+    if (!raw) return 'Gateway ESP8266 não respondeu via MQTT.';
+    const text = String(raw);
+    const lower = text.toLowerCase();
+    if (lower.includes('read timed out') || lower.includes('httpsconnectionpool')) {
+      return 'Gateway MQTT demorou para responder. ESP8266 da loja pode estar offline ou fora do broker.';
+    }
+    if (lower.includes('did not respond')) {
+      return text;
+    }
+    return friendlyUserMessage(text);
+  }
+
   function updateEspStatus() {
     const meta = $('espStatusMeta');
     const alert = $('espAlert');
@@ -164,8 +177,7 @@
 
     meta.textContent = 'ESP8266: offline ou sem resposta';
     meta.className = 'gateway-meta gateway-meta--err';
-    const msg = statusData.esp_error || 'Gateway ESP8266 não respondeu via MQTT.';
-    alert.textContent = msg;
+    alert.textContent = formatEspError(statusData.esp_error);
     alert.classList.remove('hidden');
   }
 
@@ -356,9 +368,6 @@
       $('statusTime').textContent = `Status: ${new Date().toLocaleTimeString('pt-BR')}`;
       renderDevices();
       appendLog(`Status ${currentStore}`, true, statusData);
-      if (statusData.esp_online === false) {
-        showToast(statusData.esp_error || 'ESP8266 offline via MQTT', false);
-      }
     } catch (err) {
       statusData = null;
       $('statusTime').textContent = 'Status: erro';
