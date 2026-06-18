@@ -590,6 +590,14 @@
     const card = document.querySelector(`.device-card[data-dryer-id="${dryerId}"]`);
     if (card) applyDryerLockUI(card, dryerId);
     scheduleDeviceLockTick();
+    logGatewayAudit({
+      action: 'dryer_unlock',
+      label: `Reativar botões · secadora ${dryerId}`,
+      method: 'UI',
+      success: true,
+      device_type: 'dryer',
+      device_id: String(dryerId),
+    });
   }
 
   function getWasherLockRemainingMs(washerId) {
@@ -622,6 +630,14 @@
     const card = document.querySelector(`.device-card[data-washer-id="${washerId}"]`);
     if (card) applyWasherLockUI(card, washerId);
     scheduleDeviceLockTick();
+    logGatewayAudit({
+      action: 'washer_unlock',
+      label: `Reativar botões · lavadora ${washerId}`,
+      method: 'UI',
+      success: true,
+      device_type: 'washer',
+      device_id: String(washerId),
+    });
   }
 
   function initDeviceLocks() {
@@ -866,6 +882,20 @@
     return true;
   }
 
+  function buildGatewayAudit(fields) {
+    const base = {
+      store: currentStore,
+      page: 'gateway',
+      ...fields,
+    };
+    return window.Lav60Audit?.buildEntry ? Lav60Audit.buildEntry(base) : base;
+  }
+
+  async function logGatewayAudit(fields) {
+    if (!window.Lav60Audit) return false;
+    return Lav60Audit.log(buildGatewayAudit(fields));
+  }
+
   async function runAction(label, fn, audit = null) {
     if (actionBusy) return;
     if (!storeSelected()) {
@@ -880,10 +910,34 @@
     try {
       const data = await fn();
       showActionConfirm(label, data);
+      await logGatewayAudit({
+        action: audit?.action || 'operation',
+        label: audit?.label || label,
+        method: audit?.method || 'POST',
+        path: audit?.path || null,
+        success: true,
+        payload: audit?.payload || null,
+        response: data,
+        device_type: audit?.device_type || null,
+        device_id: audit?.device_id || null,
+        meta: audit?.meta || null,
+      });
       if (shouldRefreshDevicesAfterAction(audit)) {
         void startBackgroundDeviceProbes({ force: true });
       }
     } catch (e) {
+      await logGatewayAudit({
+        action: audit?.action || 'operation',
+        label: audit?.label || label,
+        method: audit?.method || 'POST',
+        path: audit?.path || null,
+        success: false,
+        payload: audit?.payload || null,
+        error: e?.message || String(e),
+        device_type: audit?.device_type || null,
+        device_id: audit?.device_id || null,
+        meta: audit?.meta || null,
+      });
       showToast(formatOperatorError(label, e.message), false);
     } finally {
       actionBusy = false;
@@ -901,8 +955,30 @@
       const data = await runGatewayAction(`Secadora ${id}`, `dryer/${id}`, 'POST', { minutes });
       setDryerLock(id, data.minutes ?? minutes);
       showActionConfirm(`Secadora ${id}`, data);
+      await logGatewayAudit({
+        action: 'dryer_release',
+        label: `Secadora ${id} · ${minutes} min`,
+        method: 'POST',
+        path: `/dryer/${id}`,
+        success: true,
+        payload: { minutes },
+        response: data,
+        device_type: 'dryer',
+        device_id: String(id),
+      });
       void startBackgroundDeviceProbes({ force: true });
     } catch (e) {
+      await logGatewayAudit({
+        action: 'dryer_release',
+        label: `Secadora ${id} · ${minutes} min`,
+        method: 'POST',
+        path: `/dryer/${id}`,
+        success: false,
+        payload: { minutes },
+        error: e?.message || String(e),
+        device_type: 'dryer',
+        device_id: String(id),
+      });
       showToast(formatOperatorError(`Secadora ${id}`, e.message), false);
     }
   }
@@ -919,8 +995,30 @@
       const data = await runGatewayAction(`Lavadora ${id}`, `washer/${id}`, 'POST', am ? { am } : {});
       setWasherLock(id, getWasherLockMinutes(getMachineMeta(id, 'washer')));
       showActionConfirm(`Lavadora ${id}`, data);
+      await logGatewayAudit({
+        action: 'washer_release',
+        label: `Lavadora ${id}`,
+        method: 'POST',
+        path: `/washer/${id}`,
+        success: true,
+        payload: am ? { am } : {},
+        response: data,
+        device_type: 'washer',
+        device_id: String(id),
+      });
       void startBackgroundDeviceProbes({ force: true });
     } catch (e) {
+      await logGatewayAudit({
+        action: 'washer_release',
+        label: `Lavadora ${id}`,
+        method: 'POST',
+        path: `/washer/${id}`,
+        success: false,
+        payload: am ? { am } : {},
+        error: e?.message || String(e),
+        device_type: 'washer',
+        device_id: String(id),
+      });
       showToast(formatOperatorError(`Lavadora ${id}`, e.message), false);
     }
   }
@@ -1184,6 +1282,10 @@
     if (!ok) return;
     bindConfirmEvents();
     await mountUserMenu($('headerUserMenu'));
+
+    if (window.Lav60Audit) {
+      await Lav60Audit.refreshStatus();
+    }
 
     try {
       await loadGatewayConfig();

@@ -18,6 +18,11 @@ _DEVICE_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 
+CHANNEL_LABELS_PT: dict[str, str] = {
+    'agente_local': 'Agente local',
+    'redundancia': 'Redundância',
+}
+
 ACTION_LABELS_PT: dict[str, str] = {
     'auth_login': 'Login no painel',
     'auth_logout': 'Logout do painel',
@@ -168,6 +173,7 @@ def build_operation_summary(
     device_id: str | None,
     payload: Any,
     success: bool,
+    channel: str | None = None,
 ) -> str:
     verb = ACTION_LABELS_PT.get(action, label or action or 'Operação')
     parts = [operator_name, verb]
@@ -196,6 +202,10 @@ def build_operation_summary(
     if store:
         parts.append(store.upper())
 
+    if channel:
+        channel_label = CHANNEL_LABELS_PT.get(channel, channel)
+        parts.append(f'via {channel_label}')
+
     summary = ' · '.join(str(p) for p in parts if p)
     if not success:
         summary = f'{summary} · falhou' if summary else 'Operação falhou'
@@ -219,6 +229,14 @@ def build_audit_record(
     device_type, device_id = resolve_device_fields(body)
     operator_name = operator_display_name(user)
     operator_email = (user or {}).get('email') or None
+    meta = body.get('meta') if isinstance(body.get('meta'), dict) else {}
+    channel = str(meta.get('channel') or '').strip() or None
+    if not channel:
+        page_key = str(body.get('page') or '').strip().lower()
+        if page_key == 'gateway':
+            channel = 'redundancia'
+        elif page_key == 'store':
+            channel = 'agente_local'
 
     record: dict[str, Any] = {
         'ts': now.isoformat(),
@@ -237,11 +255,13 @@ def build_audit_record(
             device_id=device_id,
             payload=payload,
             success=success,
+            channel=channel,
         ),
         'operator_name': operator_name,
         'operator_email': operator_email,
         'device_type': device_type,
         'device_id': device_id,
+        'channel': channel,
         'method': str(body.get('method') or '').strip().upper()[:12] or None,
         'path': _truncate(body.get('path') or '', 240) or None,
         'success': success,

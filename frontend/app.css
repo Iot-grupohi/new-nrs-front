@@ -4300,6 +4300,11 @@ a.topbar__tool {
   width: 5rem;
 }
 
+.records-table__channel {
+  width: 7.5rem;
+  font-weight: 600;
+}
+
 .records-table__equip-type {
   width: 9.5rem;
 }
@@ -4321,6 +4326,7 @@ a.topbar__tool {
 .records-table__equip-type,
 .records-table__equip-code,
 .records-table__store,
+.records-table__channel,
 .records-table__action,
 .records-table__dry-time {
   font-weight: 600;

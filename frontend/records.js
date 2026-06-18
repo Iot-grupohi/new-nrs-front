@@ -2,7 +2,7 @@
   'use strict';
 
   const PAGE_SIZE = 20;
-  const CACHE_VERSION = '10';
+  const CACHE_VERSION = '11';
   const CACHE_TTL_MS = 5 * 60 * 1000;
   const CACHE_PREFIX = `lav60:records:v${CACHE_VERSION}:`;
   const FILTERS_KEY = `${CACHE_PREFIX}filters`;
@@ -84,6 +84,11 @@
     ac: 'AR-CONDICIONADO',
   };
 
+  const CHANNEL_LABELS = {
+    agente_local: 'Agente local',
+    redundancia: 'Redundância',
+  };
+
   function payloadOf(row) {
     return row?.payload && typeof row.payload === 'object' ? row.payload : {};
   }
@@ -103,6 +108,15 @@
   function storeLabel(row) {
     const store = String(row?.store || '').trim();
     return store ? store.toUpperCase() : '—';
+  }
+
+  function channelLabel(row) {
+    const ch = row?.channel || row?.meta?.channel;
+    if (ch) return CHANNEL_LABELS[ch] || ch;
+    const page = String(row?.page || '').toLowerCase();
+    if (page === 'gateway') return CHANNEL_LABELS.redundancia;
+    if (page === 'store') return CHANNEL_LABELS.agente_local;
+    return '—';
   }
 
   function actionCellText(row) {
@@ -632,6 +646,7 @@
           ${escapeHtml(row.operator_email || row.operator_name || '—')}
         </td>
         <td class="records-table__store">${escapeHtml(storeLabel(row))}</td>
+        <td class="records-table__channel">${escapeHtml(channelLabel(row))}</td>
         <td class="records-table__equip-type">${escapeHtml(equipmentType(row))}</td>
         <td class="records-table__equip-code">${escapeHtml(equipmentCode(row))}</td>
         <td class="records-table__action">${escapeHtml(actionCellText(row))}</td>
