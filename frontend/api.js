@@ -1288,6 +1288,14 @@
     });
   }
 
+  function isStoreHeartbeatAlive(hb, catalog) {
+    if (!hb) return false;
+    if (hb.alive === false) return false;
+    const timeoutMs = getHeartbeatTimeoutMs(catalog);
+    const receivedAt = hb.receivedAt || 0;
+    return Boolean(receivedAt && Date.now() - receivedAt <= timeoutMs);
+  }
+
   function ingestHeartbeatEntry(storeId, entry) {
     const id = normalizeStoreId(storeId);
     if (!id) return;
@@ -1298,10 +1306,12 @@
         : entry?.receivedAt || Date.now();
     const payload = entry?.payload || entry;
     const status = statusFromHeartbeatPayload(null, payload, id);
+    const alive = entry?.alive !== false;
     heartbeatState.set(id, {
       receivedAt,
       payload,
       lastStatus: status || prev?.lastStatus || null,
+      alive,
     });
   }
 
@@ -1395,7 +1405,6 @@
   function buildCardFromHeartbeat(meta, catalog, cacheMap = dashboardCacheMap) {
     const id = normalizeStoreId(meta.id);
     const hb = heartbeatState.get(id);
-    const displayDelayMs = getOfflineDisplayDelayMs(catalog);
     const now = Date.now();
     const cachedRow = cacheMap?.[id];
 
@@ -1404,10 +1413,25 @@
       return cardFromCacheRow(meta, cachedRow, catalog);
     }
 
-    if (!hb) {
+    function offlineFromCacheOrEmpty() {
       const cached = fromCache();
       if (cached) {
-        if (cached.accessible) {
+        return {
+          ...cached,
+          accessible: false,
+          state: 'unreachable',
+          error: friendlyUserMessage('Sem conexão com a loja'),
+          staleSnapshot: true,
+        };
+      }
+      return buildStoreCard(meta, null, 'Sem conexão com a loja', catalog);
+    }
+
+    if (!hb) {
+      const snapshotGraceMs = 12000;
+      if (now - heartbeatPageStartedAt < snapshotGraceMs) {
+        const cached = fromCache();
+        if (cached?.accessible) {
           return {
             ...cached,
             accessible: false,
@@ -1416,18 +1440,13 @@
             staleSnapshot: true,
           };
         }
-        return cached;
-      }
-      const snapshotGraceMs = 12000;
-      if (now - heartbeatPageStartedAt < snapshotGraceMs) {
+        if (cached) return cached;
         return buildPlaceholderCard(meta, catalog);
       }
-      return buildStoreCard(meta, null, 'Sem conexão com a loja', catalog);
+      return offlineFromCacheOrEmpty();
     }
 
-    const ageMs = now - hb.receivedAt;
-
-    if (ageMs > displayDelayMs) {
+    if (!isStoreHeartbeatAlive(hb, catalog)) {
       return buildOfflineCardFromHeartbeat(meta, catalog, hb, cacheMap);
     }
 
