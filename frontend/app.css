@@ -745,7 +745,7 @@ a.topbar__tool {
 }
 
 .stats-grid--dashboard {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 0.85rem;
   margin-bottom: 0;
 }
@@ -770,6 +770,10 @@ a.topbar__tool {
 
 .page-dashboard .stat-card--suspended::before {
   background: #64748b;
+}
+
+.page-dashboard .stat-card--occupied::before {
+  background: var(--warning);
 }
 
 .page-dashboard .stat-card__label {
@@ -1278,6 +1282,7 @@ a.topbar__tool {
 .stat-card--warn::before { background: var(--warning); }
 .stat-card--danger::before { background: var(--danger); }
 .stat-card--suspended::before { background: #64748b; }
+.stat-card--occupied::before { background: var(--warning); }
 
 .stat-card__label {
   display: block;

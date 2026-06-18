@@ -835,16 +835,22 @@
     return normalizeMachineStatus(dev?.status) === 'suspended';
   }
 
+  function isDeviceOccupied(dev) {
+    return normalizeMachineStatus(dev?.status) === 'occupied';
+  }
+
   function countDeviceStates(devices) {
     let suspended = 0;
     let offlineNetwork = 0;
+    let occupied = 0;
     ['washers', 'dryers', 'dosers', 'ac'].forEach((key) => {
       (devices?.[key] || []).forEach((dev) => {
         if (isDeviceSuspended(dev)) suspended += 1;
+        else if (isDeviceOccupied(dev)) occupied += 1;
         else if (!dev.online) offlineNetwork += 1;
       });
     });
-    return { suspended, offlineNetwork };
+    return { suspended, offlineNetwork, occupied };
   }
 
   function summaryFromDevices(devices) {
@@ -942,8 +948,10 @@
     let devicesTotal = 0;
     let devicesSuspended = 0;
     let devicesOfflineNetwork = 0;
+    let devicesOccupied = 0;
     const devicesSuspendedEvents = [];
     const devicesOfflineNetworkEvents = [];
+    const devicesOccupiedEvents = [];
     const storesOnlineEvents = [];
     const storesOfflineEvents = [];
     const typeLabels = {
@@ -996,6 +1004,7 @@
       const stateCounts = countDeviceStates(card.devices);
       devicesSuspended += stateCounts.suspended;
       devicesOfflineNetwork += stateCounts.offlineNetwork;
+      devicesOccupied += stateCounts.occupied;
       Object.entries(typeLabels).forEach(([group, label]) => {
         (card.devices?.[group] || []).forEach((dev) => {
           if (isDeviceSuspended(dev)) {
@@ -1005,6 +1014,14 @@
               type_label: label,
               id: dev.id,
               status_label: dev.status_label || 'Suspensa',
+            });
+          } else if (isDeviceOccupied(dev)) {
+            devicesOccupiedEvents.push({
+              store: card.id,
+              store_name: card.name || card.id.toUpperCase(),
+              type_label: label,
+              id: dev.id,
+              status_label: dev.status_label || 'Ocupada',
             });
           } else if (!dev.online) {
             devicesOfflineNetworkEvents.push({
@@ -1033,6 +1050,7 @@
         total: devicesTotal,
         offline: devicesSuspended + devicesOfflineNetwork,
         suspended: devicesSuspended,
+        occupied: devicesOccupied,
         offline_network: devicesOfflineNetwork,
         health_pct: devicesTotal ? Math.round((devicesOnline / devicesTotal) * 100) : 0,
       },
@@ -1040,6 +1058,9 @@
         stores_online: storesOnlineEvents.sort((a, b) => a.store.localeCompare(b.store)),
         stores_offline: storesOfflineEvents.sort((a, b) => a.store.localeCompare(b.store)),
         devices_suspended: devicesSuspendedEvents.sort((a, b) =>
+          a.store.localeCompare(b.store) || String(a.id).localeCompare(String(b.id))
+        ),
+        devices_occupied: devicesOccupiedEvents.sort((a, b) =>
           a.store.localeCompare(b.store) || String(a.id).localeCompare(String(b.id))
         ),
         devices_offline_network: devicesOfflineNetworkEvents.sort((a, b) =>

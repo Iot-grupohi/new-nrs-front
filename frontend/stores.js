@@ -35,6 +35,10 @@
       title: 'Máquinas suspensas',
       empty: 'Nenhuma máquina suspensa.',
     },
+    'devices-occupied': {
+      title: 'Máquinas ocupadas',
+      empty: 'Nenhuma máquina ocupada.',
+    },
     'devices-offline': {
       title: 'Dispositivos offline na rede',
       empty: 'Nenhum dispositivo fora da rede.',
@@ -366,11 +370,13 @@
 
     if (payload.timestamp) {
       const suspended = devices.suspended ?? 0;
+      const occupied = devices.occupied ?? 0;
       const offlineNetwork = devices.offline_network ?? 0;
       const totalStores = stores.total ?? 0;
-      if (suspended > 0 || offlineNetwork > 0) {
+      if (suspended > 0 || occupied > 0 || offlineNetwork > 0) {
         const parts = [];
         if (offlineNetwork > 0) parts.push(`${offlineNetwork} offline na rede`);
+        if (occupied > 0) parts.push(`${occupied} ocupada(s)`);
         if (suspended > 0) parts.push(`${suspended} suspensa(s)`);
         subtitle.textContent = `${parts.join(' · ')} · ${totalStores} loja(s) monitoradas`;
       } else {
@@ -390,6 +396,7 @@
     $('kpiStoresOnline').textContent = stores.online ?? '—';
     $('kpiStoresOffline').textContent = stores.offline ?? '—';
     $('kpiDevicesSuspended').textContent = devices.suspended ?? '—';
+    $('kpiDevicesOccupied').textContent = devices.occupied ?? '—';
     $('kpiDevicesOffline').textContent = devices.offline_network ?? '—';
 
     updateDashboardHeader({ dashboard, ...payload });
@@ -504,6 +511,10 @@
       html = renderStoreOfflineEvents(items);
     } else if (kpiKey === 'devices-suspended') {
       const items = events.devices_suspended || [];
+      count = items.length;
+      html = renderDeviceEventsGrouped(items);
+    } else if (kpiKey === 'devices-occupied') {
+      const items = events.devices_occupied || [];
       count = items.length;
       html = renderDeviceEventsGrouped(items);
     } else if (kpiKey === 'devices-offline') {
