@@ -572,8 +572,10 @@
     const totalEl = $('dashboardAuditTotal');
     if (!totalEl) return;
 
-    if (!data?.available && data?.detail === 'audit_unavailable') {
-      $('dashboardAuditMeta').textContent = 'Auditoria indisponível';
+    if (!data?.available && (data?.detail === 'audit_unavailable' || data?.hint)) {
+      $('dashboardAuditMeta').textContent = data.hint
+        ? `Auditoria indisponível — ${data.hint}`
+        : 'Auditoria indisponível — configure FIREBASE_SERVICE_ACCOUNT_FILE no VPS';
       totalEl.textContent = '—';
       $('dashboardAuditSuccessRate').textContent = '—';
       $('dashboardAuditTopOperator').textContent = '—';
@@ -618,8 +620,12 @@
         credentials: 'same-origin',
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        renderAuditSummary({ detail: data.detail || 'audit_unavailable' });
+      if (!res.ok || data.available === false || data.detail === 'audit_unavailable') {
+        renderAuditSummary({
+          available: false,
+          detail: data.detail || 'audit_unavailable',
+          hint: data.hint,
+        });
         return;
       }
       auditSummaryCache = { ...data, available: true };

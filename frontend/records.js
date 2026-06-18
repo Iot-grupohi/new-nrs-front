@@ -27,6 +27,7 @@
   let pageCursors = { 1: null };
   /** @type {Record<number, { items: object[], hasMore: boolean, nextCursor: number|null }>} */
   let pageSnapshots = {};
+  let auditUnavailable = null;
 
   const $ = (id) => document.getElementById(id);
 
@@ -318,6 +319,37 @@
     if ($('filterSuccess')) $('filterSuccess').value = f.success || '';
   }
 
+  function isAuditUnavailable(data) {
+    return data?.available === false || data?.detail === 'audit_unavailable';
+  }
+
+  function renderAuditUnavailable(payload) {
+    auditUnavailable = payload || { detail: 'audit_unavailable' };
+    items = [];
+    hasMore = false;
+    recordsReady = true;
+    loading = false;
+    renderTable();
+    updateMeta();
+    syncRecordsView();
+
+    const banner = $('recordsAuditBanner');
+    const hint = auditUnavailable.hint || 'Configure FIREBASE_SERVICE_ACCOUNT_FILE no .env do VPS.';
+    if (banner) {
+      banner.classList.remove('hidden');
+      banner.innerHTML = `<strong>Auditoria indisponível</strong><p>${escapeHtml(hint)}</p>`;
+    }
+    const subtitle = $('recordsSubtitle');
+    if (subtitle) subtitle.textContent = 'Firestore não configurado no servidor';
+  }
+
+  function clearAuditUnavailable() {
+    auditUnavailable = null;
+    $('recordsAuditBanner')?.classList.add('hidden');
+    const subtitle = $('recordsSubtitle');
+    if (subtitle) subtitle.textContent = 'Auditoria Firestore das ações no painel';
+  }
+
   function resetPagination() {
     currentPage = 1;
     pageCursors = { 1: null };
@@ -346,7 +378,11 @@
     body?.classList.toggle('records-panel__body--busy', tableRefreshing);
 
     if (showEmpty) {
-      $('recordsEmptyText').textContent = 'Nenhum registro encontrado para os filtros selecionados.';
+      if (auditUnavailable) {
+        $('recordsEmptyText').textContent = 'Registros indisponíveis até configurar a auditoria no VPS.';
+      } else {
+        $('recordsEmptyText').textContent = 'Nenhum registro encontrado para os filtros selecionados.';
+      }
     }
   }
 
@@ -472,6 +508,10 @@
       const query = buildQueryParams(filters, page);
       const res = await fetch(`/api/audit/logs?${query}`, { credentials: 'same-origin' });
       const data = await res.json().catch(() => ({}));
+      if (isAuditUnavailable(data)) {
+        renderAuditUnavailable(data);
+        return;
+      }
       if (!res.ok) {
         const hint = data.hint ? ` — ${data.hint}` : '';
         const reason = data.reason ? ` (${data.reason})` : '';
@@ -480,6 +520,7 @@
 
       if (silent && page !== currentPage) return;
 
+      clearAuditUnavailable();
       applyPagePayload(data, page, filters);
       writePageCache(filters, page, {
         items,

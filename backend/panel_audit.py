@@ -8,7 +8,7 @@ from typing import Any
 from flask import Request
 
 from lav60_env import env_value
-from panel_auth import init_firebase_admin, service_account_configured
+from panel_auth import firebase_init_error, init_firebase_admin, service_account_configured
 
 _MAX_FIELD_LEN = 4000
 _MAX_RESPONSE_KEYS = 24
@@ -60,6 +60,31 @@ def audit_root_path() -> str:
 
 def audit_logging_available() -> bool:
     return bool(service_account_configured() and init_firebase_admin())
+
+
+def audit_unavailable_payload() -> dict[str, Any]:
+    reason = 'service_account_missing'
+    hint = (
+        'Copie o JSON da service account para o VPS e defina '
+        'FIREBASE_SERVICE_ACCOUNT_FILE com caminho absoluto no .env'
+    )
+    if not service_account_configured():
+        env_path = (env_value('FIREBASE_SERVICE_ACCOUNT_FILE') or '').strip()
+        if env_path:
+            hint = (
+                f'Arquivo não encontrado: {env_path}. '
+                'Use caminho absoluto no Linux (ex.: /root/lav60-panel/service-account.json).'
+            )
+    elif firebase_init_error():
+        reason = firebase_init_error() or 'firestore_unavailable'
+        hint = f'Firebase Admin não iniciou: {reason}'
+    return {
+        'available': False,
+        'detail': 'audit_unavailable',
+        'reason': reason,
+        'hint': hint,
+        'collection': audit_collection(),
+    }
 
 
 def _truncate(value: Any, limit: int = _MAX_FIELD_LEN) -> Any:

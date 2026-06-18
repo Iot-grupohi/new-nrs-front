@@ -20,6 +20,7 @@ from panel_audit import (
     audit_dashboard_summary,
     audit_collection,
     audit_logging_available,
+    audit_unavailable_payload,
     count_audit_events,
     list_audit_events,
     list_audit_operator_stats,
@@ -826,21 +827,11 @@ def api_audit_log():
 @app.route('/api/audit/logs', methods=['GET'])
 def api_audit_logs():
     if not audit_logging_available():
-        reason = 'service_account_missing'
-        hint = None
-        if not service_account_configured():
-            hint = (
-                'Arquivo da service account não encontrado. '
-                'No VPS: copie o JSON e use caminho absoluto em FIREBASE_SERVICE_ACCOUNT_FILE'
-            )
-        elif firebase_init_error():
-            reason = firebase_init_error() or 'firestore_unavailable'
         return jsonify({
-            'detail': 'audit_unavailable',
-            'reason': reason,
-            'hint': hint,
+            **audit_unavailable_payload(),
             'items': [],
-        }), 503
+            'has_more': False,
+        }), 200
 
     store = request.args.get('store', '').strip().lower() or None
     action = request.args.get('action', '').strip() or None
@@ -910,7 +901,7 @@ def api_audit_logs():
 @app.route('/api/audit/operators', methods=['GET'])
 def api_audit_operators():
     if not audit_logging_available():
-        return jsonify({'detail': 'audit_unavailable', 'operators': []}), 503
+        return jsonify({**audit_unavailable_payload(), 'operators': []}), 200
     operators, err = list_audit_operators()
     if err:
         return jsonify({'detail': err, 'operators': []}), 500
@@ -920,7 +911,7 @@ def api_audit_operators():
 @app.route('/api/audit/operator-stats', methods=['GET'])
 def api_audit_operator_stats():
     if not audit_logging_available():
-        return jsonify({'detail': 'audit_unavailable', 'operators': []}), 503
+        return jsonify({**audit_unavailable_payload(), 'operators': [], 'truncated': False}), 200
 
     store = request.args.get('store', '').strip().lower() or None
     action = request.args.get('action', '').strip() or None
@@ -956,13 +947,21 @@ def api_audit_operator_stats():
 
 @app.route('/api/audit/dashboard-summary', methods=['GET'])
 def api_audit_dashboard_summary():
-    if not audit_logging_available():
-        return jsonify({'detail': 'audit_unavailable'}), 503
-
     try:
         hours = int(request.args.get('hours', '24'))
     except ValueError:
         hours = 24
+
+    if not audit_logging_available():
+        return jsonify({
+            **audit_unavailable_payload(),
+            'hours': hours,
+            'total': 0,
+            'success_rate': None,
+            'top_operator': None,
+            'top_store': None,
+            'truncated': False,
+        }), 200
 
     summary, truncated, err = audit_dashboard_summary(hours=hours)
     if err:
