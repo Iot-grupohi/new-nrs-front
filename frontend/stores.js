@@ -585,13 +585,17 @@
     const pill = loading
       ? '<span class="pill pill--warn">Verificando…</span>'
       : `<span class="pill pill--${statusClass}">${escapeHtml(statusLabel)}</span>`;
+    const icon = type === 'agent' ? '◫' : '⟲';
     return `
       <button type="button" class="store-channel-option store-channel-option--${type}" data-channel="${type}" ${disabled ? 'disabled' : ''}>
-        <span class="store-channel-option__head">
-          <strong class="store-channel-option__title">${escapeHtml(title)}</strong>
-          ${pill}
+        <span class="store-channel-option__icon" aria-hidden="true">${icon}</span>
+        <span class="store-channel-option__body">
+          <span class="store-channel-option__head">
+            <strong class="store-channel-option__title">${escapeHtml(title)}</strong>
+            ${pill}
+          </span>
+          <span class="store-channel-option__detail">${escapeHtml(detail)}</span>
         </span>
-        <span class="store-channel-option__detail">${escapeHtml(detail)}</span>
       </button>`;
   }
 
@@ -1105,7 +1109,19 @@
     pageAbort?.abort();
     pageAbort = null;
     closeKpiEventsPanel();
+    window.Lav60GatewayOverview?.destroy();
     currentPageMode = null;
+  }
+
+  function initGatewayDashboardPanel() {
+    if (currentPageMode !== 'dashboard' || !$('gatewayOverview') || !panelFetch) return;
+    window.Lav60GatewayOverview?.mount({
+      fetchFn: panelFetch,
+      getStores: () => catalogConfig?.stores || [],
+      onStoreAction: (storeId) => {
+        window.location.href = gatewayPageHref(storeId);
+      },
+    });
   }
 
   async function init(mode = 'dashboard') {
@@ -1132,6 +1148,7 @@
     if (storesBootstrapped && allStores.length) {
       renderDashboard(lastPayload?.dashboard || {}, lastPayload || {});
       filterAndRender();
+      if (mode === 'dashboard') initGatewayDashboardPanel();
       return;
     }
 
@@ -1140,7 +1157,10 @@
       catalogConfig = await loadCatalog();
       await loadStores();
       storesBootstrapped = true;
-      if (mode === 'dashboard') loadAuditDashboardSummary();
+      if (mode === 'dashboard') {
+        loadAuditDashboardSummary();
+        initGatewayDashboardPanel();
+      }
     } catch (e) {
       const grid = $('storesGrid');
       if (grid) {

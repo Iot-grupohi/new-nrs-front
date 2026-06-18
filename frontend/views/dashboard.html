@@ -57,6 +57,40 @@
     </article>
   </section>
 
+  <section class="gateway-overview dashboard-panel dashboard-panel--gateway" id="gatewayOverview">
+    <header class="gateway-overview__head dashboard-panel__head">
+      <div>
+        <h2 class="dashboard-panel__title">Redundância (gateway)</h2>
+        <p class="dashboard-panel__meta" id="gatewayOverviewMeta">ESP8266 via POST led/on</p>
+      </div>
+      <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshGateways">Atualizar</button>
+    </header>
+    <div class="stats-grid stats-grid--gateway stats-grid--dashboard-gateway" id="gatewayKpis">
+      <article class="stat-card stat-card--success stat-card--clickable" data-kpi="gateway-online" tabindex="0" role="button" aria-expanded="false" aria-controls="gatewayKpiPanel">
+        <span class="stat-card__label">Gateway online</span>
+        <strong class="stat-card__value" id="kpiGatewayOnline">—</strong>
+      </article>
+      <article class="stat-card stat-card--danger stat-card--clickable" data-kpi="gateway-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="gatewayKpiPanel">
+        <span class="stat-card__label">Gateway offline</span>
+        <strong class="stat-card__value" id="kpiGatewayOffline">—</strong>
+      </article>
+      <article class="stat-card stat-card--warn stat-card--clickable" data-kpi="gateway-pending" tabindex="0" role="button" aria-expanded="false" aria-controls="gatewayKpiPanel">
+        <span class="stat-card__label">Aguardando</span>
+        <strong class="stat-card__value" id="kpiGatewayPending">—</strong>
+      </article>
+    </div>
+    <section class="kpi-events-panel hidden" id="gatewayKpiPanel" aria-labelledby="gatewayKpiTitle">
+      <header class="kpi-events-panel__head">
+        <div>
+          <h3 class="kpi-events-panel__title" id="gatewayKpiTitle">Lojas</h3>
+          <p class="kpi-events-panel__meta" id="gatewayKpiMeta">—</p>
+        </div>
+        <button type="button" class="kpi-events-panel__close" id="gatewayKpiClose" aria-label="Fechar detalhes">×</button>
+      </header>
+      <div class="kpi-events-panel__body" id="gatewayKpiBody"></div>
+    </section>
+  </section>
+
   <section class="dashboard-insights" aria-label="Resumo operacional">
     <article class="dashboard-panel">
       <header class="dashboard-panel__head">

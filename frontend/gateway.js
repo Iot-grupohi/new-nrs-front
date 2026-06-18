@@ -34,25 +34,6 @@
   const GATEWAY_TTL_MS = 5 * 60 * 1000;
   const DEVICES_TTL_MS = 10 * 60 * 1000;
 
-  const storeOverviewStatus = Object.create(null);
-  let overviewScanRunning = false;
-  let activeGatewayKpi = null;
-
-  const GATEWAY_KPI_CONFIG = {
-    'gateway-online': {
-      title: 'Gateways online',
-      empty: 'Nenhuma loja com ESP8266 online no gateway central.',
-    },
-    'gateway-offline': {
-      title: 'Gateways offline',
-      empty: 'Nenhuma loja com gateway offline.',
-    },
-    'gateway-pending': {
-      title: 'Aguardando verificação',
-      empty: 'Todas as lojas já foram verificadas.',
-    },
-  };
-
   function gatewayDebug(label, payload) {
     const ts = new Date().toISOString().slice(11, 23);
     if (payload !== undefined) console.log(`[LAV60 Gateway ${ts}] ${label}`, payload);
@@ -110,7 +91,6 @@
     const checkedAt = Date.now();
     root.stores[sid].gateway = { online: Boolean(entry.online), error: entry.error || null, checkedAt };
     saveGatewayCacheRoot(root);
-    storeOverviewStatus[sid] = { ...root.stores[sid].gateway, checking: false };
   }
 
   function getStoreDevicesEntry(storeId) {
@@ -145,219 +125,8 @@
     };
   }
 
-  function hydrateOverviewFromCache() {
-    const root = loadGatewayCacheRoot();
-    Object.entries(root.stores || {}).forEach(([sid, block]) => {
-      if (block?.gateway) {
-        storeOverviewStatus[sid] = { ...block.gateway, checking: false };
-      }
-    });
-  }
-
-  function overviewStatusForStore(storeId) {
-    const sid = normalizeStoreId(storeId);
-    return storeOverviewStatus[sid] || getStoreGatewayEntry(sid) || null;
-  }
-
-  function storeDisplayName(entry) {
-    const sid = normalizeStoreId(entry?.store || entry?.id);
-    const name = entry?.name;
-    if (name) return `${name} (${sid.toUpperCase()})`;
-    return sid.toUpperCase();
-  }
-
-  function buildGatewayEventLists() {
-    const online = [];
-    const offline = [];
-    const pending = [];
-    (catalog?.stores || []).forEach((meta) => {
-      const sid = normalizeStoreId(meta.id);
-      const status = overviewStatusForStore(sid);
-      const entry = {
-        store: sid,
-        name: meta.name,
-        checkedAt: status?.checkedAt,
-        error: status?.error,
-        checking: Boolean(status?.checking),
-      };
-      if (!status || status.checking || status.online == null) pending.push(entry);
-      else if (status.online) online.push(entry);
-      else offline.push(entry);
-    });
-    const sort = (a, b) => a.store.localeCompare(b.store);
-    online.sort(sort);
-    offline.sort(sort);
-    pending.sort(sort);
-    return { online, offline, pending };
-  }
-
-  function renderGatewayOnlineEvents(items) {
-    if (!items?.length) return '';
-    return `<ul class="kpi-event-list kpi-event-list--stores">
-      ${items
-        .map((entry) => {
-          const age = entry.checkedAt ? formatCacheAge(entry.checkedAt) : '';
-          const sub = age ? `ESP8266 online · ${age}` : 'ESP8266 online';
-          return `
-        <li class="kpi-event-item">
-          <button type="button" class="kpi-event-item__store kpi-event-item__store--action" data-gateway-store="${escapeHtml(entry.store)}">${escapeHtml(storeDisplayName(entry))}</button>
-          <span class="kpi-event-item__sub">${escapeHtml(sub)}</span>
-        </li>`;
-        })
-        .join('')}
-    </ul>`;
-  }
-
-  function renderGatewayOfflineEvents(items) {
-    if (!items?.length) return '';
-    return `<ul class="kpi-event-list kpi-event-list--stores">
-      ${items
-        .map((entry) => {
-          const age = entry.checkedAt ? formatCacheAge(entry.checkedAt) : '';
-          const reason = entry.error || 'Gateway offline';
-          const sub = age ? `${reason} · ${age}` : reason;
-          return `
-        <li class="kpi-event-item kpi-event-item--alert">
-          <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
-          <span class="kpi-event-item__sub">${escapeHtml(sub)}</span>
-        </li>`;
-        })
-        .join('')}
-    </ul>`;
-  }
-
-  function renderGatewayPendingEvents(items) {
-    if (!items?.length) return '';
-    return `<ul class="kpi-event-list kpi-event-list--stores">
-      ${items
-        .map((entry) => {
-          const sub = entry.checking ? 'Verificando ESP8266…' : 'Aguardando verificação';
-          return `
-        <li class="kpi-event-item">
-          <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
-          <span class="kpi-event-item__sub">${escapeHtml(sub)}</span>
-        </li>`;
-        })
-        .join('')}
-    </ul>`;
-  }
-
-  function renderGatewayKpiPanel(kpiKey) {
-    const panel = $('gatewayKpiPanel');
-    const config = GATEWAY_KPI_CONFIG[kpiKey];
-    const lists = buildGatewayEventLists();
-    if (!panel || !config) return;
-
-    let html = '';
-    let count = 0;
-
-    if (kpiKey === 'gateway-online') {
-      count = lists.online.length;
-      html = renderGatewayOnlineEvents(lists.online);
-    } else if (kpiKey === 'gateway-offline') {
-      count = lists.offline.length;
-      html = renderGatewayOfflineEvents(lists.offline);
-    } else if (kpiKey === 'gateway-pending') {
-      count = lists.pending.length;
-      html = renderGatewayPendingEvents(lists.pending);
-    }
-
-    $('gatewayKpiTitle').textContent = config.title;
-    $('gatewayKpiMeta').textContent = count > 0 ? `${count} loja(s)` : config.empty;
-    $('gatewayKpiBody').innerHTML =
-      html || `<p class="kpi-events-panel__empty">${escapeHtml(config.empty)}</p>`;
-
-    panel.classList.remove('hidden');
-    document.querySelectorAll('#gatewayKpis [data-kpi]').forEach((el) => {
-      const active = el.dataset.kpi === kpiKey;
-      el.classList.toggle('stat-card--active', active);
-      el.setAttribute('aria-expanded', active ? 'true' : 'false');
-    });
-  }
-
-  function closeGatewayKpiPanel() {
-    activeGatewayKpi = null;
-    $('gatewayKpiPanel')?.classList.add('hidden');
-    document.querySelectorAll('#gatewayKpis [data-kpi]').forEach((el) => {
-      el.classList.remove('stat-card--active');
-      el.setAttribute('aria-expanded', 'false');
-    });
-  }
-
-  function toggleGatewayKpiPanel(kpiKey) {
-    if (activeGatewayKpi === kpiKey) {
-      closeGatewayKpiPanel();
-      return;
-    }
-    activeGatewayKpi = kpiKey;
-    renderGatewayKpiPanel(kpiKey);
-  }
-
-  function initGatewayKpiEvents() {
-    const root = $('gatewayOverview');
-    if (!root) return;
-
-    root.addEventListener('click', (e) => {
-      const storeBtn = e.target.closest('[data-gateway-store]');
-      if (storeBtn) {
-        void applyStore(storeBtn.dataset.gatewayStore);
-        closeGatewayKpiPanel();
-        $('devicesPanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        return;
-      }
-      const card = e.target.closest('[data-kpi]');
-      if (!card) return;
-      toggleGatewayKpiPanel(card.dataset.kpi);
-    });
-
-    root.addEventListener('keydown', (e) => {
-      const card = e.target.closest('[data-kpi]');
-      if (!card || (e.key !== 'Enter' && e.key !== ' ')) return;
-      e.preventDefault();
-      toggleGatewayKpiPanel(card.dataset.kpi);
-    });
-
-    $('gatewayKpiClose')?.addEventListener('click', closeGatewayKpiPanel);
-  }
-
-  function updateGatewayOverviewKpis() {
-    const stores = catalog?.stores || [];
-    let online = 0;
-    let offline = 0;
-    let pending = 0;
-    stores.forEach((meta) => {
-      const status = overviewStatusForStore(meta.id);
-      if (!status || status.checking || status.online == null) pending += 1;
-      else if (status.online) online += 1;
-      else offline += 1;
-    });
-    const onlineEl = $('kpiGatewayOnline');
-    const offlineEl = $('kpiGatewayOffline');
-    const pendingEl = $('kpiGatewayPending');
-    if (onlineEl) onlineEl.textContent = String(online);
-    if (offlineEl) offlineEl.textContent = String(offline);
-    if (pendingEl) pendingEl.textContent = String(pending);
-  }
-
-  function updateGatewayOverviewMeta(scanning = false) {
-    const el = $('gatewayOverviewMeta');
-    if (!el) return;
-    if (scanning) {
-      el.textContent = 'Verificando gateways (POST led/on)…';
-      return;
-    }
-    const ttlMin = Math.round(GATEWAY_TTL_MS / 60000);
-    el.textContent = `ESP8266 verificado via POST led/on — cache local por ${ttlMin} min (equipamentos por ${Math.round(DEVICES_TTL_MS / 60000)} min)`;
-  }
-
-  function renderGatewayOverview() {
-    updateGatewayOverviewKpis();
-    updateGatewayOverviewMeta(overviewScanRunning);
-    if (activeGatewayKpi) renderGatewayKpiPanel(activeGatewayKpi);
-  }
-
   function refreshGatewayOverview() {
-    renderGatewayOverview();
+    window.Lav60GatewayOverview?.render();
   }
 
   async function postStoreLedOn(storeId) {
@@ -376,65 +145,6 @@
       method: 'POST',
       headers: { Accept: 'application/json' },
     }).catch(() => {});
-  }
-
-  async function probeOverviewStoreGateway(storeId) {
-    const sid = normalizeStoreId(storeId);
-    storeOverviewStatus[sid] = { ...(storeOverviewStatus[sid] || {}), checking: true, online: null };
-    refreshGatewayOverview();
-
-    try {
-      const { ok, status, data } = await postStoreLedOn(sid);
-      if (ok) {
-        setStoreGatewayEntry(sid, { online: true, error: null });
-        revertStoreLedTest(sid);
-        gatewayDebug('Overview ESP online', { store: sid });
-      } else {
-        const error = formatStoreGatewayError(
-          sid,
-          data.detail || data.error || data.message || `HTTP ${status}`
-        );
-        setStoreGatewayEntry(sid, { online: false, error });
-        gatewayDebug('Overview ESP offline', { store: sid, status });
-      }
-    } catch (err) {
-      setStoreGatewayEntry(sid, { online: false, error: formatStoreGatewayError(sid, err.message) });
-    }
-
-    refreshGatewayOverview();
-  }
-
-  async function scanAllStoreGateways({ force = false, skipStores = null } = {}) {
-    if (overviewScanRunning || !catalog) return;
-    overviewScanRunning = true;
-    updateGatewayOverviewMeta(true);
-    $('btnRefreshGateways')?.setAttribute('disabled', 'disabled');
-
-    const skip = new Set(
-      (Array.isArray(skipStores) ? skipStores : skipStores ? [skipStores] : [])
-        .map(normalizeStoreId)
-        .filter(Boolean)
-    );
-
-    const stores = catalog.stores || [];
-    try {
-      for (let i = 0; i < stores.length; i += 1) {
-        const sid = normalizeStoreId(stores[i].id);
-        if (!sid || skip.has(sid)) continue;
-        const cached = getStoreGatewayEntry(sid);
-        if (!force && cached && isCacheFresh(cached.checkedAt, GATEWAY_TTL_MS)) {
-          storeOverviewStatus[sid] = { ...cached, checking: false };
-          continue;
-        }
-        await probeOverviewStoreGateway(sid);
-        if (i < stores.length - 1) await sleep(400);
-      }
-    } finally {
-      overviewScanRunning = false;
-      $('btnRefreshGateways')?.removeAttribute('disabled');
-      updateGatewayOverviewMeta(false);
-      refreshGatewayOverview();
-    }
   }
 
   function escapeHtml(text) {
@@ -1406,15 +1116,24 @@
       await loadGatewayConfig();
       catalog = await loadCatalog();
       populateStoreSelect();
-      hydrateOverviewFromCache();
-      renderGatewayOverview();
       resetPingStatus();
       setDevicesPanelBlocked(true);
       updateDevicesPanelVisibility();
       renderDevices();
 
       const initial = normalizeStoreId(new URLSearchParams(window.location.search).get('store'));
-      scanAllStoreGateways({ force: false, skipStores: initial }).catch(() => {});
+      window.Lav60GatewayOverview?.mount({
+        fetchFn: panelFetch,
+        getStores: () => catalog?.stores || [],
+        onStoreAction: (storeId) => {
+          void applyStore(storeId);
+          $('devicesPanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        },
+        onRefresh: () => {
+          if (currentStore) void verifyStoreGateway(currentStore, { force: true });
+        },
+        skipStores: initial || null,
+      });
       if (initial) {
         $('storeSelect').value = initial;
         void applyStore(initial);
@@ -1425,13 +1144,7 @@
 
     checkApiHealth().catch(() => {});
 
-    initGatewayKpiEvents();
     $('storeSelect').addEventListener('change', onStoreSelectChange);
-    $('btnRefreshGateways')?.addEventListener('click', () => {
-      void scanAllStoreGateways({ force: true }).then(() => {
-        if (currentStore) void verifyStoreGateway(currentStore, { force: true });
-      });
-    });
     $('btnClearLog').addEventListener('click', () => {
       $('responseLog').innerHTML = '';
     });
