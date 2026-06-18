@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LAV60 — Gateway (redundância)</title>
-  <link rel="stylesheet" href="app.css?v=24">
+  <link rel="stylesheet" href="app.css?v=25">
 </head>
 <body class="page-dashboard page-store page-gateway auth-pending">
   <div class="app-shell">
@@ -32,9 +32,8 @@
     </header>
 
     <main class="main-content">
-      <section class="gateway-banner" id="gatewayBanner" role="status">
-        <strong>Redundância operacional</strong>
-        <p>Canal alternativo quando o agente local estiver indisponível. Selecione a loja no menu — os equipamentos são verificados automaticamente em segundo plano.</p>
+      <section class="gateway-banner gateway-banner--compact hidden" id="gatewayNoStore" role="status">
+        <p>Escolha uma loja em <a href="index.html#/lojas" class="gateway-banner__link">Lojas</a> para operar pela redundância.</p>
       </section>
 
       <section class="gateway-alert hidden" id="tokenAlert" role="alert">
@@ -50,19 +49,8 @@
         Verificando conexão com a loja…
       </section>
 
-      <section class="gateway-toolbar card">
-        <div class="gateway-toolbar__row gateway-toolbar__row--store">
-          <label class="gateway-field gateway-field--store">
-            <span class="gateway-field__label">Loja</span>
-            <select id="storeSelect" class="gateway-field__select">
-              <option value="">Selecione…</option>
-            </select>
-          </label>
-        </div>
-        <div class="gateway-toolbar__meta">
-          <span class="gateway-meta" id="storeMeta">Loja: —</span>
-          <span class="gateway-meta" id="storeGatewayMeta">Gateway: —</span>
-        </div>
+      <section class="gateway-status card hidden" id="storeStatusBar">
+        <span class="gateway-meta" id="storeGatewayMeta">Gateway: —</span>
       </section>
 
       <section class="gateway-overview card" id="gatewayOverview">
@@ -130,22 +118,42 @@
           </header>
           <div class="device-list" id="acGrid"></div>
         </div>
-
-        <div class="devices-panel__section">
-          <header class="devices-panel__head">
-            <h2 class="devices-panel__title">Indicador do gateway</h2>
-          </header>
-          <div class="device-list" id="ledGrid"></div>
-        </div>
       </section>
     </main>
   </div>
 
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
+  <div id="actionPromptModal" class="confirm-modal confirm-modal--prompt hidden" role="alertdialog" aria-modal="true" aria-labelledby="actionPromptTitle">
+    <div class="confirm-modal__backdrop" data-action-prompt-dismiss></div>
+    <div class="confirm-modal__box">
+      <div class="confirm-modal__icon confirm-modal__icon--prompt" aria-hidden="true">?</div>
+      <h2 id="actionPromptTitle" class="confirm-modal__title">Confirmar operação</h2>
+      <p id="actionPromptMessage" class="confirm-modal__message">Deseja executar esta ação na loja?</p>
+      <div id="actionPromptBody" class="confirm-modal__body"></div>
+      <div class="confirm-modal__actions">
+        <button type="button" id="actionPromptCancel" class="btn btn--ghost">Cancelar</button>
+        <button type="button" id="actionPromptOk" class="btn btn--primary">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="confirmModal" class="confirm-modal hidden" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="confirm-modal__backdrop"></div>
+    <div class="confirm-modal__box">
+      <div class="confirm-modal__icon confirm-modal__icon--ok" aria-hidden="true"></div>
+      <h2 id="confirmTitle" class="confirm-modal__title">Comando confirmado</h2>
+      <p id="confirmMessage" class="confirm-modal__message"></p>
+      <div id="confirmBody" class="confirm-modal__body hidden"></div>
+      <span id="confirmStatus" class="confirm-modal__badge">Confirmado</span>
+      <button type="button" id="confirmOk" class="btn btn--primary confirm-modal__btn">OK</button>
+    </div>
+  </div>
+
   <script src="api.js?v=5"></script>
   <script src="auth.js"></script>
+  <script src="device-ui.js?v=1"></script>
   <script src="gateway-overview.js?v=2"></script>
-  <script src="gateway.js?v=26"></script>
+  <script src="gateway.js?v=28"></script>
 </body>
 </html>

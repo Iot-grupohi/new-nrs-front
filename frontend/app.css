@@ -4526,6 +4526,31 @@ a.topbar__tool {
   color: var(--warning);
 }
 
+.gateway-status {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1.1rem;
+}
+
+.gateway-banner--compact {
+  margin-bottom: 1rem;
+  padding: 0.85rem 1.1rem;
+}
+
+.gateway-banner--compact p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.gateway-banner__link {
+  color: #93c5fd;
+  text-decoration: none;
+}
+
+.gateway-banner__link:hover {
+  text-decoration: underline;
+}
+
 .gateway-toolbar {
   margin-bottom: 1rem;
   padding: 1rem 1.1rem;

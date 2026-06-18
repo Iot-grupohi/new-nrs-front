@@ -1,13 +1,42 @@
 (() => {
   'use strict';
 
-  const { loadCatalog, friendlyUserMessage, WASHER_DOSAGE_OPTIONS } = window.Lav60;
+  const {
+    loadCatalog,
+    friendlyUserMessage,
+    formatOperatorError,
+    WASHER_DOSAGE_OPTIONS,
+    findMachineMeta,
+    mergeMachinesCatalog,
+    getCachedStoreEntry,
+    fetchStoreStatusFromHeartbeat,
+    canOperateMachineStatus,
+    isDeviceVisibleInFrontend,
+  } = window.Lav60;
   const { guardPage, mountUserMenu, panelFetch } = window.Lav60Auth;
 
   const $ = (id) => document.getElementById(id);
 
-  const TEMPO_LABELS = { sabao: 'Sabão', floral: 'Floral', sport: 'Sport' };
-  const DOSER_TYPE_LABELS = { rele1on: 'Sabão', rele2on: 'Floral', rele3on: 'Sport' };
+  const confirmUI = Lav60DeviceUI.createConfirmUI({
+    $,
+    onToast: (message, ok = true) => showToast(message, ok),
+  });
+  const { confirmAction, showActionConfirm, bindConfirmEvents } = confirmUI;
+
+  const {
+    createDeviceCard,
+    deviceStatusHint,
+    buildDoserCardContent,
+    btn,
+    createChoicePicker,
+    syncReleaseButtonWithPicker,
+    appendReleaseButton,
+  } = Lav60DeviceUI.createDeviceUI(window.Lav60);
+
+  const { dosageLabel } = Lav60DeviceUI;
+
+  const DRYER_LOCK_STORAGE_KEY = 'lav60_dryer_locks';
+  const WASHER_LOCK_STORAGE_KEY = 'lav60_washer_locks';
 
   const STATUS_PATHS = {
     washer: (id) => `status/washer/${id}`,
@@ -18,12 +47,16 @@
 
   let gatewayConfig = null;
   let catalog = null;
+  let machinesCatalog = [];
   let currentStore = '';
   let storeGatewayReady = false;
   let storeGatewayError = null;
   let storeCheckGeneration = 0;
   let pingStatus = null;
   let actionBusy = false;
+  let deviceLockTimer = null;
+  let dryerLocks = {};
+  let washerLocks = {};
   const probingDevices = new Set();
   let probeGeneration = 0;
   let probeQueueRunner = null;
@@ -414,15 +447,6 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  function onlinePill(online, probing = false) {
-    if (probing) {
-      return '<span class="device-card__status pill pill--warn">Verificando…</span>';
-    }
-    if (online === true) return '<span class="device-card__status pill pill--on">Online</span>';
-    if (online === false) return '<span class="device-card__status pill pill--off">Offline</span>';
-    return '<span class="device-card__status pill pill--warn">Não verificado</span>';
-  }
-
   function deviceProbeKey(deviceType, machine) {
     return machine ? `${deviceType}:${machine}` : deviceType;
   }
@@ -431,120 +455,251 @@
     return probingDevices.has(deviceProbeKey(deviceType, machine));
   }
 
-  function findDeviceCard(deviceType, machine) {
-    if (deviceType === 'washer') {
-      return document.querySelector(`[data-washer-id="${CSS.escape(String(machine))}"]`);
-    }
-    if (deviceType === 'dryer') {
-      return document.querySelector(`[data-dryer-id="${CSS.escape(String(machine))}"]`);
-    }
-    if (deviceType === 'doser') {
-      return document.querySelector(`[data-doser-id="${CSS.escape(String(machine))}"]`);
-    }
-    if (deviceType === 'ac') {
-      return $('acGrid')?.querySelector('.device-card');
-    }
-    return null;
+  function updateDeviceStatusPill() {
+    renderDevices();
+    scheduleDeviceLockTick();
   }
 
-  function updateDeviceStatusPill(deviceType, machine, online, probing = false) {
-    const card = findDeviceCard(deviceType, machine);
-    if (!card) return;
-    const pill = card.querySelector('.device-card__status');
-    if (!pill) return;
-    pill.outerHTML = onlinePill(online, probing);
-  }
-
-  function btn(text, className, onclick) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = `btn btn--sm ${className || ''}`;
-    b.textContent = text;
-    if (onclick) b.addEventListener('click', onclick);
-    return b;
-  }
-
-  function createChoicePicker(options, { columns = 3, requireSelection = false, disabled = false } = {}) {
-    const wrap = document.createElement('div');
-    wrap.className = `device-card__choice-grid device-card__choice-grid--${columns}`;
-    let selected = requireSelection ? null : options[0]?.value ?? '';
-    const buttons = [];
-    const listeners = [];
-
-    function notifyChange() {
-      listeners.forEach((fn) => fn(selected));
+  async function loadMachinesForStore(storeId) {
+    const meta = (catalog?.stores || []).find((s) => normalizeStoreId(s.id) === storeId);
+    if (!meta) {
+      machinesCatalog = [];
+      return;
     }
+    const cached = await getCachedStoreEntry(meta, catalog);
+    if (cached?.status?.machines?.length) {
+      machinesCatalog = cached.status.machines;
+      return;
+    }
+    const { status } = await fetchStoreStatusFromHeartbeat(meta, catalog);
+    machinesCatalog = status?.machines || [];
+  }
 
-    options.forEach((opt) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'device-card__choice';
-      if (opt.wide) b.classList.add('device-card__choice--wide');
-      if (!requireSelection && String(opt.value) === String(selected)) {
-        b.classList.add('device-card__choice--active');
-      }
-      b.textContent = opt.label;
-      b.dataset.choiceValue = String(opt.value);
-      b.disabled = disabled;
-      b.addEventListener('click', () => {
-        if (b.disabled) return;
-        selected = opt.value;
-        buttons.forEach((item) => {
-          item.classList.toggle('device-card__choice--active', item.dataset.choiceValue === String(selected));
-        });
-        notifyChange();
-      });
-      buttons.push(b);
-      wrap.appendChild(b);
-    });
+  function getMachinesCatalog() {
+    return mergeMachinesCatalog(machinesCatalog);
+  }
 
+  function getMachineMeta(id, type) {
+    return findMachineMeta(getMachinesCatalog(), id, type);
+  }
+
+  function setSectionCount(elementId, map) {
+    Lav60DeviceUI.setSectionCount($(elementId), map);
+  }
+
+  function gatewayNetworkContext() {
     return {
-      root: wrap,
-      getValue: () => selected,
-      hasSelection: () => selected != null,
-      onChange(fn) {
-        listeners.push(fn);
-      },
-      setDisabled(value) {
-        buttons.forEach((item) => {
-          item.disabled = value;
-        });
-      },
+      machines: getMachinesCatalog(),
+      washers: pingStatus?.washers || {},
+      dryers: pingStatus?.dryers || {},
+      dosers: pingStatus?.dosers || {},
     };
   }
 
-  function syncReleaseButtonWithPicker(releaseBtn, picker) {
-    if (!releaseBtn || !picker) return;
-    const update = () => {
-      releaseBtn.disabled = !storeSelected() || !picker.hasSelection();
-    };
-    picker.onChange(update);
-    update();
+  function visibleDeviceIds(deviceType, ids) {
+    if (!getMachinesCatalog().length) return ids || [];
+    const network = gatewayNetworkContext();
+    return (ids || []).filter((id) => isDeviceVisibleInFrontend(deviceType, id, network));
   }
 
-  function appendReleaseButton(container, { label = 'Liberar', className = 'btn--primary', onRelease, disabled = false }) {
-    const releaseBtn = btn(label, `device-card__release-btn ${className}`, onRelease);
-    releaseBtn.disabled = disabled || !storeSelected();
-    container.appendChild(releaseBtn);
-    return releaseBtn;
+  function deviceOnline(deviceType, id) {
+    if (isDeviceProbing(deviceType, id)) return null;
+    if (deviceType === 'ac') return pingStatus?.ac ?? null;
+    return pingStatus?.[`${deviceType}s`]?.[id] ?? null;
   }
 
-  function appendEndpointHint() {}
+  function loadDryerLocksFromStorage() {
+    try {
+      const all = JSON.parse(localStorage.getItem(DRYER_LOCK_STORAGE_KEY) || '{}');
+      return all[currentStore] || {};
+    } catch {
+      return {};
+    }
+  }
 
-  function createDeviceShell(id, online, fillContent, { probing = false } = {}) {
-    const card = document.createElement('article');
-    card.className = 'device-card device-card--tile';
-    card.innerHTML = `
-      <header class="device-card__head">
-        <div class="device-card__title-row">
-          <h3 class="device-card__id">${escapeHtml(String(id))}</h3>
-        </div>
-      </header>
-    `;
-    const head = card.querySelector('.device-card__head');
-    head.insertAdjacentHTML('beforeend', onlinePill(online, probing));
-    fillContent(card);
-    return card;
+  function saveDryerLocksToStorage() {
+    try {
+      const all = JSON.parse(localStorage.getItem(DRYER_LOCK_STORAGE_KEY) || '{}');
+      all[currentStore] = dryerLocks;
+      localStorage.setItem(DRYER_LOCK_STORAGE_KEY, JSON.stringify(all));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function loadWasherLocksFromStorage() {
+    try {
+      const all = JSON.parse(localStorage.getItem(WASHER_LOCK_STORAGE_KEY) || '{}');
+      return all[currentStore] || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveWasherLocksToStorage() {
+    try {
+      const all = JSON.parse(localStorage.getItem(WASHER_LOCK_STORAGE_KEY) || '{}');
+      all[currentStore] = washerLocks;
+      localStorage.setItem(WASHER_LOCK_STORAGE_KEY, JSON.stringify(all));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function formatLockRemaining(ms) {
+    const totalSec = Math.max(0, Math.ceil(ms / 1000));
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    if (min >= 1 && sec > 0) return `${min} min ${sec} s`;
+    if (min >= 1) return `${min} min`;
+    return `${sec} s`;
+  }
+
+  function getDryerLockRemainingMs(dryerId) {
+    const unlockAt = dryerLocks[String(dryerId)];
+    if (!unlockAt) return 0;
+    const remaining = unlockAt - Date.now();
+    if (remaining <= 0) {
+      delete dryerLocks[String(dryerId)];
+      saveDryerLocksToStorage();
+      return 0;
+    }
+    return remaining;
+  }
+
+  function setDryerLock(dryerId, minutes) {
+    dryerLocks[String(dryerId)] = Date.now() + (Number(minutes) || 15) * 60 * 1000;
+    saveDryerLocksToStorage();
+    scheduleDeviceLockTick();
+  }
+
+  function clearDryerLock(dryerId) {
+    delete dryerLocks[String(dryerId)];
+    saveDryerLocksToStorage();
+    const card = document.querySelector(`.device-card[data-dryer-id="${dryerId}"]`);
+    if (card) applyDryerLockUI(card, dryerId);
+    scheduleDeviceLockTick();
+  }
+
+  function getWasherLockRemainingMs(washerId) {
+    const unlockAt = washerLocks[String(washerId)];
+    if (!unlockAt) return 0;
+    const remaining = unlockAt - Date.now();
+    if (remaining <= 0) {
+      delete washerLocks[String(washerId)];
+      saveWasherLocksToStorage();
+      return 0;
+    }
+    return remaining;
+  }
+
+  function getWasherLockMinutes(meta) {
+    const mins = Number(meta?.waiting_minutes);
+    if (Number.isFinite(mins) && mins > 0) return mins;
+    return 45;
+  }
+
+  function setWasherLock(washerId, minutes) {
+    washerLocks[String(washerId)] = Date.now() + (Number(minutes) || 45) * 60 * 1000;
+    saveWasherLocksToStorage();
+    scheduleDeviceLockTick();
+  }
+
+  function clearWasherLock(washerId) {
+    delete washerLocks[String(washerId)];
+    saveWasherLocksToStorage();
+    const card = document.querySelector(`.device-card[data-washer-id="${washerId}"]`);
+    if (card) applyWasherLockUI(card, washerId);
+    scheduleDeviceLockTick();
+  }
+
+  function initDeviceLocks() {
+    if (!currentStore) return;
+    dryerLocks = loadDryerLocksFromStorage();
+    washerLocks = loadWasherLocksFromStorage();
+    scheduleDeviceLockTick();
+  }
+
+  function scheduleDeviceLockTick() {
+    if (deviceLockTimer) {
+      clearInterval(deviceLockTimer);
+      deviceLockTimer = null;
+    }
+    if (!Object.keys(dryerLocks).length && !Object.keys(washerLocks).length) return;
+    deviceLockTimer = setInterval(() => {
+      Object.keys(dryerLocks).forEach((id) => {
+        const card = document.querySelector(`.device-card[data-dryer-id="${id}"]`);
+        if (card) applyDryerLockUI(card, id);
+      });
+      Object.keys(washerLocks).forEach((id) => {
+        const card = document.querySelector(`.device-card[data-washer-id="${id}"]`);
+        if (card) applyWasherLockUI(card, id);
+      });
+    }, 1000);
+  }
+
+  function syncDryerCardControls(card, meta, online) {
+    const dryerId = card.dataset.dryerId;
+    const remaining = getDryerLockRemainingMs(dryerId);
+    const statusEl = card.querySelector('.device-card__cycle-status');
+    const unlockBtn = card.querySelector('.device-card__unlock');
+    const releaseBtn = card.querySelector('button[data-dryer-release]');
+    const choiceButtons = card.querySelectorAll('.device-card__choice');
+    const operable = online === true && canOperateMachineStatus(meta?.status);
+
+    if (remaining) {
+      card.classList.add('device-card--busy');
+      if (statusEl) statusEl.textContent = `Em secagem · ${formatLockRemaining(remaining)}`;
+      if (releaseBtn) releaseBtn.disabled = true;
+      choiceButtons.forEach((b) => { b.disabled = true; });
+      unlockBtn?.classList.remove('device-card__unlock--hidden');
+      return;
+    }
+
+    card.classList.remove('device-card--busy');
+    if (statusEl) statusEl.textContent = operable ? '' : deviceStatusHint({ online: online === true, operable, statusInfo: { label: meta?.status_label || 'Indisponível' } });
+    if (releaseBtn) {
+      const hasChoice = Array.from(choiceButtons).some((b) => b.classList.contains('device-card__choice--active'));
+      releaseBtn.disabled = !operable || !hasChoice;
+    }
+    choiceButtons.forEach((b) => { b.disabled = !operable; });
+    unlockBtn?.classList.add('device-card__unlock--hidden');
+  }
+
+  function applyDryerLockUI(card, dryerId) {
+    syncDryerCardControls(card, getMachineMeta(dryerId, 'dryer'), deviceOnline('dryer', dryerId));
+  }
+
+  function syncWasherCardControls(card, meta, online) {
+    const washerId = card.dataset.washerId;
+    const remaining = getWasherLockRemainingMs(washerId);
+    const statusEl = card.querySelector('.device-card__cycle-status');
+    const unlockBtn = card.querySelector('.device-card__unlock');
+    const releaseBtn = card.querySelector('button[data-washer-release]');
+    const choiceButtons = card.querySelectorAll('.device-card__choice');
+    const operable = online === true && canOperateMachineStatus(meta?.status);
+
+    if (remaining) {
+      card.classList.add('device-card--busy');
+      if (statusEl) statusEl.textContent = `Em lavagem · ${formatLockRemaining(remaining)}`;
+      if (releaseBtn) releaseBtn.disabled = true;
+      choiceButtons.forEach((b) => { b.disabled = true; });
+      unlockBtn?.classList.remove('device-card__unlock--hidden');
+      return;
+    }
+
+    card.classList.remove('device-card--busy');
+    if (statusEl) statusEl.textContent = operable ? '' : deviceStatusHint({ online: online === true, operable, statusInfo: { label: meta?.status_label || 'Indisponível' } });
+    if (releaseBtn) {
+      const hasChoice = Array.from(choiceButtons).some((b) => b.classList.contains('device-card__choice--active'));
+      releaseBtn.disabled = !operable || !hasChoice;
+    }
+    choiceButtons.forEach((b) => { b.disabled = !operable; });
+    unlockBtn?.classList.add('device-card__unlock--hidden');
+  }
+
+  function applyWasherLockUI(card, washerId) {
+    syncWasherCardControls(card, getMachineMeta(washerId, 'washer'), deviceOnline('washer', washerId));
   }
 
   function devicePingLabel(deviceType, machine) {
@@ -569,7 +724,7 @@
     const key = deviceProbeKey(deviceType, machine);
     const label = devicePingLabel(deviceType, machine);
     probingDevices.add(key);
-    updateDeviceStatusPill(deviceType, machine, null, true);
+    updateDeviceStatusPill();
 
     let resolved = null;
 
@@ -621,7 +776,7 @@
         deviceType === 'ac'
           ? pingStatus?.ac ?? resolved
           : pingStatus?.[`${deviceType}s`]?.[machine] ?? resolved;
-      updateDeviceStatusPill(deviceType, machine, state, false);
+      updateDeviceStatusPill();
     }
   }
 
@@ -695,233 +850,196 @@
     return result.data;
   }
 
-  async function runAction(label, fn) {
+  async function runAction(label, fn, audit = null) {
     if (actionBusy) return;
-    if (!currentStore) {
-      showToast('Selecione uma loja', false);
-      return;
-    }
-    if (!storeGatewayReady) {
+    if (!storeSelected()) {
       showToast(storeGatewayError || 'Gateway da loja não está online', false);
       return;
     }
+    const ok = await confirmAction(audit?.confirmMessage, audit?.confirmRows || [], {
+      heading: audit?.confirmHeading || 'Confirmar operação',
+    });
+    if (!ok) return;
     actionBusy = true;
     try {
       const data = await fn();
-      showToast(`${label} — OK`);
-      appendLog(label, true, data);
-      return data;
-    } catch (err) {
-      showToast(`${label}: ${friendlyUserMessage(err.message)}`, false);
-      appendLog(label, false, err.payload || err.message);
+      showActionConfirm(label, data);
+      void startBackgroundDeviceProbes({ force: true });
+    } catch (e) {
+      showToast(formatOperatorError(label, e.message), false);
     } finally {
       actionBusy = false;
     }
   }
 
-  function dosageLabel(am) {
-    const opt = WASHER_DOSAGE_OPTIONS.find((o) => o.value === am);
-    return opt?.label || am || 'Sem cheiro';
+  async function runDryerRelease(id, minutes) {
+    if (minutes == null || Number.isNaN(minutes)) return;
+    const ok = await confirmAction(null, [
+      ['Equipamento', `Secadora ${id}`],
+      ['Tempo', `${minutes} min`],
+    ], { heading: 'Confirmar liberação' });
+    if (!ok) return;
+    try {
+      const data = await runGatewayAction(`Secadora ${id}`, `dryer/${id}`, 'POST', { minutes });
+      setDryerLock(id, data.minutes ?? minutes);
+      showActionConfirm(`Secadora ${id}`, data);
+      void startBackgroundDeviceProbes({ force: true });
+    } catch (e) {
+      showToast(formatOperatorError(`Secadora ${id}`, e.message), false);
+    }
   }
+
+  async function runWasherRelease(id, amValue) {
+    const am = typeof amValue === 'string' ? amValue : '';
+    const amLabel = am ? dosageLabel(am) : 'Sem cheiro';
+    const ok = await confirmAction(null, [
+      ['Equipamento', `Lavadora ${id}`],
+      ['Dosagem', amLabel],
+    ], { heading: 'Confirmar liberação' });
+    if (!ok) return;
+    try {
+      const data = await runGatewayAction(`Lavadora ${id}`, `washer/${id}`, 'POST', am ? { am } : {});
+      setWasherLock(id, getWasherLockMinutes(getMachineMeta(id, 'washer')));
+      showActionConfirm(`Lavadora ${id}`, data);
+      void startBackgroundDeviceProbes({ force: true });
+    } catch (e) {
+      showToast(formatOperatorError(`Lavadora ${id}`, e.message), false);
+    }
+  }
+
+  const doserCardApi = {
+    runDoserCommand: (id, type) =>
+      runGatewayAction(`Dosadora ${id}`, `doser/${id}`, 'POST', { type }).then((data) => ({
+        ...data,
+        type,
+        machine: data.machine || id,
+      })),
+    runDoserConsult: (id) =>
+      runGatewayAction(`Consulta ${id}`, `doser/${id}/consulta`, 'GET').then((data) => ({
+        ...data,
+        machine: data.machine || id,
+      })),
+    runDoserSetTime: (id, kind, seconds) =>
+      runGatewayAction(`Ajuste ${id}`, `doser/${id}/settime/${kind}`, 'POST', { seconds }).then((data) => ({
+        ...data,
+        machine: data.machine || id,
+        seconds,
+      })),
+  };
 
   function renderWashers() {
     const grid = $('washersGrid');
     grid.innerHTML = '';
-    const ids = gatewayConfig?.washers || [];
-    $('washersCount').textContent = String(ids.length);
-    const disabled = !storeSelected();
-
-    ids.forEach((id) => {
-      const probing = isDeviceProbing('washer', id);
-      const online = probing ? null : pingStatus?.washers?.[id] ?? null;
-      const card = createDeviceShell(
+    if (!gatewayConfig) return;
+    setSectionCount('washersCount', pingStatus?.washers);
+    visibleDeviceIds('washer', gatewayConfig.washers).forEach((id) => {
+      const online = deviceOnline('washer', id);
+      const meta = getMachineMeta(id, 'washer');
+      const card = createDeviceCard(
         id,
         online,
-        (shell) => {
-        appendEndpointHint(shell, 'washer', id);
+        (actions, _card, ctx) => {
+          actions.classList.add('device-card__actions--washer');
+          const statusEl = document.createElement('p');
+          statusEl.className = 'device-card__cycle-status';
+          statusEl.setAttribute('aria-live', 'polite');
+          actions.appendChild(statusEl);
 
-        const actions = document.createElement('div');
-        actions.className = 'device-card__actions device-card__actions--washer';
+          const dosageOptions = (gatewayConfig.washer_dosage_options || WASHER_DOSAGE_OPTIONS).map((o) => ({ ...o }));
+          const picker = createChoicePicker(dosageOptions, { columns: 2, requireSelection: true });
+          if (!ctx.operable) picker.setDisabled(true);
+          actions.appendChild(picker.root);
 
-        const dosageOptions = (gatewayConfig.washer_dosage_options || WASHER_DOSAGE_OPTIONS).map((o) => ({ ...o }));
-        const picker = createChoicePicker(dosageOptions, { columns: 2, requireSelection: true, disabled });
-        actions.appendChild(picker.root);
+          const releaseBtn = appendReleaseButton(actions, {
+            dataset: { washerRelease: '1' },
+            disabled: true,
+            onRelease: () => {
+              if (!picker.hasSelection()) return;
+              runWasherRelease(id, picker.getValue());
+            },
+          });
+          syncReleaseButtonWithPicker(releaseBtn, picker, ctx.operable);
 
-        const releaseBtn = appendReleaseButton(actions, {
-          disabled: true,
-          onRelease: () => {
-            if (!picker.hasSelection()) return;
-            const am = picker.getValue();
-            const amLabel = am ? dosageLabel(am) : 'Sem cheiro';
-            if (!confirm(`Confirmar liberação da lavadora ${id}?\nDosagem: ${amLabel}`)) return;
-            runAction(`Lavadora ${id}`, () =>
-              runGatewayAction(`Lavadora ${id}`, `washer/${id}`, 'POST', am ? { am } : {})
-            );
-          },
-        });
-        syncReleaseButtonWithPicker(releaseBtn, picker);
-        shell.appendChild(actions);
-      },
-        { probing }
+          const unlockBtn = btn('Ativar botões', 'btn--ghost device-card__unlock', () => clearWasherLock(id));
+          unlockBtn.classList.add('device-card__unlock--hidden');
+          actions.appendChild(unlockBtn);
+
+          const hint = deviceStatusHint(ctx);
+          if (hint) statusEl.textContent = hint;
+        },
+        meta,
+        { probing: isDeviceProbing('washer', id) }
       );
       card.dataset.washerId = id;
       grid.appendChild(card);
+      if (online === true) syncWasherCardControls(card, meta, online);
     });
   }
 
   function renderDryers() {
     const grid = $('dryersGrid');
     grid.innerHTML = '';
-    const ids = gatewayConfig?.dryers || [];
-    const minutes = gatewayConfig?.dryer_minutes || [15, 30, 45];
-    $('dryersCount').textContent = String(ids.length);
-    const disabled = !storeSelected();
-
-    ids.forEach((id) => {
-      const probing = isDeviceProbing('dryer', id);
-      const online = probing ? null : pingStatus?.dryers?.[id] ?? null;
-      const card = createDeviceShell(
+    if (!gatewayConfig) return;
+    setSectionCount('dryersCount', pingStatus?.dryers);
+    const minutes = gatewayConfig.dryer_minutes || [15, 30, 45];
+    visibleDeviceIds('dryer', gatewayConfig.dryers).forEach((id) => {
+      const online = deviceOnline('dryer', id);
+      const meta = getMachineMeta(id, 'dryer');
+      const card = createDeviceCard(
         id,
         online,
-        (shell) => {
-        appendEndpointHint(shell, 'dryer', id);
+        (actions, _card, ctx) => {
+          actions.classList.add('device-card__actions--dryer');
+          const statusEl = document.createElement('p');
+          statusEl.className = 'device-card__cycle-status';
+          statusEl.setAttribute('aria-live', 'polite');
+          actions.appendChild(statusEl);
 
-        const actions = document.createElement('div');
-        actions.className = 'device-card__actions device-card__actions--dryer';
+          const minuteOptions = minutes.map((min) => ({ value: String(min), label: `${min} min` }));
+          const picker = createChoicePicker(minuteOptions, { columns: 3, requireSelection: true });
+          if (!ctx.operable) picker.setDisabled(true);
+          actions.appendChild(picker.root);
 
-        const minuteOptions = minutes.map((min) => ({ value: String(min), label: `${min} min` }));
-        const picker = createChoicePicker(minuteOptions, { columns: 3, requireSelection: true, disabled });
-        actions.appendChild(picker.root);
+          const releaseBtn = appendReleaseButton(actions, {
+            dataset: { dryerRelease: '1' },
+            disabled: true,
+            onRelease: () => {
+              if (!picker.hasSelection()) return;
+              runDryerRelease(id, Number(picker.getValue()));
+            },
+          });
+          syncReleaseButtonWithPicker(releaseBtn, picker, ctx.operable);
 
-        const releaseBtn = appendReleaseButton(actions, {
-          disabled: true,
-          onRelease: () => {
-            if (!picker.hasSelection()) return;
-            const mins = Number(picker.getValue());
-            if (!confirm(`Iniciar secadora ${id} por ${mins} min?`)) return;
-            runAction(`Secadora ${id} · ${mins} min`, () =>
-              runGatewayAction(`Secadora ${id}`, `dryer/${id}`, 'POST', { minutes: mins })
-            );
-          },
-        });
-        syncReleaseButtonWithPicker(releaseBtn, picker);
-        shell.appendChild(actions);
-      },
-        { probing }
+          const unlockBtn = btn('Ativar botões', 'btn--ghost device-card__unlock', () => clearDryerLock(id));
+          unlockBtn.classList.add('device-card__unlock--hidden');
+          actions.appendChild(unlockBtn);
+
+          const hint = deviceStatusHint(ctx);
+          if (hint) statusEl.textContent = hint;
+        },
+        meta,
+        { probing: isDeviceProbing('dryer', id) }
       );
       card.dataset.dryerId = id;
       grid.appendChild(card);
+      if (online === true) syncDryerCardControls(card, meta, online);
     });
-  }
-
-  function buildDoserActions(actions, id) {
-    actions.classList.add('device-card__actions--doser');
-    const disabled = !storeSelected();
-
-    const picker = createChoicePicker(
-      [
-        { value: 'rele1on', label: 'Sabão' },
-        { value: 'rele2on', label: 'Floral' },
-        { value: 'rele3on', label: 'Sport' },
-      ],
-      { columns: 3, requireSelection: true, disabled }
-    );
-    actions.appendChild(picker.root);
-
-    const releaseBtn = appendReleaseButton(actions, {
-      label: 'Acionar',
-      disabled: true,
-      onRelease: () => {
-        if (!picker.hasSelection()) return;
-        const type = picker.getValue();
-        const product = DOSER_TYPE_LABELS[type] || type;
-        if (!confirm(`Acionar ${product} na dosadora ${id}?`)) return;
-        runAction(`Dosadora ${id} · ${product}`, () =>
-          runGatewayAction(`Dosadora ${id}`, `doser/${id}`, 'POST', { type })
-        );
-      },
-    });
-    syncReleaseButtonWithPicker(releaseBtn, picker);
-
-    const consultRow = document.createElement('div');
-    consultRow.className = 'device-card__action-row';
-    consultRow.appendChild(
-      btn('Consultar tempos salvos', 'btn--ghost device-card__action-wide', () => {
-        if (!confirm(`Consultar tempos da dosadora ${id}?`)) return;
-        runAction(`Consulta dosadora ${id}`, () =>
-          runGatewayAction(`Consulta ${id}`, `doser/${id}/consulta`, 'GET')
-        );
-      })
-    );
-    actions.appendChild(consultRow);
-
-    const panel = document.createElement('div');
-    panel.className = 'device-card__panel';
-
-    const panelLabel = document.createElement('span');
-    panelLabel.className = 'device-card__panel-label';
-    panelLabel.textContent = 'Ajuste de tempo';
-    panel.appendChild(panelLabel);
-
-    const timeField = document.createElement('div');
-    timeField.className = 'device-card__time-field';
-
-    const secInput = document.createElement('input');
-    secInput.type = 'number';
-    secInput.min = '1';
-    secInput.max = '3600';
-    secInput.value = '5';
-    secInput.className = 'device-card__input';
-    secInput.title = 'Segundos';
-    secInput.setAttribute('aria-label', 'Segundos de dosagem');
-    secInput.disabled = disabled;
-
-    const secUnit = document.createElement('span');
-    secUnit.className = 'device-card__time-unit';
-    secUnit.textContent = 'seg';
-
-    timeField.appendChild(secInput);
-    timeField.appendChild(secUnit);
-    panel.appendChild(timeField);
-
-    const setGrid = document.createElement('div');
-    setGrid.className = 'device-card__action-grid device-card__action-grid--3';
-    ['sabao', 'floral', 'sport'].forEach((kind) => {
-      const kindLabel = TEMPO_LABELS[kind] || kind;
-      const setBtn = btn(kindLabel, 'btn--ghost', () => {
-        const seconds = parseFloat(secInput.value) || 5;
-        if (!confirm(`Ajustar ${kindLabel} da dosadora ${id} para ${seconds} seg?`)) return;
-        runAction(`Ajuste ${id} · ${kindLabel}`, () =>
-          runGatewayAction(`Ajuste ${id}`, `doser/${id}/settime/${kind}`, 'POST', { seconds })
-        );
-      });
-      setBtn.disabled = disabled;
-      setGrid.appendChild(setBtn);
-    });
-    panel.appendChild(setGrid);
-    actions.appendChild(panel);
   }
 
   function renderDosers() {
     const grid = $('dosersGrid');
     grid.innerHTML = '';
-    const ids = gatewayConfig?.dosers || [];
-    $('dosersCount').textContent = String(ids.length);
-
-    ids.forEach((id) => {
-      const probing = isDeviceProbing('doser', id);
-      const online = probing ? null : pingStatus?.dosers?.[id] ?? null;
-      const card = createDeviceShell(
+    if (!gatewayConfig) return;
+    setSectionCount('dosersCount', pingStatus?.dosers);
+    visibleDeviceIds('doser', gatewayConfig.dosers).forEach((id) => {
+      const online = deviceOnline('doser', id);
+      const meta = getMachineMeta(id, 'doser');
+      const card = createDeviceCard(
         id,
         online,
-        (shell) => {
-        appendEndpointHint(shell, 'doser', id);
-        const actions = document.createElement('div');
-        actions.className = 'device-card__actions';
-        buildDoserActions(actions, id);
-        shell.appendChild(actions);
-      },
-        { probing }
+        (actions, _card, ctx) => buildDoserCardContent(actions, id, ctx, runAction, doserCardApi),
+        meta,
+        { probing: isDeviceProbing('doser', id) }
       );
       card.classList.add('device-card--doser');
       card.dataset.doserId = id;
@@ -932,68 +1050,56 @@
   function renderAc() {
     const grid = $('acGrid');
     grid.innerHTML = '';
-    const temps = gatewayConfig?.ac_temperatures || ['18', '22', 'off'];
-    const probing = isDeviceProbing('ac', null);
-    const online = probing ? null : pingStatus?.ac ?? null;
-    const disabled = !storeSelected();
+    if (!gatewayConfig) return;
+    const temps = gatewayConfig.ac_temperatures || ['18', '22', 'off'];
+    const online = deviceOnline('ac', null);
+    const meta = getMachineMeta('110', 'ac') || { machine_type_label: 'Ar-condicionado' };
 
-    const card = createDeviceShell(
+    const card = createDeviceCard(
       'AC',
       online,
-      (shell) => {
-      appendEndpointHint(shell, 'ac');
+      (actions, _card, ctx) => {
+        actions.classList.add('device-card__actions--ac');
+        const tempOptions = temps.map((temp) => ({
+          value: temp,
+          label: temp === 'off' ? 'Desligar' : `${temp}°C`,
+        }));
+        const picker = createChoicePicker(tempOptions, { columns: 3, requireSelection: true });
+        if (!ctx.operable) picker.setDisabled(true);
+        actions.appendChild(picker.root);
 
-      const actions = document.createElement('div');
-      actions.className = 'device-card__actions device-card__actions--ac';
-
-      const tempOptions = temps.map((temp) => ({
-        value: temp,
-        label: temp === 'off' ? 'Desligar' : `${temp}°C`,
-      }));
-      const picker = createChoicePicker(tempOptions, { columns: 3, requireSelection: true, disabled });
-      actions.appendChild(picker.root);
-
-      const releaseBtn = appendReleaseButton(actions, {
-        label: 'Acionar',
-        disabled: true,
-        onRelease: () => {
-          if (!picker.hasSelection()) return;
-          const temp = picker.getValue();
-          const tempLabel = temp === 'off' ? 'Desligar' : `${temp}°C`;
-          if (!confirm(`Confirmar AC · ${tempLabel}?`)) return;
-          runAction(`AC · ${tempLabel}`, () =>
-            runGatewayAction(`AC · ${tempLabel}`, 'ac', 'POST', { temperature: temp })
-          );
-        },
-      });
-      syncReleaseButtonWithPicker(releaseBtn, picker);
-      shell.appendChild(actions);
-    },
-      { probing }
+        const releaseBtn = appendReleaseButton(actions, {
+          label: 'Acionar',
+          disabled: true,
+          onRelease: () => {
+            if (!picker.hasSelection()) return;
+            const temp = picker.getValue();
+            const tempLabel = temp === 'off' ? 'Desligar' : `${temp}°C`;
+            runAction(
+              `Ar-condicionado · ${tempLabel}`,
+              () => runGatewayAction(`AC · ${tempLabel}`, 'ac', 'POST', { temperature: temp }),
+              {
+                action: 'ac_control',
+                label: `AC · ${tempLabel}`,
+                confirmHeading: 'Confirmar acionamento',
+                confirmRows: [
+                  ['Equipamento', 'Ar-condicionado'],
+                  ['Ação', tempLabel],
+                ],
+                method: 'POST',
+                path: 'ac',
+                payload: { temperature: temp },
+                device_type: 'ac',
+                device_id: '110',
+              }
+            );
+          },
+        });
+        syncReleaseButtonWithPicker(releaseBtn, picker, ctx.operable);
+      },
+      meta,
+      { probing: isDeviceProbing('ac', null) }
     );
-    grid.appendChild(card);
-  }
-
-  function renderLed() {
-    const grid = $('ledGrid');
-    grid.innerHTML = '';
-    const disabled = !storeSelected();
-
-    const card = createDeviceShell('LED', null, (shell) => {
-      const actions = document.createElement('div');
-      actions.className = 'device-card__actions';
-      const onBtn = btn('Ligar', 'btn--success', () => {
-        runAction('LED ligar', () => runGatewayAction('LED ligar', 'led/on', 'POST'));
-      });
-      const offBtn = btn('Desligar', 'btn--ghost', () => {
-        runAction('LED desligar', () => runGatewayAction('LED desligar', 'led/off', 'POST'));
-      });
-      onBtn.disabled = disabled;
-      offBtn.disabled = disabled;
-      actions.appendChild(onBtn);
-      actions.appendChild(offBtn);
-      shell.appendChild(actions);
-    });
     grid.appendChild(card);
   }
 
@@ -1003,11 +1109,16 @@
     renderDryers();
     renderDosers();
     renderAc();
-    renderLed();
+    scheduleDeviceLockTick();
   }
 
   function updateDevicesPanelVisibility() {
     $('devicesPanel')?.classList.toggle('hidden', !currentStore);
+  }
+
+  function updateStoreStatusBarVisibility() {
+    $('storeStatusBar')?.classList.toggle('hidden', !currentStore);
+    $('gatewayNoStore')?.classList.toggle('hidden', Boolean(currentStore));
   }
 
   async function applyStore(next) {
@@ -1020,13 +1131,13 @@
 
     if (!next) {
       currentStore = '';
-      $('storeMeta').textContent = 'Loja: —';
       hideStoreGatewayAlert();
       showStoreGatewayChecking(false);
       updateStoreGatewayMeta(null);
       setDevicesPanelBlocked(true);
       resetPingStatus();
       updateDevicesPanelVisibility();
+      updateStoreStatusBarVisibility();
       refreshGatewayOverview();
       renderDevices();
       const url = new URL(window.location.href);
@@ -1036,66 +1147,45 @@
     }
 
     currentStore = next;
-    const meta = (catalog?.stores || []).find((s) => s.id === next);
-    const title = meta?.name ? `${meta.name} (${next.toUpperCase()})` : next.toUpperCase();
-    $('storeMeta').textContent = `Loja: ${title}`;
-    $('storeSelect').value = next;
     const url = new URL(window.location.href);
     url.searchParams.set('store', next);
     window.history.replaceState({}, '', url);
     resetPingStatus();
+    await loadMachinesForStore(next);
+    initDeviceLocks();
     updateDevicesPanelVisibility();
+    updateStoreStatusBarVisibility();
     refreshGatewayOverview();
     renderDevices();
     gatewayDebug('Loja selecionada — verificando gateway', { store: currentStore });
     await verifyStoreGateway(next);
   }
 
-  function onStoreSelectChange() {
-    void applyStore($('storeSelect').value);
-  }
-
-  function populateStoreSelect() {
-    const select = $('storeSelect');
-    const stores = catalog?.stores || [];
-    select.innerHTML = '<option value="">Selecione…</option>';
-    stores.forEach((s) => {
-      const opt = document.createElement('option');
-      opt.value = s.id;
-      opt.textContent = s.name ? `${s.name} (${s.id.toUpperCase()})` : s.id.toUpperCase();
-      select.appendChild(opt);
-    });
-  }
-
   async function init() {
     const ok = await guardPage({ returnPath: `gateway.html${window.location.search}` });
     if (!ok) return;
+    bindConfirmEvents();
     await mountUserMenu($('headerUserMenu'));
 
     try {
       await loadGatewayConfig();
       catalog = await loadCatalog();
-      populateStoreSelect();
       resetPingStatus();
       setDevicesPanelBlocked(true);
       updateDevicesPanelVisibility();
+      updateStoreStatusBarVisibility();
       renderDevices();
 
       const initial = normalizeStoreId(new URLSearchParams(window.location.search).get('store'));
       window.Lav60GatewayOverview?.mount({
         fetchFn: panelFetch,
         getStores: () => catalog?.stores || [],
-        onStoreAction: (storeId) => {
-          void applyStore(storeId);
-          $('devicesPanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        },
         onRefresh: () => {
           if (currentStore) void verifyStoreGateway(currentStore, { force: true });
         },
         skipStores: initial || null,
       });
       if (initial) {
-        $('storeSelect').value = initial;
         void applyStore(initial);
       }
     } catch (err) {
@@ -1103,8 +1193,6 @@
     }
 
     checkApiHealth().catch(() => {});
-
-    $('storeSelect').addEventListener('change', onStoreSelectChange);
   }
 
   init().catch((err) => {
