@@ -1439,6 +1439,16 @@ def fetch_store_machines_from_api(store_code: str) -> dict | None:
     headers_list = _machines_auth_headers_list()
     last_status: int | None = None
     last_body = ''
+
+    def log_machines_api_error(status: int, body: str) -> None:
+        if status == 400 and 'suspend' in (body or '').lower():
+            logger.info(
+                f"{Fore.YELLOW}🏭 Loja {store_code.upper()} suspensa no sistema Lav60 "
+                f"— operação local e heartbeat continuam{Style.RESET_ALL}"
+            )
+            return
+        logger.warning('API máquinas HTTP %s: %s', status, body)
+
     try:
         for headers in headers_list:
             response = requests.get(
@@ -1452,7 +1462,7 @@ def fetch_store_machines_from_api(store_code: str) -> dict | None:
             if response.status_code == 401:
                 continue
             if response.status_code >= 400:
-                logger.warning('API máquinas HTTP %s: %s', response.status_code, last_body)
+                log_machines_api_error(response.status_code, last_body)
                 return None
             payload = response.json()
             return parse_machines_api_payload(payload, store_code)
@@ -1460,7 +1470,7 @@ def fetch_store_machines_from_api(store_code: str) -> dict | None:
         if last_status == 401:
             return None
         if last_status is not None and last_status >= 400:
-            logger.warning('API máquinas HTTP %s: %s', last_status, last_body)
+            log_machines_api_error(last_status, last_body)
         return None
     except Exception as exc:
         logger.warning('Falha ao consultar API de máquinas: %s', exc)

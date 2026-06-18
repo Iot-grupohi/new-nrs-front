@@ -42,6 +42,29 @@ def catalog_whitelist_ids(catalog: dict | None) -> set[str]:
     return ids
 
 
+def parse_lav60_machines_api_status(response: requests.Response) -> str:
+    """ok | suspended | not_found | rejected"""
+    if response.status_code == 200:
+        return 'ok'
+    if response.status_code == 404:
+        return 'not_found'
+
+    blob = (response.text or '').lower()
+    try:
+        data = response.json()
+        err = data.get('error')
+        if isinstance(err, dict):
+            blob += ' ' + str(err.get('message') or '').lower()
+        else:
+            blob += ' ' + str(data.get('message') or data.get('detail') or err or '').lower()
+    except Exception:
+        pass
+
+    if response.status_code == 400 and 'suspend' in blob:
+        return 'suspended'
+    return 'rejected'
+
+
 def store_registered_in_lav60_api(store_id: str) -> bool | None:
     """True/False se consultou a API; None se token/API indisponível."""
     token = machines_api_token()
@@ -69,7 +92,8 @@ def store_registered_in_lav60_api(store_id: str) -> bool | None:
             headers={'X-Token': token, 'Accept': 'application/json'},
             timeout=12,
         )
-        ok = response.status_code == 200
+        status = parse_lav60_machines_api_status(response)
+        ok = status in ('ok', 'suspended')
     except requests.RequestException:
         ok = False
 
@@ -91,7 +115,6 @@ def is_allowed_store(store_id: str, catalog: dict | None = None) -> bool:
     if registered is not None:
         return registered
 
-    # Sem API e sem whitelist explícita — não aceita lojas novas desconhecidas.
     return False
 
 
