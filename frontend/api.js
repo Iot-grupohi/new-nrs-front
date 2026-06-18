@@ -1743,6 +1743,7 @@
 
   function mergeCatalogStores(catalog, cacheMap) {
     const byId = new Map();
+    const allowed = new Set((catalog?.stores || []).map((meta) => normalizeStoreId(meta.id)).filter(Boolean));
     (catalog?.stores || []).forEach((meta) => {
       const id = normalizeStoreId(meta.id);
       if (id) byId.set(id, { ...meta, id, name: meta.name || id.toUpperCase() });
@@ -1750,6 +1751,7 @@
     Object.entries(cacheMap || {}).forEach(([id, row]) => {
       const sid = normalizeStoreId(id);
       if (!sid || byId.has(sid)) return;
+      if (allowed.size && !allowed.has(sid)) return;
       const card = row?.card;
       byId.set(sid, {
         id: sid,
@@ -1762,16 +1764,21 @@
 
   function rebuildCatalogStores(catalog, cacheMap = null) {
     const byId = new Map();
+    const allowed = new Set((catalog?.stores || []).map((meta) => normalizeStoreId(meta.id)).filter(Boolean));
     (catalog?.stores || []).forEach((meta) => {
       const id = normalizeStoreId(meta.id);
       if (id) byId.set(id, { ...meta, id, name: meta.name || id.toUpperCase() });
     });
     heartbeatState.forEach((hb, id) => {
-      byId.set(id, storeMetaFromId(id, { payload: hb.payload }));
+      const sid = normalizeStoreId(id);
+      if (!sid) return;
+      if (allowed.size && !allowed.has(sid)) return;
+      byId.set(sid, storeMetaFromId(id, { payload: hb.payload }));
     });
     Object.entries(cacheMap || {}).forEach(([id, row]) => {
       const sid = normalizeStoreId(id);
       if (!sid || byId.has(sid)) return;
+      if (allowed.size && !allowed.has(sid)) return;
       const card = row?.card;
       byId.set(sid, {
         id: sid,

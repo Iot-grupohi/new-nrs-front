@@ -14,6 +14,7 @@ import requests
 from flask import Flask, Response, jsonify, request, send_from_directory, session, stream_with_context
 
 from lav60_env import env_value, load_local_env
+from panel_stores import is_allowed_store, reject_store_detail
 from panel_audit import (
     ACTION_LABELS_PT,
     DEVICE_LABELS_PT,
@@ -317,28 +318,47 @@ def upsert_known_store(store_id: str, name: str | None = None) -> None:
         save_known_stores(stores)
 
 
+def purge_unregistered_stores(catalog: dict | None = None) -> None:
+    """Remove lojas não cadastradas (ex.: pb100) de heartbeats e known_stores."""
+    cfg = catalog if catalog is not None else load_catalog()
+    with heartbeats_lock:
+        for sid in list(heartbeats.keys()):
+            if not is_allowed_store(sid, cfg):
+                heartbeats.pop(sid, None)
+    with known_stores_lock:
+        stores = load_known_stores()
+        filtered = {sid: meta for sid, meta in stores.items() if is_allowed_store(sid, cfg)}
+        if filtered != stores:
+            save_known_stores(filtered)
+
+
 def catalog_stores_from_heartbeats() -> list[dict]:
-    """Lojas já vistas (persistidas) + heartbeats atuais — offline continua no catálogo."""
-    stores_map = load_known_stores()
+    """Lojas cadastradas no sistema — offline continua visível, inválidas são removidas."""
     config = load_catalog()
-    for item in config.get('known_stores') or []:
+    purge_unregistered_stores(config)
+    stores_map: dict[str, dict] = {}
+
+    for item in config.get('stores') or []:
         if not isinstance(item, dict):
             continue
         sid = normalize_store_id(item.get('id'))
-        if not sid:
+        if not sid or not is_allowed_store(sid, config):
             continue
-        stores_map.setdefault(
-            sid,
-            {
-                'id': sid,
-                'name': str(item.get('name') or sid.upper()).strip() or sid.upper(),
-            },
-        )
+        stores_map[sid] = {
+            'id': sid,
+            'name': str(item.get('name') or sid.upper()).strip() or sid.upper(),
+        }
+
+    for sid, meta in load_known_stores().items():
+        if not is_allowed_store(sid, config):
+            continue
+        stores_map.setdefault(sid, meta)
+
     with heartbeats_lock:
         items = list(heartbeats.items())
     for store_id, entry in items:
         sid = normalize_store_id(store_id)
-        if not sid:
+        if not sid or not is_allowed_store(sid, config):
             continue
         payload = entry.get('payload') or {}
         name = str(payload.get('store_name') or payload.get('name') or sid.upper()).strip()
@@ -346,9 +366,10 @@ def catalog_stores_from_heartbeats() -> list[dict]:
             'id': sid,
             'name': name or stores_map.get(sid, {}).get('name') or sid.upper(),
         }
-    if items:
-        with known_stores_lock:
-            save_known_stores(stores_map)
+
+    with known_stores_lock:
+        save_known_stores(stores_map)
+
     return sorted(
         [{'id': s['id'], 'name': s.get('name') or s['id'].upper()} for s in stores_map.values()],
         key=lambda s: s['id'],
@@ -392,6 +413,10 @@ def api_heartbeat():
     store_id = normalize_store_id(body.get('store'))
     if not store_id:
         return jsonify({'detail': "Field 'store' is required."}), 400
+
+    catalog = load_catalog()
+    if not is_allowed_store(store_id, catalog):
+        return jsonify({'detail': reject_store_detail(store_id)}), 403
 
     received_at = time.time()
     entry = {
@@ -448,6 +473,15 @@ def is_store_heartbeat_alive(store_id: str) -> bool:
         return False
     age = time.time() - float(entry.get('received_at') or 0)
     return age <= heartbeat_timeout_seconds()
+
+
+def require_registered_store(store_id: str):
+    sid = normalize_store_id(store_id)
+    if not sid:
+        return None, (jsonify({'detail': 'Invalid store id'}), 400)
+    if not is_allowed_store(sid, load_catalog()):
+        return None, (jsonify({'detail': reject_store_detail(sid)}), 403)
+    return sid, None
 
 
 def agent_base_urls_for_store(store_id: str) -> list[str]:
@@ -705,9 +739,9 @@ def fill_status_summary_probes(store_id: str, summary: dict, timeout: int | None
 def api_store_agent_config(store_id: str):
     if request.method == 'OPTIONS':
         return '', 204
-    sid = normalize_store_id(store_id)
-    if not sid:
-        return jsonify({'detail': 'Invalid store id'}), 400
+    sid, err = require_registered_store(store_id)
+    if err:
+        return err
     if not is_store_heartbeat_alive(sid):
         return jsonify({'detail': 'Loja offline ou sem heartbeat recente'}), 503
     try:
@@ -724,9 +758,9 @@ def api_store_agent_config(store_id: str):
 def api_store_agent_gateway(store_id: str, subpath: str):
     if request.method == 'OPTIONS':
         return '', 204
-    sid = normalize_store_id(store_id)
-    if not sid:
-        return jsonify({'detail': 'Invalid store id'}), 400
+    sid, err = require_registered_store(store_id)
+    if err:
+        return err
     if not is_store_heartbeat_alive(sid):
         return jsonify({'detail': 'Loja offline ou sem heartbeat recente'}), 503
     agent_path = f'/{sid}/{subpath.lstrip("/")}'
@@ -772,9 +806,9 @@ def api_gateway_health():
 @app.route('/api/gateway/<store_id>/status-summary', methods=['GET'])
 def api_gateway_status_summary(store_id: str):
     """Status via um único GET /{store}/status (evita inundar o ESP8266)."""
-    sid = normalize_store_id(store_id)
-    if not sid:
-        return jsonify({'detail': 'Invalid store id'}), 400
+    sid, err = require_registered_store(store_id)
+    if err:
+        return err
 
     use_probes = request.args.get('probes', '').strip().lower() in ('1', 'true', 'yes')
     summary = build_default_status_summary(sid)
@@ -825,9 +859,9 @@ def api_gateway_status_summary(store_id: str):
 def api_central_gateway_proxy(store_id: str, subpath: str):
     if request.method == 'OPTIONS':
         return '', 204
-    sid = normalize_store_id(store_id)
-    if not sid:
-        return jsonify({'detail': 'Invalid store id'}), 400
+    sid, err = require_registered_store(store_id)
+    if err:
+        return err
     path = f'/{sid}/{subpath.lstrip("/")}'
     is_status_read = request.method == 'GET' and subpath.lstrip('/').startswith('status')
     try:
