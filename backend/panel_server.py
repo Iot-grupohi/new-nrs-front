@@ -6,7 +6,6 @@ import os
 import queue
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -727,20 +726,12 @@ def fill_status_summary_probes(store_id: str, summary: dict, timeout: int | None
         probes.append(('dosers', mid, f'status/doser/{mid}'))
     probes.append(('ac', None, 'status/ac'))
 
-    workers = min(8, max(1, len(probes)))
-
-    def run_probe(item: tuple[str, str | None, str]) -> tuple[str, str | None, bool | None]:
-        key, mid, subpath = item
-        return key, mid, probe_central_device_online(store_id, subpath, timeout=probe_timeout)
-
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(run_probe, item) for item in probes]
-        for future in as_completed(futures):
-            key, mid, online = future.result()
-            if key == 'ac':
-                summary['ac'] = online
-            elif mid is not None:
-                summary[key][mid] = online
+    for key, mid, subpath in probes:
+        online = probe_central_device_online(store_id, subpath, timeout=probe_timeout)
+        if key == 'ac':
+            summary['ac'] = online
+        elif mid is not None:
+            summary[key][mid] = online
 
 
 @app.route('/api/stores/<store_id>/agent/config', methods=['GET', 'OPTIONS'])

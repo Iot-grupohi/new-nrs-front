@@ -24,6 +24,7 @@
   let actionBusy = false;
   const probingDevices = new Set();
   let probeGeneration = 0;
+  let probeQueueRunner = null;
 
   function gatewayDebug(label, payload) {
     const ts = new Date().toISOString().slice(11, 23);
@@ -169,13 +170,33 @@
 
   function extractOnlineFromProbeResult(result) {
     const data = result.data || {};
+    const detail = String(data.detail || data.message || '').toLowerCase();
+    if (detail.includes('did not respond') || detail.includes('timeout')) {
+      return null;
+    }
+
+    const status = typeof data.status === 'string' ? data.status.trim().toLowerCase() : '';
+    if (status === 'online') return true;
+    if (status === 'offline') return false;
+
     const fromOnline = parseOnlineFlag(data.online);
     if (fromOnline !== null) return fromOnline;
+
     const upstream = Number(data.upstream_status);
     if (upstream === 200) return true;
     if (upstream >= 400) return false;
     if (result.ok) return true;
     return null;
+  }
+
+  function isEspTimeoutResult(result) {
+    const data = result?.data || {};
+    const detail = String(data.detail || data.message || '').toLowerCase();
+    return detail.includes('did not respond') || detail.includes('timeout');
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   function onlinePill(online, probing = false) {
@@ -338,25 +359,47 @@
     if (!path) return;
 
     const key = deviceProbeKey(deviceType, machine);
-    if (probingDevices.has(key)) return;
-
     const label = devicePingLabel(deviceType, machine);
     probingDevices.add(key);
     updateDeviceStatusPill(deviceType, machine, null, true);
 
+    let resolved = null;
+
     try {
-      const result = await gatewayRequest('GET', path, undefined, { allowHttpError: true });
-      if (generation !== probeGeneration) return;
-      const online = extractOnlineFromProbeResult(result);
-      if (online === true || online === false) {
-        setDeviceOnlineState(deviceType, machine, online);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (generation !== probeGeneration) return;
+
+        const result = await gatewayRequest('GET', path, undefined, { allowHttpError: true });
+        if (generation !== probeGeneration) return;
+
+        const online = extractOnlineFromProbeResult(result);
+        if (online === true || online === false) {
+          resolved = online;
+          setDeviceOnlineState(deviceType, machine, online);
+          if (!silent) {
+            appendLog(`Ping ${label}`, online === true, {
+              path: fullGatewayPath(path),
+              ...result.data,
+              online,
+            });
+          }
+          break;
+        }
+
+        if (attempt === 0 && isEspTimeoutResult(result)) {
+          gatewayDebug(`Retry ${label} após timeout ESP8266`);
+          await sleep(400);
+          continue;
+        }
+
+        if (!silent) {
+          appendLog(`Ping ${label}`, false, { path: fullGatewayPath(path), ...result.data });
+        }
+        break;
       }
-      if (!silent) {
-        appendLog(`Ping ${label}`, online === true, { path: fullGatewayPath(path), ...result.data, online });
-        if (online === true) showToast(`${label} — online`);
-        else if (online === false) showToast(`${label} — offline`, false);
-        else showToast(`${label} — resposta inconclusiva`, false);
-      }
+
+      if (!silent && resolved === true) showToast(`${label} — online`);
+      else if (!silent && resolved === false) showToast(`${label} — offline`, false);
     } catch (err) {
       if (generation !== probeGeneration) return;
       if (!silent) {
@@ -366,11 +409,11 @@
     } finally {
       probingDevices.delete(key);
       if (generation !== probeGeneration) return;
-      const resolved =
+      const state =
         deviceType === 'ac'
-          ? pingStatus?.ac ?? null
-          : pingStatus?.[`${deviceType}s`]?.[machine] ?? null;
-      updateDeviceStatusPill(deviceType, machine, resolved, false);
+          ? pingStatus?.ac ?? resolved
+          : pingStatus?.[`${deviceType}s`]?.[machine] ?? resolved;
+      updateDeviceStatusPill(deviceType, machine, state, false);
     }
   }
 
@@ -383,6 +426,32 @@
     return jobs;
   }
 
+  async function runProbeQueue(generation) {
+    if (probeQueueRunner) {
+      await probeQueueRunner.catch(() => {});
+    }
+
+    const jobs = collectDeviceProbeJobs();
+    probeQueueRunner = (async () => {
+      for (const { deviceType, machine } of jobs) {
+        if (generation !== probeGeneration) return;
+        await probeDeviceOnline(deviceType, machine, { silent: true, generation });
+        if (generation !== probeGeneration) return;
+        await sleep(250);
+      }
+    })();
+
+    try {
+      await probeQueueRunner;
+    } catch {
+      /* fila cancelada ao trocar loja */
+    } finally {
+      if (probeQueueRunner && generation === probeGeneration) {
+        probeQueueRunner = null;
+      }
+    }
+  }
+
   function startBackgroundDeviceProbes() {
     if (!currentStore || !gatewayConfig) return;
     probeGeneration += 1;
@@ -390,10 +459,7 @@
     probingDevices.clear();
     resetPingStatus();
     renderDevices();
-
-    collectDeviceProbeJobs().forEach(({ deviceType, machine }) => {
-      probeDeviceOnline(deviceType, machine, { silent: true, generation }).catch(() => {});
-    });
+    runProbeQueue(generation).catch(() => {});
   }
 
   async function runGatewayAction(label, subpath, method = 'POST', body) {
