@@ -507,6 +507,26 @@ def agent_proxy_response(resp: requests.Response):
     return jsonify(payload), resp.status_code
 
 
+def agent_proxy_status_response(resp: requests.Response):
+    """Status de equipamento: sempre HTTP 200 no painel, com online no JSON."""
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = {'detail': resp.text or resp.reason}
+    if not isinstance(payload, dict):
+        payload = {'detail': str(payload)}
+
+    upstream_status = resp.status_code
+    if 'online' not in payload:
+        if upstream_status == 200:
+            payload['online'] = True
+        elif upstream_status >= 400:
+            payload['online'] = False
+
+    payload['upstream_status'] = upstream_status
+    return jsonify(payload), 200
+
+
 def parse_upstream_gateway_json(resp: requests.Response) -> dict:
     try:
         data = resp.json()
@@ -721,8 +741,11 @@ def api_central_gateway_proxy(store_id: str, subpath: str):
     if not sid:
         return jsonify({'detail': 'Invalid store id'}), 400
     path = f'/{sid}/{subpath.lstrip("/")}'
+    is_status_read = request.method == 'GET' and subpath.lstrip('/').startswith('status')
     try:
         resp = forward_central_gateway(request.method, path, timeout=60)
+        if is_status_read:
+            return agent_proxy_status_response(resp)
         return agent_proxy_response(resp)
     except ValueError as exc:
         return jsonify({'detail': str(exc)}), 503

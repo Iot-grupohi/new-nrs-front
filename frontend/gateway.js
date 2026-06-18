@@ -163,9 +163,32 @@
     };
   }
 
+  function parseOnlineFlag(value) {
+    if (value === true || value === 1) return true;
+    if (value === false || value === 0) return false;
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true' || normalized === 'online' || normalized === '1' || normalized === 'yes') {
+        return true;
+      }
+      if (normalized === 'false' || normalized === 'offline' || normalized === '0' || normalized === 'no') {
+        return false;
+      }
+    }
+    return null;
+  }
+
   function extractOnlineFromProbeResult(result) {
     const data = result.data || {};
-    if (typeof data.online === 'boolean') return data.online;
+    const fromOnline = parseOnlineFlag(data.online);
+    if (fromOnline !== null) return fromOnline;
+
+    const fromStatus = parseOnlineFlag(data.status);
+    if (fromStatus !== null) return fromStatus;
+
+    const upstream = Number(data.upstream_status);
+    if (upstream === 200) return true;
+    if (upstream >= 400) return false;
     if (result.ok) return true;
     if (result.status >= 400) return false;
     return null;
@@ -214,8 +237,18 @@
         statusData.esp_error = null;
       }
 
-      appendLog(`Ping ${label}`, online === true, result.data);
-      showToast(online === true ? `${label} — online` : `${label} — offline`, online === true);
+      appendLog(`Ping ${label}`, online === true, {
+        ...result.data,
+        http: result.status,
+        online,
+      });
+      if (online === true) {
+        showToast(`${label} — online`);
+      } else if (online === false) {
+        showToast(`${label} — offline`, false);
+      } else {
+        showToast(`${label} — resposta inconclusiva`, false);
+      }
     } catch (err) {
       showToast(`Ping ${label}: ${friendlyUserMessage(err.message)}`, false);
       appendLog(`Ping ${label}`, false, err.payload || err.message);
