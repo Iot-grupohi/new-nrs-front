@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LAV60 — Gateway (redundância)</title>
-  <link rel="stylesheet" href="app.css?v=17">
+  <link rel="stylesheet" href="app.css?v=18">
 </head>
 <body class="page-dashboard page-store page-gateway auth-pending">
   <div class="app-shell">
@@ -35,7 +35,7 @@
     <main class="main-content">
       <section class="gateway-banner" id="gatewayBanner" role="status">
         <strong>Redundância operacional</strong>
-        <p>Use quando o agente local ou túnel estiver indisponível. Selecione a loja e use <strong>Verificar online</strong> em cada equipamento antes de operar.</p>
+        <p>Canal alternativo quando o agente local estiver indisponível. Selecione a loja no menu — os equipamentos são verificados automaticamente em segundo plano.</p>
       </section>
 
       <section class="gateway-alert hidden" id="tokenAlert" role="alert">
@@ -43,19 +43,13 @@
       </section>
 
       <section class="gateway-toolbar card">
-        <div class="gateway-toolbar__row">
-          <label class="gateway-field">
+        <div class="gateway-toolbar__row gateway-toolbar__row--store">
+          <label class="gateway-field gateway-field--store">
             <span class="gateway-field__label">Loja</span>
             <select id="storeSelect" class="gateway-field__select">
               <option value="">Selecione…</option>
             </select>
           </label>
-          <label class="gateway-field gateway-field--compact">
-            <span class="gateway-field__label">ou código</span>
-            <input type="text" id="storeManual" class="gateway-field__input" placeholder="pb05" autocomplete="off" spellcheck="false">
-          </label>
-          <button type="button" class="btn btn--primary" id="btnApplyStore">Aplicar</button>
-          <button type="button" class="btn btn--ghost" id="btnApiHealth">Testar API</button>
         </div>
         <div class="gateway-toolbar__meta">
           <span class="gateway-meta" id="apiHealthMeta">API: —</span>
@@ -118,6 +112,6 @@
 
   <script src="api.js"></script>
   <script src="auth.js"></script>
-  <script src="gateway.js?v=17"></script>
+  <script src="gateway.js?v=18"></script>
 </body>
 </html>

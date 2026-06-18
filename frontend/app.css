@@ -4183,6 +4183,16 @@ a.topbar__tool {
   border-top: 1px solid rgba(148, 163, 184, 0.12);
 }
 
+.gateway-toolbar__row--store {
+  align-items: stretch;
+}
+
+.gateway-field--store {
+  flex: 1;
+  min-width: min(100%, 320px);
+  max-width: 420px;
+}
+
 .gateway-field {
   display: flex;
   flex-direction: column;

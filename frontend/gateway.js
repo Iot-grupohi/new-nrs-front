@@ -23,6 +23,7 @@
   let pingStatus = null;
   let actionBusy = false;
   const probingDevices = new Set();
+  let probeGeneration = 0;
 
   function gatewayDebug(label, payload) {
     const ts = new Date().toISOString().slice(11, 23);
@@ -177,10 +178,45 @@
     return null;
   }
 
-  function onlinePill(online) {
+  function onlinePill(online, probing = false) {
+    if (probing) {
+      return '<span class="device-card__status pill pill--warn">Verificando…</span>';
+    }
     if (online === true) return '<span class="device-card__status pill pill--on">Online</span>';
     if (online === false) return '<span class="device-card__status pill pill--off">Offline</span>';
     return '<span class="device-card__status pill pill--warn">Não verificado</span>';
+  }
+
+  function deviceProbeKey(deviceType, machine) {
+    return machine ? `${deviceType}:${machine}` : deviceType;
+  }
+
+  function isDeviceProbing(deviceType, machine) {
+    return probingDevices.has(deviceProbeKey(deviceType, machine));
+  }
+
+  function findDeviceCard(deviceType, machine) {
+    if (deviceType === 'washer') {
+      return document.querySelector(`[data-washer-id="${CSS.escape(String(machine))}"]`);
+    }
+    if (deviceType === 'dryer') {
+      return document.querySelector(`[data-dryer-id="${CSS.escape(String(machine))}"]`);
+    }
+    if (deviceType === 'doser') {
+      return document.querySelector(`[data-doser-id="${CSS.escape(String(machine))}"]`);
+    }
+    if (deviceType === 'ac') {
+      return $('acGrid')?.querySelector('.device-card');
+    }
+    return null;
+  }
+
+  function updateDeviceStatusPill(deviceType, machine, online, probing = false) {
+    const card = findDeviceCard(deviceType, machine);
+    if (!card) return;
+    const pill = card.querySelector('.device-card__status');
+    if (!pill) return;
+    pill.outerHTML = onlinePill(online, probing);
   }
 
   function btn(text, className, onclick) {
@@ -266,62 +302,7 @@
     container.appendChild(p);
   }
 
-  function appendPingRow(container, deviceType, machine) {
-    const row = document.createElement('div');
-    row.className = 'device-card__ping-row';
-    const key = machine ? `${deviceType}:${machine}` : deviceType;
-    const loading = probingDevices.has(key);
-    const pingBtn = btn(loading ? 'Verificando…' : 'Verificar online', 'btn--ghost device-card__ping', () =>
-      probeDeviceOnline(deviceType, machine || null)
-    );
-    pingBtn.disabled = loading || !storeSelected();
-    row.appendChild(pingBtn);
-    container.appendChild(row);
-  }
-
-  function devicePingLabel(deviceType, machine) {
-    const names = { washer: 'Lavadora', dryer: 'Secadora', doser: 'Dosadora', ac: 'AC' };
-    const name = names[deviceType] || deviceType;
-    return machine ? `${name} ${machine}` : name;
-  }
-
-  async function probeDeviceOnline(deviceType, machine) {
-    if (!currentStore) {
-      showToast('Selecione uma loja', false);
-      return;
-    }
-    const path = deviceEndpointPath(deviceType, machine);
-    if (!path) return;
-
-    const key = machine ? `${deviceType}:${machine}` : deviceType;
-    if (probingDevices.has(key)) return;
-
-    const label = devicePingLabel(deviceType, machine);
-    probingDevices.add(key);
-    renderDevices();
-
-    try {
-      const result = await gatewayRequest('GET', path, undefined, { allowHttpError: true });
-      const online = extractOnlineFromProbeResult(result);
-      if (!pingStatus) resetPingStatus();
-      if (online === true || online === false) {
-        if (deviceType === 'ac') pingStatus.ac = online;
-        else pingStatus[`${deviceType}s`][machine] = online;
-      }
-      appendLog(`Ping ${label}`, online === true, { path: fullGatewayPath(path), ...result.data, online });
-      if (online === true) showToast(`${label} — online`);
-      else if (online === false) showToast(`${label} — offline`, false);
-      else showToast(`${label} — resposta inconclusiva`, false);
-    } catch (err) {
-      showToast(`Ping ${label}: ${friendlyUserMessage(err.message)}`, false);
-      appendLog(`Ping ${label}`, false, err.payload || err.message);
-    } finally {
-      probingDevices.delete(key);
-      renderDevices();
-    }
-  }
-
-  function createDeviceShell(id, online, fillContent) {
+  function createDeviceShell(id, online, fillContent, { probing = false } = {}) {
     const card = document.createElement('article');
     card.className = 'device-card device-card--tile';
     card.innerHTML = `
@@ -332,9 +313,87 @@
       </header>
     `;
     const head = card.querySelector('.device-card__head');
-    head.insertAdjacentHTML('beforeend', onlinePill(online));
+    head.insertAdjacentHTML('beforeend', onlinePill(online, probing));
     fillContent(card);
     return card;
+  }
+
+  function devicePingLabel(deviceType, machine) {
+    const names = { washer: 'Lavadora', dryer: 'Secadora', doser: 'Dosadora', ac: 'AC' };
+    const name = names[deviceType] || deviceType;
+    return machine ? `${name} ${machine}` : name;
+  }
+
+  function setDeviceOnlineState(deviceType, machine, online) {
+    if (!pingStatus) resetPingStatus();
+    if (online !== true && online !== false) return;
+    if (deviceType === 'ac') pingStatus.ac = online;
+    else pingStatus[`${deviceType}s`][machine] = online;
+  }
+
+  async function probeDeviceOnline(deviceType, machine, options = {}) {
+    const { silent = false, generation = probeGeneration } = options;
+    if (!currentStore) return;
+    const path = deviceEndpointPath(deviceType, machine);
+    if (!path) return;
+
+    const key = deviceProbeKey(deviceType, machine);
+    if (probingDevices.has(key)) return;
+
+    const label = devicePingLabel(deviceType, machine);
+    probingDevices.add(key);
+    updateDeviceStatusPill(deviceType, machine, null, true);
+
+    try {
+      const result = await gatewayRequest('GET', path, undefined, { allowHttpError: true });
+      if (generation !== probeGeneration) return;
+      const online = extractOnlineFromProbeResult(result);
+      if (online === true || online === false) {
+        setDeviceOnlineState(deviceType, machine, online);
+      }
+      if (!silent) {
+        appendLog(`Ping ${label}`, online === true, { path: fullGatewayPath(path), ...result.data, online });
+        if (online === true) showToast(`${label} — online`);
+        else if (online === false) showToast(`${label} — offline`, false);
+        else showToast(`${label} — resposta inconclusiva`, false);
+      }
+    } catch (err) {
+      if (generation !== probeGeneration) return;
+      if (!silent) {
+        showToast(`Ping ${label}: ${friendlyUserMessage(err.message)}`, false);
+        appendLog(`Ping ${label}`, false, err.payload || err.message);
+      }
+    } finally {
+      probingDevices.delete(key);
+      if (generation !== probeGeneration) return;
+      const resolved =
+        deviceType === 'ac'
+          ? pingStatus?.ac ?? null
+          : pingStatus?.[`${deviceType}s`]?.[machine] ?? null;
+      updateDeviceStatusPill(deviceType, machine, resolved, false);
+    }
+  }
+
+  function collectDeviceProbeJobs() {
+    const jobs = [];
+    (gatewayConfig?.washers || []).forEach((id) => jobs.push({ deviceType: 'washer', machine: id }));
+    (gatewayConfig?.dryers || []).forEach((id) => jobs.push({ deviceType: 'dryer', machine: id }));
+    (gatewayConfig?.dosers || []).forEach((id) => jobs.push({ deviceType: 'doser', machine: id }));
+    jobs.push({ deviceType: 'ac', machine: null });
+    return jobs;
+  }
+
+  function startBackgroundDeviceProbes() {
+    if (!currentStore || !gatewayConfig) return;
+    probeGeneration += 1;
+    const generation = probeGeneration;
+    probingDevices.clear();
+    resetPingStatus();
+    renderDevices();
+
+    collectDeviceProbeJobs().forEach(({ deviceType, machine }) => {
+      probeDeviceOnline(deviceType, machine, { silent: true, generation }).catch(() => {});
+    });
   }
 
   async function runGatewayAction(label, subpath, method = 'POST', body) {
@@ -380,10 +439,13 @@
     const disabled = !storeSelected();
 
     ids.forEach((id) => {
-      const online = pingStatus?.washers?.[id] ?? null;
-      const card = createDeviceShell(id, online, (shell) => {
+      const probing = isDeviceProbing('washer', id);
+      const online = probing ? null : pingStatus?.washers?.[id] ?? null;
+      const card = createDeviceShell(
+        id,
+        online,
+        (shell) => {
         appendEndpointHint(shell, 'washer', id);
-        appendPingRow(shell, 'washer', id);
 
         const actions = document.createElement('div');
         actions.className = 'device-card__actions device-card__actions--washer';
@@ -406,7 +468,9 @@
         });
         syncReleaseButtonWithPicker(releaseBtn, picker);
         shell.appendChild(actions);
-      });
+      },
+        { probing }
+      );
       card.dataset.washerId = id;
       grid.appendChild(card);
     });
@@ -421,10 +485,13 @@
     const disabled = !storeSelected();
 
     ids.forEach((id) => {
-      const online = pingStatus?.dryers?.[id] ?? null;
-      const card = createDeviceShell(id, online, (shell) => {
+      const probing = isDeviceProbing('dryer', id);
+      const online = probing ? null : pingStatus?.dryers?.[id] ?? null;
+      const card = createDeviceShell(
+        id,
+        online,
+        (shell) => {
         appendEndpointHint(shell, 'dryer', id);
-        appendPingRow(shell, 'dryer', id);
 
         const actions = document.createElement('div');
         actions.className = 'device-card__actions device-card__actions--dryer';
@@ -446,7 +513,9 @@
         });
         syncReleaseButtonWithPicker(releaseBtn, picker);
         shell.appendChild(actions);
-      });
+      },
+        { probing }
+      );
       card.dataset.dryerId = id;
       grid.appendChild(card);
     });
@@ -547,16 +616,22 @@
     $('dosersCount').textContent = String(ids.length);
 
     ids.forEach((id) => {
-      const online = pingStatus?.dosers?.[id] ?? null;
-      const card = createDeviceShell(id, online, (shell) => {
+      const probing = isDeviceProbing('doser', id);
+      const online = probing ? null : pingStatus?.dosers?.[id] ?? null;
+      const card = createDeviceShell(
+        id,
+        online,
+        (shell) => {
         appendEndpointHint(shell, 'doser', id);
-        appendPingRow(shell, 'doser', id);
         const actions = document.createElement('div');
         actions.className = 'device-card__actions';
         buildDoserActions(actions, id);
         shell.appendChild(actions);
-      });
+      },
+        { probing }
+      );
       card.classList.add('device-card--doser');
+      card.dataset.doserId = id;
       grid.appendChild(card);
     });
   }
@@ -565,12 +640,15 @@
     const grid = $('acGrid');
     grid.innerHTML = '';
     const temps = gatewayConfig?.ac_temperatures || ['18', '22', 'off'];
-    const online = pingStatus?.ac ?? null;
+    const probing = isDeviceProbing('ac', null);
+    const online = probing ? null : pingStatus?.ac ?? null;
     const disabled = !storeSelected();
 
-    const card = createDeviceShell('AC', online, (shell) => {
+    const card = createDeviceShell(
+      'AC',
+      online,
+      (shell) => {
       appendEndpointHint(shell, 'ac');
-      appendPingRow(shell, 'ac');
 
       const actions = document.createElement('div');
       actions.className = 'device-card__actions device-card__actions--ac';
@@ -597,7 +675,9 @@
       });
       syncReleaseButtonWithPicker(releaseBtn, picker);
       shell.appendChild(actions);
-    });
+    },
+      { probing }
+    );
     grid.appendChild(card);
   }
 
@@ -638,27 +718,37 @@
     renderLed();
   }
 
-  function applyStore(fromUser = true) {
-    const manual = normalizeStoreId($('storeManual').value);
-    const selected = normalizeStoreId($('storeSelect').value);
-    const next = manual || selected;
+  function applyStore(next) {
+    next = normalizeStoreId(next);
     if (!next) {
-      if (fromUser) showToast('Informe o código da loja', false);
+      currentStore = '';
+      $('storeMeta').textContent = 'Loja: —';
+      updateStoreEndpointMeta();
+      probingDevices.clear();
+      resetPingStatus();
+      renderDevices();
+      const url = new URL(window.location.href);
+      url.searchParams.delete('store');
+      window.history.replaceState({}, '', url);
       return;
     }
+
     currentStore = next;
     const meta = (catalog?.stores || []).find((s) => s.id === next);
     const title = meta?.name ? `${meta.name} (${next.toUpperCase()})` : next.toUpperCase();
     $('storeMeta').textContent = `Loja: ${title}`;
     $('storeSelect').value = next;
-    $('storeManual').value = next;
     updateStoreEndpointMeta();
     const url = new URL(window.location.href);
     url.searchParams.set('store', next);
     window.history.replaceState({}, '', url);
-    resetPingStatus();
     renderDevices();
-    gatewayDebug('Loja aplicada', { store: currentStore });
+    startBackgroundDeviceProbes();
+    gatewayDebug('Loja selecionada', { store: currentStore });
+  }
+
+  function onStoreSelectChange() {
+    applyStore($('storeSelect').value);
   }
 
   function populateStoreSelect() {
@@ -692,19 +782,11 @@
 
     const initial = normalizeStoreId(new URLSearchParams(window.location.search).get('store'));
     if (initial) {
-      $('storeManual').value = initial;
       $('storeSelect').value = initial;
-      applyStore(false);
+      applyStore(initial);
     }
 
-    $('btnApplyStore').addEventListener('click', () => applyStore(true));
-    $('storeSelect').addEventListener('change', () => {
-      $('storeManual').value = $('storeSelect').value;
-    });
-    $('storeManual').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') applyStore(true);
-    });
-    $('btnApiHealth').addEventListener('click', () => checkApiHealth().catch(() => {}));
+    $('storeSelect').addEventListener('change', onStoreSelectChange);
     $('btnClearLog').addEventListener('click', () => {
       $('responseLog').innerHTML = '';
     });
@@ -716,5 +798,5 @@
     showToast(err.message || 'Erro ao iniciar', false);
   });
 
-  gatewayDebug('gateway.js carregado — sem verificação em massa');
+  gatewayDebug('gateway.js carregado — verificação automática por equipamento');
 })();
