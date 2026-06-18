@@ -127,21 +127,6 @@
     return `Gateway da loja ${code} não está online. ${friendlyUserMessage(msg)}`;
   }
 
-  function applyGatewaySummaryToPingStatus(summary) {
-    if (!summary) return;
-    if (!pingStatus) resetPingStatus();
-    ['washers', 'dryers', 'dosers'].forEach((key) => {
-      const block = summary[key];
-      if (!block || typeof block !== 'object') return;
-      Object.entries(block).forEach(([id, val]) => {
-        if (val === true || val === false) pingStatus[key][id] = val;
-      });
-    });
-    if (summary.ac === true || summary.ac === false) {
-      pingStatus.ac = summary.ac;
-    }
-  }
-
   async function verifyStoreGateway(storeId) {
     const gen = ++storeCheckGeneration;
     storeGatewayReady = false;
@@ -152,35 +137,43 @@
     setDevicesPanelBlocked(true);
     renderDevices();
 
+    const ledOnUrl = `/api/gateway/${encodeURIComponent(storeId)}/led/on`;
+
     try {
-      const res = await panelFetch(`/api/gateway/${encodeURIComponent(storeId)}/status-summary`);
+      gatewayDebug('Verificando ESP8266', { store: storeId, method: 'POST', path: `${storeId}/led/on` });
+
+      const res = await panelFetch(ledOnUrl, {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+      });
       const data = await res.json().catch(() => ({}));
       if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
 
-      const gatewayOnline =
-        data.esp_online === true &&
-        (data.status_source === 'aggregate' || data.status_source === 'probes');
-
-      if (gatewayOnline) {
+      if (res.ok) {
         storeGatewayReady = true;
         storeGatewayError = null;
-        applyGatewaySummaryToPingStatus(data);
         updateStoreGatewayMeta('online');
         hideStoreGatewayAlert();
         setDevicesPanelBlocked(false);
+        gatewayDebug('ESP8266 respondeu (led/on)', { store: storeId, data });
+
+        panelFetch(`/api/gateway/${encodeURIComponent(storeId)}/led/off`, {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+        }).catch(() => {});
+
         startBackgroundDeviceProbes();
-        gatewayDebug('Gateway da loja online', { store: storeId, source: data.status_source });
         return true;
       }
 
       storeGatewayError = formatStoreGatewayError(
         storeId,
-        data.esp_error || data.detail || data.message
+        data.detail || data.error || data.message || `HTTP ${res.status}`
       );
       showStoreGatewayAlert(storeGatewayError);
       updateStoreGatewayMeta('offline');
       setDevicesPanelBlocked(true);
-      gatewayDebug('Gateway da loja offline', { store: storeId, data });
+      gatewayDebug('ESP8266 offline (led/on)', { store: storeId, status: res.status, data });
       return false;
     } catch (err) {
       if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
