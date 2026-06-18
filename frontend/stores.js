@@ -415,7 +415,7 @@
   }
 
   function filterAndRender() {
-    if (!$('storesGrid')) return;
+    if (currentPageMode !== 'lojas' || !$('storesGrid')) return;
     const filtered = allStores.filter((s) => matchesFilter(s) && matchesSearch(s));
     renderStoresList(filtered);
   }
