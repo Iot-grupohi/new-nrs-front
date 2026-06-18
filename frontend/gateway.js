@@ -16,6 +16,37 @@
   const washerAm = {};
   const probingDevices = new Set();
 
+  function gatewayDebug(label, payload) {
+    const ts = new Date().toISOString().slice(11, 23);
+    if (payload !== undefined) {
+      console.log(`[LAV60 Gateway ${ts}] ${label}`, payload);
+    } else {
+      console.log(`[LAV60 Gateway ${ts}] ${label}`);
+    }
+  }
+
+  function logDeviceStatusSnapshot(context) {
+    if (!statusData) {
+      gatewayDebug(`${context} — sem statusData`);
+      return;
+    }
+    const rows = [];
+    (gatewayConfig?.washers || []).forEach((id) => {
+      rows.push({ tipo: 'lavadora', id, online: statusData.washers?.[id] });
+    });
+    (gatewayConfig?.dryers || []).forEach((id) => {
+      rows.push({ tipo: 'secadora', id, online: statusData.dryers?.[id] });
+    });
+    (gatewayConfig?.dosers || []).forEach((id) => {
+      rows.push({ tipo: 'dosador', id, online: statusData.dosers?.[id] });
+    });
+    rows.push({ tipo: 'ac', id: 'AC', online: statusData.ac });
+    gatewayDebug(`${context} — esp_online=${statusData.esp_online} source=${statusData.status_source || '—'}`, rows);
+    if (typeof console.table === 'function') {
+      console.table(rows);
+    }
+  }
+
   function normalizeStoreId(value) {
     return String(value || '').trim().toLowerCase();
   }
@@ -90,6 +121,8 @@
       fetchOptions.headers['Content-Type'] = 'application/json';
       fetchOptions.body = JSON.stringify(body);
     }
+    gatewayDebug(`→ ${method} ${url}`, body !== undefined ? { body } : undefined);
+    const started = performance.now();
     const res = await panelFetch(url, fetchOptions);
     let data;
     try {
@@ -97,6 +130,7 @@
     } catch {
       data = { detail: `HTTP ${res.status}` };
     }
+    gatewayDebug(`← ${method} ${url} HTTP ${res.status} (${Math.round(performance.now() - started)}ms)`, data);
     if (!res.ok && !options.allowHttpError) {
       const err = new Error(readGatewayError(data, res.status));
       err.payload = data;
@@ -108,9 +142,11 @@
 
   async function checkApiHealth() {
     $('apiHealthMeta').textContent = 'API: verificando…';
+    gatewayDebug('Health check iniciado');
     try {
       const res = await panelFetch('/api/gateway/health');
       const data = await res.json();
+      gatewayDebug('Health check resposta', { ok: res.ok, status: res.status, data });
       if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
       $('apiHealthMeta').textContent = `API: online (${data.message || 'OK'})`;
       $('apiHealthMeta').className = 'gateway-meta gateway-meta--ok';
@@ -150,7 +186,27 @@
     return `<button type="button" class="btn btn--sm btn--ghost device-card__ping" data-action="device-ping" data-device-type="${escapeHtml(deviceType)}"${machineAttr}${loading ? ' disabled aria-busy="true"' : ''}>${escapeHtml(text)}</button>`;
   }
 
-  function ensureStatusData() {
+  function normalizeStatusSummary(data) {
+    if (!data || typeof data !== 'object') return data;
+    const next = { ...data };
+    ['washers', 'dryers', 'dosers'].forEach((key) => {
+      if (!next[key] || typeof next[key] !== 'object') return;
+      next[key] = { ...next[key] };
+      Object.keys(next[key]).forEach((id) => {
+        const parsed = parseOnlineFlag(next[key][id]);
+        if (parsed !== null) next[key][id] = parsed;
+      });
+    });
+    if ('ac' in next) {
+      const acParsed = parseOnlineFlag(next.ac);
+      if (acParsed !== null) next.ac = acParsed;
+    }
+    if ('esp_online' in next) {
+      const espParsed = parseOnlineFlag(next.esp_online);
+      if (espParsed !== null) next.esp_online = espParsed;
+    }
+    return next;
+  }
     if (statusData) return;
     statusData = {
       store: currentStore,
@@ -226,16 +282,27 @@
       const online = extractOnlineFromProbeResult(result);
       ensureStatusData();
 
-      if (deviceType === 'ac') {
-        statusData.ac = online;
-      } else {
-        statusData[`${deviceType}s`][machine] = online;
+      gatewayDebug(`Ping ${label} interpretado`, {
+        path,
+        online,
+        upstream: result.data?.upstream_status,
+        raw: result.data,
+      });
+
+      if (online === true || online === false) {
+        if (deviceType === 'ac') {
+          statusData.ac = online;
+        } else {
+          statusData[`${deviceType}s`][machine] = online;
+        }
       }
 
       if (online === true) {
         statusData.esp_online = true;
         statusData.esp_error = null;
       }
+
+      logDeviceStatusSnapshot(`após ping ${label}`);
 
       appendLog(`Ping ${label}`, online === true, {
         ...result.data,
@@ -471,25 +538,38 @@
     renderLed();
     renderSummary();
     updateEspStatus();
+    logDeviceStatusSnapshot('renderDevices');
   }
 
-  async function refreshStatus() {
+  async function refreshStatus(options = {}) {
     if (!currentStore) {
       showToast('Selecione uma loja', false);
       return;
     }
-    if (statusLoading) return;
+    if (statusLoading) {
+      gatewayDebug('refreshStatus ignorado — já carregando');
+      return;
+    }
+    const useProbes = Boolean(options.probes);
     $('statusTime').textContent = 'Status: carregando…';
     setStatusLoading(true);
+    const url = `/api/gateway/${encodeURIComponent(currentStore)}/status-summary${useProbes ? '?probes=1' : ''}`;
+    gatewayDebug(`refreshStatus iniciado${useProbes ? ' (probes=1)' : ' (1 req aggregate)'}`);
     try {
-      const res = await panelFetch(`/api/gateway/${encodeURIComponent(currentStore)}/status-summary`);
+      const started = performance.now();
+      const res = await panelFetch(url);
       const data = await res.json();
+      gatewayDebug(`refreshStatus resposta (${Math.round(performance.now() - started)}ms)`, data);
       if (!res.ok) throw new Error(readGatewayError(data, res.status));
-      statusData = data;
+      statusData = normalizeStatusSummary(data);
       $('statusTime').textContent = `Status: ${new Date().toLocaleTimeString('pt-BR')}`;
       renderDevices();
       appendLog(`Status ${currentStore}`, true, statusData);
+      if (statusData.status_source === 'none' && statusData.esp_online === false) {
+        gatewayDebug('Aggregate falhou — equipamentos ficam desconhecidos; use Verificar online por card');
+      }
     } catch (err) {
+      gatewayDebug('refreshStatus erro', err.message);
       statusData = null;
       $('statusTime').textContent = 'Status: erro';
       renderDevices();
@@ -532,7 +612,7 @@
       const data = await fn();
       showToast(`${label} — OK`);
       appendLog(label, true, data);
-      await refreshStatus().catch(() => {});
+      gatewayDebug(`Ação OK: ${label} — sem refresh automático (evita flood no ESP)`);
       return data;
     } catch (err) {
       showToast(`${label}: ${friendlyUserMessage(err.message)}`, false);
@@ -731,6 +811,12 @@
       if (e.key === 'Enter') applyStore(true);
     });
     $('btnRefreshStatus').addEventListener('click', () => refreshStatus());
+    $('btnRefreshStatus')?.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (confirm('Atualizar com probes individuais? (13+ requisições ao ESP — use só para debug)')) {
+        refreshStatus({ probes: true }).catch(() => {});
+      }
+    });
     $('btnApiHealth').addEventListener('click', () => checkApiHealth().catch(() => {}));
     $('btnClearLog').addEventListener('click', () => {
       $('responseLog').innerHTML = '';
@@ -747,6 +833,9 @@
 
   init().catch((err) => {
     document.body.classList.remove('auth-pending');
+    gatewayDebug('init erro', err.message);
     showToast(err.message || 'Erro ao iniciar', false);
   });
+
+  gatewayDebug('gateway.js carregado — debug ativo no console (F12)');
 })();

@@ -586,9 +586,9 @@ def merge_aggregate_gateway_status(data: dict, summary: dict) -> None:
             for mid, val in block.items():
                 mid_str = str(mid)
                 if mid_str in summary[key]:
-                    summary[key][mid_str] = bool(val)
+                    summary[key][mid_str] = bool(val) if val is not None else None
     if 'ac' in data:
-        summary['ac'] = bool(data['ac'])
+        summary['ac'] = bool(data['ac']) if data['ac'] is not None else None
 
 
 def fill_status_summary_probes(store_id: str, summary: dict, timeout: int | None = None) -> None:
@@ -688,19 +688,23 @@ def api_gateway_health():
 
 @app.route('/api/gateway/<store_id>/status-summary', methods=['GET'])
 def api_gateway_status_summary(store_id: str):
-    """Agrega status da API central; sempre HTTP 200 com online/offline por equipamento."""
+    """Status via um único GET /{store}/status (evita inundar o ESP8266)."""
     sid = normalize_store_id(store_id)
     if not sid:
         return jsonify({'detail': 'Invalid store id'}), 400
 
+    use_probes = request.args.get('probes', '').strip().lower() in ('1', 'true', 'yes')
     summary = build_default_status_summary(sid)
-    probe_timeout = GATEWAY_PROBE_TIMEOUT
+    summary['status_source'] = 'none'
 
     try:
         resp = forward_central_gateway('GET', f'/{sid}/status', timeout=GATEWAY_STATUS_TIMEOUT)
         data = parse_upstream_gateway_json(resp)
+        print(f'[gateway status-summary] {sid} aggregate HTTP {resp.status_code} keys={list(data.keys())[:8]}')
         if resp.status_code == 200 and isinstance(data.get('washers'), dict):
             summary['esp_online'] = True
+            summary['esp_error'] = None
+            summary['status_source'] = 'aggregate'
             merge_aggregate_gateway_status(data, summary)
             return jsonify(summary), 200
 
@@ -712,23 +716,24 @@ def api_gateway_status_summary(store_id: str):
     except requests.Timeout as exc:
         summary['esp_error'] = friendly_gateway_transport_error(exc)
         summary['esp_online'] = False
-        probe_timeout = GATEWAY_PROBE_TIMEOUT_FAST
+        print(f'[gateway status-summary] {sid} aggregate timeout')
     except requests.RequestException as exc:
         summary['esp_error'] = friendly_gateway_transport_error(exc)
         summary['esp_online'] = False
-        if 'timed out' in str(exc).lower():
-            probe_timeout = GATEWAY_PROBE_TIMEOUT_FAST
+        print(f'[gateway status-summary] {sid} aggregate error: {exc}')
 
-    fill_status_summary_probes(sid, summary, timeout=probe_timeout)
-
-    any_online = any(
-        value is True
-        for block in (summary['washers'], summary['dryers'], summary['dosers'])
-        for value in block.values()
-    ) or summary['ac'] is True
-    if any_online and summary['esp_online'] is False:
-        summary['esp_online'] = True
-        summary['esp_error'] = None
+    if use_probes:
+        print(f'[gateway status-summary] {sid} running individual probes (explicit probes=1)')
+        summary['status_source'] = 'probes'
+        fill_status_summary_probes(sid, summary, timeout=GATEWAY_PROBE_TIMEOUT_FAST)
+        any_online = any(
+            value is True
+            for block in (summary['washers'], summary['dryers'], summary['dosers'])
+            for value in block.values()
+        ) or summary['ac'] is True
+        if any_online and summary['esp_online'] is False:
+            summary['esp_online'] = True
+            summary['esp_error'] = None
 
     return jsonify(summary), 200
 
