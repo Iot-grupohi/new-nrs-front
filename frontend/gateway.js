@@ -207,6 +207,8 @@
     }
     return next;
   }
+
+  function ensureStatusData() {
     if (statusData) return;
     statusData = {
       store: currentStore,
