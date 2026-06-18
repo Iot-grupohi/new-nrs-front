@@ -2208,6 +2208,7 @@
   }
 
   async function getCachedStoreEntry(meta, catalog) {
+    if (!meta?.id || !catalog || !Cache) return null;
     const id = normalizeStoreId(meta.id);
     const hash = Cache.catalogHash(catalog.stores || []);
     const row = await Cache.getStore(id);

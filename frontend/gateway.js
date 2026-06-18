@@ -461,18 +461,29 @@
   }
 
   async function loadMachinesForStore(storeId) {
-    const meta = (catalog?.stores || []).find((s) => normalizeStoreId(s.id) === storeId);
-    if (!meta) {
+    const sid = normalizeStoreId(storeId);
+    if (!sid) {
       machinesCatalog = [];
       return;
     }
-    const cached = await getCachedStoreEntry(meta, catalog);
-    if (cached?.status?.machines?.length) {
-      machinesCatalog = cached.status.machines;
-      return;
+    const meta =
+      (catalog?.stores || []).find((s) => normalizeStoreId(s.id) === sid) || { id: sid, name: sid.toUpperCase() };
+
+    try {
+      const cached = catalog ? await getCachedStoreEntry(meta, catalog) : null;
+      if (cached?.status?.machines?.length) {
+        machinesCatalog = cached.status.machines;
+        return;
+      }
+      if (catalog) {
+        const { status } = await fetchStoreStatusFromHeartbeat(meta, catalog);
+        machinesCatalog = status?.machines || [];
+        return;
+      }
+    } catch {
+      /* cache/heartbeat indisponível — cards seguem sem metadados extras */
     }
-    const { status } = await fetchStoreStatusFromHeartbeat(meta, catalog);
-    machinesCatalog = status?.machines || [];
+    machinesCatalog = [];
   }
 
   function getMachinesCatalog() {
