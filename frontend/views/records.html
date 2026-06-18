@@ -1,0 +1,98 @@
+<header class="page-header">
+  <div class="page-header__head">
+    <h1 class="page-header__title">Registros</h1>
+    <p class="page-header__subtitle" id="recordsSubtitle">Auditoria Firestore das ações no painel</p>
+  </div>
+</header>
+
+<main class="main-content">
+  <section class="records-stats" id="recordsStats" aria-label="Ranking de operadores">
+    <article class="records-stat-card records-stat-card--leader">
+      <span class="records-stat-card__label">Operador mais ativo</span>
+      <strong class="records-stat-card__value" id="recordsTopOperator">—</strong>
+      <span class="records-stat-card__meta" id="recordsTopOperatorMeta"></span>
+    </article>
+    <ol class="records-ranking" id="recordsOperatorRanking" aria-label="Top operadores"></ol>
+  </section>
+
+  <section class="records-panel panel">
+    <div class="records-panel__toolbar">
+      <div class="records-panel__head">
+        <h2 class="records-panel__title">Histórico</h2>
+        <span class="records-panel__meta" id="recordsMeta">—</span>
+      </div>
+      <div class="records-panel__controls">
+        <label class="field field--compact">
+          <span class="visually-hidden">Operador</span>
+          <select id="filterOperator">
+            <option value="">Todos os operadores</option>
+          </select>
+        </label>
+        <label class="field field--compact">
+          <span class="visually-hidden">Loja</span>
+          <select id="filterStore">
+            <option value="">Todas as lojas</option>
+          </select>
+        </label>
+        <label class="field field--compact">
+          <span class="visually-hidden">Tipo</span>
+          <select id="filterAction">
+            <option value="">Todos os tipos</option>
+          </select>
+        </label>
+        <label class="field field--compact">
+          <span class="visually-hidden">Resultado</span>
+          <select id="filterSuccess">
+            <option value="">Todos</option>
+            <option value="true">Sucesso</option>
+            <option value="false">Falha</option>
+          </select>
+        </label>
+        <button type="button" id="btnRefresh" class="btn btn--sm btn--ghost">Atualizar</button>
+      </div>
+    </div>
+
+    <div class="records-panel__body" id="recordsPanelBody" data-view="loading">
+      <div id="recordsLoading" class="records-loading">
+        <div class="spinner" aria-hidden="true"></div>
+        <p>Carregando registros…</p>
+      </div>
+      <div id="recordsEmpty" class="records-empty hidden">
+        <p id="recordsEmptyText">Nenhum registro encontrado.</p>
+      </div>
+      <div class="records-table-wrap hidden" id="recordsTableWrap">
+        <div id="recordsTableOverlay" class="records-table-overlay hidden" aria-hidden="true">
+          <div class="spinner" aria-hidden="true"></div>
+        </div>
+        <table class="records-table" aria-label="Registros de auditoria">
+          <thead>
+            <tr>
+              <th scope="col">Data / hora</th>
+              <th scope="col">Operador</th>
+              <th scope="col">Loja</th>
+              <th scope="col">Equipamento</th>
+              <th scope="col">Código</th>
+              <th scope="col">Ação</th>
+              <th scope="col">Tempo secagem</th>
+            </tr>
+          </thead>
+          <tbody id="recordsTbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="records-panel__footer hidden" id="recordsFooter">
+      <button type="button" id="btnPrevPage" class="btn btn--sm btn--ghost" disabled>Anterior</button>
+      <div class="records-panel__footer-meta">
+        <span class="records-panel__page" id="recordsPageInfo">Página 1</span>
+        <span class="records-panel__total" id="recordsTotalInfo"></span>
+      </div>
+      <button type="button" id="btnNextPage" class="btn btn--sm btn--ghost" disabled>Próxima</button>
+    </div>
+  </section>
+</main>
+
+<footer class="app-footer">
+  <span>LAV60 · Painel operacional</span>
+  <strong id="recordsAppFooterTotal" class="records-app-footer-total"></strong>
+</footer>

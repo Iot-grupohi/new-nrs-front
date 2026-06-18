@@ -15,6 +15,7 @@
   let operatorOptions = [];
   let operatorStats = [];
   let operatorStatsTruncated = false;
+  let recordsAbort = null;
   let items = [];
   let hasMore = false;
   let loading = false;
@@ -679,9 +680,9 @@
     }
   }
 
-  function bindClick(id, fn) {
+  function bindClick(id, fn, signal) {
     const el = $(id);
-    if (el) el.addEventListener('click', fn);
+    if (el) el.addEventListener('click', fn, { signal });
   }
 
   function clearLegacyRecordsCache() {
@@ -704,10 +705,10 @@
     fetchLogs({ page: 1, force: true });
   }
 
-  function initFilters() {
+  function initFilters(signal) {
     ['filterStore', 'filterOperator', 'filterAction', 'filterSuccess'].forEach((id) => {
       const el = $(id);
-      if (el) el.addEventListener('change', onFiltersChanged);
+      if (el) el.addEventListener('change', onFiltersChanged, { signal });
     });
 
     bindClick('btnRefresh', () => {
@@ -715,33 +716,34 @@
       loadOperators({ force: true });
       loadOperatorStats({ force: true });
       fetchLogs({ page: 1, force: true });
-    });
+    }, signal);
 
     bindClick('btnPrevPage', () => {
       if (currentPage <= 1 || loading) return;
       const targetPage = currentPage - 1;
       if (restorePageSnapshot(targetPage)) return;
       fetchLogs({ page: targetPage });
-    });
+    }, signal);
 
     bindClick('btnNextPage', () => {
       if (loading) return;
       if (!hasMore && !pageCursors[currentPage + 1]) return;
       fetchLogs({ page: currentPage + 1 });
-    });
+    }, signal);
   }
 
-  async function initAuthUi() {
-    if (!window.Lav60Auth) return;
-    const enabled = await Lav60Auth.authEnabled();
-    if (!enabled) return;
-    await Lav60Auth.mountSidebarUser($('sidebarUser'));
+  function destroy() {
+    recordsAbort?.abort();
+    recordsAbort = null;
   }
 
   async function init() {
+    destroy();
+    recordsAbort = new AbortController();
+    const { signal } = recordsAbort;
+
     clearLegacyRecordsCache();
-    initFilters();
-    await initAuthUi();
+    initFilters(signal);
     restoreFiltersFromSession();
     syncRecordsView();
     try {
@@ -759,12 +761,5 @@
     }
   }
 
-  (async () => {
-    if (window.Lav60Auth) {
-      const ok = await Lav60Auth.guardPage({ returnPath: 'records.html' });
-      if (!ok) return;
-    }
-    document.body.classList.remove('auth-pending');
-    await init();
-  })();
+  window.Lav60RecordsPage = { init, destroy };
 })();

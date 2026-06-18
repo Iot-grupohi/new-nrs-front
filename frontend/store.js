@@ -1354,13 +1354,13 @@
 
   function redirectToDashboard(reason, detail = {}) {
     lav60Debug('store', 'REDIRECT → dashboard', { reason, pageStore, ...detail });
-    window.location.href = `lojas.html?blocked=${encodeURIComponent(pageStore)}`;
+    window.location.href = `index.html?blocked=${encodeURIComponent(pageStore)}#/lojas`;
   }
 
   async function init() {
     lav60Debug('store', 'init', { pageStore, href: window.location.href });
     if (!pageStore) {
-      window.location.href = 'lojas.html';
+      window.location.href = 'index.html#/lojas';
       return;
     }
 

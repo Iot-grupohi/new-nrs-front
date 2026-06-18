@@ -21,6 +21,10 @@
   let searchQuery = '';
   let activeKpiPanel = null;
   let lastDashboardEvents = null;
+  let lastPayload = null;
+  let pageAbort = null;
+  let storesBootstrapped = false;
+  let currentPageMode = null;
 
   const KPI_PANEL_CONFIG = {
     'stores-online': {
@@ -574,7 +578,7 @@
     renderKpiEventsPanel(kpiKey);
   }
 
-  function initKpiEvents() {
+  function initKpiEvents(signal) {
     const dashboard = $('dashboard');
     if (!dashboard) return;
 
@@ -582,26 +586,23 @@
       const card = e.target.closest('[data-kpi]');
       if (!card) return;
       toggleKpiEventsPanel(card.dataset.kpi);
-    });
+    }, { signal });
 
     dashboard.addEventListener('keydown', (e) => {
       const card = e.target.closest('[data-kpi]');
       if (!card || (e.key !== 'Enter' && e.key !== ' ')) return;
       e.preventDefault();
       toggleKpiEventsPanel(card.dataset.kpi);
-    });
+    }, { signal });
 
-    $('kpiEventsClose')?.addEventListener('click', closeKpiEventsPanel);
+    $('kpiEventsClose')?.addEventListener('click', closeKpiEventsPanel, { signal });
   }
 
   function applyPayload(data) {
+    lastPayload = data;
     allStores = data.stores || [];
     renderDashboard(data.dashboard || {}, data);
     filterAndRender();
-  }
-
-  function currentListPage() {
-    return window.location.pathname.split('/').pop() || 'index.html';
   }
 
   async function loadStores(options = {}) {
@@ -630,18 +631,11 @@
     const blocked = params.get('blocked');
     if (blocked) {
       showToast(noAgentMessage(blocked), false);
-      window.history.replaceState({}, '', currentListPage());
+      window.history.replaceState({ route: 'lojas' }, '', 'index.html#/lojas');
     }
   }
 
-  async function initAuthUi() {
-    if (!window.Lav60Auth) return;
-    const enabled = await Lav60Auth.authEnabled();
-    if (!enabled) return;
-    await Lav60Auth.mountSidebarUser($('sidebarUser'));
-  }
-
-  function initFilters() {
+  function initFilters(signal) {
     const search = $('inputSearch');
     const chips = $('filterChips');
     if (!search || !chips) return;
@@ -649,7 +643,7 @@
     search.addEventListener('input', (e) => {
       searchQuery = e.target.value.trim();
       filterAndRender();
-    });
+    }, { signal });
 
     chips.addEventListener('click', (e) => {
       const chip = e.target.closest('[data-filter]');
@@ -658,18 +652,38 @@
       chips.querySelectorAll('.chip').forEach((c) => c.classList.remove('chip--active'));
       chip.classList.add('chip--active');
       filterAndRender();
-    });
+    }, { signal });
   }
 
-  async function init() {
-    initFilters();
-    initKpiEvents();
-    await initAuthUi();
-    if ($('storesGrid')) checkBlockedParam();
+  function destroy() {
+    pageAbort?.abort();
+    pageAbort = null;
+    closeKpiEventsPanel();
+    currentPageMode = null;
+  }
+
+  async function init(mode = 'dashboard') {
+    destroy();
+    pageAbort = new AbortController();
+    const { signal } = pageAbort;
+    currentPageMode = mode;
+
+    initFilters(signal);
+    initKpiEvents(signal);
+
+    if (mode === 'lojas') checkBlockedParam();
+
+    if (storesBootstrapped && allStores.length) {
+      renderDashboard(lastPayload?.dashboard || {}, lastPayload || {});
+      filterAndRender();
+      return;
+    }
+
     await ensureDefaultAgentToken();
     try {
       catalogConfig = await loadCatalog();
       await loadStores();
+      storesBootstrapped = true;
     } catch (e) {
       const grid = $('storesGrid');
       if (grid) {
@@ -679,12 +693,5 @@
     }
   }
 
-  (async () => {
-    if (window.Lav60Auth) {
-      const ok = await Lav60Auth.guardPage();
-      if (!ok) return;
-    }
-    document.body.classList.remove('auth-pending');
-    await init();
-  })();
+  window.Lav60StoresPage = { init, destroy };
 })();

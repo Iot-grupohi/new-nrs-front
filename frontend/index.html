@@ -3,71 +3,48 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LAV60 — Dashboard</title>
-  <link rel="stylesheet" href="app.css?v=10">
+  <title>LAV60 — Painel</title>
+  <link rel="stylesheet" href="app.css?v=11">
 </head>
 <body class="page-panel page-dashboard auth-pending">
-  <div class="app-layout" data-nav="dashboard">
-    <div class="app-main">
-      <header class="page-header">
-        <div class="page-header__head">
-          <h1 class="page-header__title">Dashboard</h1>
-          <p class="page-header__subtitle" id="dashboardSubtitle">Visão geral do monitoramento</p>
+  <div class="app-layout">
+    <aside class="sidebar" aria-label="Menu principal">
+      <div class="sidebar__brand">
+        <span class="sidebar__logo" aria-hidden="true">L60</span>
+        <div class="sidebar__identity">
+          <strong class="sidebar__title">LAV60</strong>
+          <span class="sidebar__eyebrow">Painel central</span>
         </div>
-      </header>
+      </div>
+      <nav class="sidebar__nav" aria-label="Navegação">
+        <a href="index.html" class="sidebar__link sidebar__link--active" data-route="dashboard" aria-current="page">
+          <span class="sidebar__icon" aria-hidden="true">▣</span>
+          <span class="sidebar__label">Dashboard</span>
+        </a>
+        <a href="index.html#/lojas" class="sidebar__link" data-route="lojas">
+          <span class="sidebar__icon" aria-hidden="true">◫</span>
+          <span class="sidebar__label">Lojas</span>
+        </a>
+        <a href="index.html#/registros" class="sidebar__link" data-route="registros">
+          <span class="sidebar__icon" aria-hidden="true">☰</span>
+          <span class="sidebar__label">Registros</span>
+        </a>
+      </nav>
+      <div class="sidebar__footer" id="sidebarUser"></div>
+    </aside>
 
-      <main class="main-content main-content--dashboard">
-        <section class="stats-grid stats-grid--dashboard" id="dashboard">
-          <article class="stat-card stat-card--success stat-card--clickable" data-kpi="stores-online" tabindex="0" role="button" aria-expanded="false" aria-controls="kpiEventsPanel">
-            <span class="stat-card__label">Lojas online</span>
-            <strong class="stat-card__value" id="kpiStoresOnline">—</strong>
-          </article>
-          <article class="stat-card stat-card--warn stat-card--clickable" data-kpi="stores-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="kpiEventsPanel">
-            <span class="stat-card__label">Lojas offline</span>
-            <strong class="stat-card__value" id="kpiStoresOffline">—</strong>
-          </article>
-          <article class="stat-card stat-card--suspended stat-card--clickable" data-kpi="devices-suspended" tabindex="0" role="button" aria-expanded="false" aria-controls="kpiEventsPanel">
-            <span class="stat-card__label">Máquinas suspensas</span>
-            <strong class="stat-card__value" id="kpiDevicesSuspended">—</strong>
-          </article>
-          <article class="stat-card stat-card--occupied stat-card--clickable" data-kpi="devices-occupied" tabindex="0" role="button" aria-expanded="false" aria-controls="kpiEventsPanel">
-            <span class="stat-card__label">Máquinas ocupadas</span>
-            <strong class="stat-card__value" id="kpiDevicesOccupied">—</strong>
-          </article>
-          <article class="stat-card stat-card--available stat-card--clickable" data-kpi="devices-available" tabindex="0" role="button" aria-expanded="false" aria-controls="kpiEventsPanel">
-            <span class="stat-card__label">Máquinas disponíveis</span>
-            <strong class="stat-card__value" id="kpiDevicesAvailable">—</strong>
-          </article>
-          <article class="stat-card stat-card--danger stat-card--clickable" data-kpi="devices-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="kpiEventsPanel">
-            <span class="stat-card__label">Offline (rede)</span>
-            <strong class="stat-card__value" id="kpiDevicesOffline">—</strong>
-          </article>
-        </section>
-
-        <section class="kpi-events-panel hidden" id="kpiEventsPanel" aria-labelledby="kpiEventsTitle">
-          <header class="kpi-events-panel__head">
-            <div>
-              <h2 class="kpi-events-panel__title" id="kpiEventsTitle">Eventos</h2>
-              <p class="kpi-events-panel__meta" id="kpiEventsMeta">—</p>
-            </div>
-            <button type="button" class="kpi-events-panel__close" id="kpiEventsClose" aria-label="Fechar detalhes">×</button>
-          </header>
-          <div class="kpi-events-panel__body" id="kpiEventsBody"></div>
-        </section>
-      </main>
-
-      <footer class="app-footer">
-        <span>LAV60 · Painel operacional</span>
-      </footer>
+    <div class="app-main">
+      <div class="app-view" id="appView" aria-live="polite"></div>
     </div>
   </div>
 
   <div id="toast" class="toast hidden" role="status"></div>
 
   <script src="auth.js?v=6"></script>
-  <script src="sidebar.js?v=1"></script>
   <script src="cache.js"></script>
   <script src="api.js"></script>
-  <script src="stores.js?v=2"></script>
+  <script src="stores.js?v=3"></script>
+  <script src="records.js?v=15"></script>
+  <script src="router.js?v=1"></script>
 </body>
 </html>
