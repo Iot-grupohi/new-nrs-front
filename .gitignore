@@ -15,6 +15,9 @@ __pycache__/
 # Config gerada pelo agente (túnel local)
 config/config.yml
 
+# Registro de lojas vistas via heartbeat (runtime VPS)
+data/known_stores.json
+
 # IDE / OS
 .vscode/
 .idea/

@@ -45,6 +45,7 @@ BACKEND = Path(__file__).resolve().parent
 ROOT = BACKEND.parent
 FRONTEND = ROOT / 'frontend'
 STORES_JSON = FRONTEND / 'stores.json'
+KNOWN_STORES_PATH = ROOT / 'data' / 'known_stores.json'
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', '').strip() or os.urandom(32).hex()
@@ -65,6 +66,7 @@ PUBLIC_API_PATHS = frozenset({
 
 heartbeats: dict[str, dict] = {}
 heartbeats_lock = threading.Lock()
+known_stores_lock = threading.Lock()
 sse_clients: list[queue.Queue] = []
 sse_lock = threading.Lock()
 
@@ -263,16 +265,94 @@ def api_auth_logout():
     return jsonify({'ok': True}), 200
 
 
+def load_known_stores() -> dict[str, dict]:
+    try:
+        raw = json.loads(KNOWN_STORES_PATH.read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+    if isinstance(raw, list):
+        out: dict[str, dict] = {}
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            sid = normalize_store_id(item.get('id'))
+            if sid:
+                out[sid] = {'id': sid, 'name': str(item.get('name') or sid.upper()).strip() or sid.upper()}
+        return out
+    if isinstance(raw, dict):
+        out = {}
+        for key, value in raw.items():
+            sid = normalize_store_id(key)
+            if not sid:
+                continue
+            if isinstance(value, dict):
+                out[sid] = {
+                    'id': sid,
+                    'name': str(value.get('name') or sid.upper()).strip() or sid.upper(),
+                }
+            else:
+                out[sid] = {'id': sid, 'name': sid.upper()}
+        return out
+    return {}
+
+
+def save_known_stores(stores: dict[str, dict]) -> None:
+    KNOWN_STORES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    items = sorted(stores.values(), key=lambda s: s.get('id', ''))
+    KNOWN_STORES_PATH.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
+def upsert_known_store(store_id: str, name: str | None = None) -> None:
+    sid = normalize_store_id(store_id)
+    if not sid:
+        return
+    with known_stores_lock:
+        stores = load_known_stores()
+        prev = stores.get(sid, {})
+        stores[sid] = {
+            'id': sid,
+            'name': str(name or prev.get('name') or sid.upper()).strip() or sid.upper(),
+            'last_seen_at': datetime.utcnow().isoformat() + 'Z',
+        }
+        save_known_stores(stores)
+
+
 def catalog_stores_from_heartbeats() -> list[dict]:
+    """Lojas já vistas (persistidas) + heartbeats atuais — offline continua no catálogo."""
+    stores_map = load_known_stores()
+    config = load_catalog()
+    for item in config.get('known_stores') or []:
+        if not isinstance(item, dict):
+            continue
+        sid = normalize_store_id(item.get('id'))
+        if not sid:
+            continue
+        stores_map.setdefault(
+            sid,
+            {
+                'id': sid,
+                'name': str(item.get('name') or sid.upper()).strip() or sid.upper(),
+            },
+        )
     with heartbeats_lock:
         items = list(heartbeats.items())
-    stores = []
     for store_id, entry in items:
+        sid = normalize_store_id(store_id)
+        if not sid:
+            continue
         payload = entry.get('payload') or {}
-        name = str(payload.get('store_name') or payload.get('name') or store_id.upper()).strip()
-        stores.append({'id': store_id, 'name': name or store_id.upper()})
-    stores.sort(key=lambda s: s['id'])
-    return stores
+        name = str(payload.get('store_name') or payload.get('name') or sid.upper()).strip()
+        stores_map[sid] = {
+            'id': sid,
+            'name': name or stores_map.get(sid, {}).get('name') or sid.upper(),
+        }
+    if items:
+        with known_stores_lock:
+            save_known_stores(stores_map)
+    return sorted(
+        [{'id': s['id'], 'name': s.get('name') or s['id'].upper()} for s in stores_map.values()],
+        key=lambda s: s['id'],
+    )
 
 
 def build_panel_catalog_payload() -> dict:
@@ -322,6 +402,9 @@ def api_heartbeat():
     }
     with heartbeats_lock:
         heartbeats[store_id] = entry
+
+    payload_name = str(body.get('store_name') or body.get('name') or store_id.upper()).strip()
+    upsert_known_store(store_id, payload_name or store_id.upper())
 
     broadcast_sse({
         'type': 'heartbeat',

@@ -1247,14 +1247,11 @@
     return card;
   }
 
-  async function loadDashboardCacheMap(catalog) {
-    const hash = Cache.catalogHash(catalog.stores || []);
+  async function loadDashboardCacheMap(_catalog) {
     const rows = await Cache.getAll();
     const map = {};
     (rows || []).forEach((row) => {
-      if (row?.id && row.catalogHash === hash) {
-        map[row.id] = row;
-      }
+      if (row?.id) map[row.id] = row;
     });
     return map;
   }
@@ -1409,8 +1406,20 @@
 
     if (!hb) {
       const cached = fromCache();
-      if (cached) return cached;
-      if (now - heartbeatPageStartedAt < displayDelayMs) {
+      if (cached) {
+        if (cached.accessible) {
+          return {
+            ...cached,
+            accessible: false,
+            state: 'unreachable',
+            error: friendlyUserMessage('Sem conexão com a loja'),
+            staleSnapshot: true,
+          };
+        }
+        return cached;
+      }
+      const snapshotGraceMs = 12000;
+      if (now - heartbeatPageStartedAt < snapshotGraceMs) {
         return buildPlaceholderCard(meta, catalog);
       }
       return buildStoreCard(meta, null, 'Sem conexão com a loja', catalog);
@@ -1440,7 +1449,7 @@
 
   function emitHeartbeatUpdate(extra = {}) {
     if (!heartbeatCatalog || !heartbeatOnUpdate) return;
-    heartbeatCatalog = rebuildCatalogStores(heartbeatCatalog);
+    heartbeatCatalog = rebuildCatalogStores(heartbeatCatalog, dashboardCacheMap);
     const payload = buildPayloadFromHeartbeats(heartbeatCatalog, extra);
     schedulePersistDashboardCards(payload.stores, heartbeatCatalog);
     heartbeatOnUpdate(payload);
@@ -1732,7 +1741,26 @@
     return { id, name: name || id.toUpperCase() };
   }
 
-  function rebuildCatalogStores(catalog) {
+  function mergeCatalogStores(catalog, cacheMap) {
+    const byId = new Map();
+    (catalog?.stores || []).forEach((meta) => {
+      const id = normalizeStoreId(meta.id);
+      if (id) byId.set(id, { ...meta, id, name: meta.name || id.toUpperCase() });
+    });
+    Object.entries(cacheMap || {}).forEach(([id, row]) => {
+      const sid = normalizeStoreId(id);
+      if (!sid || byId.has(sid)) return;
+      const card = row?.card;
+      byId.set(sid, {
+        id: sid,
+        name: card?.name || sid.toUpperCase(),
+      });
+    });
+    const stores = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
+    return { ...(catalog || {}), stores };
+  }
+
+  function rebuildCatalogStores(catalog, cacheMap = null) {
     const byId = new Map();
     (catalog?.stores || []).forEach((meta) => {
       const id = normalizeStoreId(meta.id);
@@ -1740,6 +1768,15 @@
     });
     heartbeatState.forEach((hb, id) => {
       byId.set(id, storeMetaFromId(id, { payload: hb.payload }));
+    });
+    Object.entries(cacheMap || {}).forEach(([id, row]) => {
+      const sid = normalizeStoreId(id);
+      if (!sid || byId.has(sid)) return;
+      const card = row?.card;
+      byId.set(sid, {
+        id: sid,
+        name: card?.name || sid.toUpperCase(),
+      });
     });
     const stores = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
     return { ...(catalog || {}), stores };
@@ -1967,10 +2004,10 @@
 
     const snapshot = await fetchHeartbeatsSnapshot();
     ingestHeartbeatSnapshot(snapshot);
-    catalog = rebuildCatalogStores(catalog);
-    heartbeatCatalog = catalog;
-
     dashboardCacheMap = options.force ? {} : await loadDashboardCacheMap(catalog);
+    catalog = mergeCatalogStores(catalog, dashboardCacheMap);
+    catalog = rebuildCatalogStores(catalog, dashboardCacheMap);
+    heartbeatCatalog = catalog;
 
     if (!options.force && Object.keys(dashboardCacheMap).length && onUpdate) {
       onUpdate(
@@ -2166,6 +2203,7 @@
     findStoreInCatalog,
     storeMetaFromId,
     rebuildCatalogStores,
+    mergeCatalogStores,
     fetchAgentConfig,
     agentRequest,
     attachSummary,
