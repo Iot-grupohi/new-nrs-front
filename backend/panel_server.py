@@ -6,6 +6,7 @@ import os
 import queue
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -508,10 +509,10 @@ def extract_online_from_probe(data: dict) -> bool | None:
     return None
 
 
-def probe_central_device_online(store_id: str, subpath: str) -> bool | None:
+def probe_central_device_online(store_id: str, subpath: str, timeout: int = 12) -> bool | None:
     path = f'/{store_id}/{subpath.lstrip("/")}'
     try:
-        resp = forward_central_gateway('GET', path, timeout=20)
+        resp = forward_central_gateway('GET', path, timeout=timeout)
         data = parse_upstream_gateway_json(resp)
         online = extract_online_from_probe(data)
         if online is not None:
@@ -548,6 +549,32 @@ def merge_aggregate_gateway_status(data: dict, summary: dict) -> None:
                     summary[key][mid_str] = bool(val)
     if 'ac' in data:
         summary['ac'] = bool(data['ac'])
+
+
+def fill_status_summary_probes(store_id: str, summary: dict) -> None:
+    probes: list[tuple[str, str | None, str]] = []
+    for mid in CENTRAL_GATEWAY_MACHINES['washers']:
+        probes.append(('washers', mid, f'status/washer/{mid}'))
+    for mid in CENTRAL_GATEWAY_MACHINES['dryers']:
+        probes.append(('dryers', mid, f'status/dryer/{mid}'))
+    for mid in CENTRAL_GATEWAY_MACHINES['dosers']:
+        probes.append(('dosers', mid, f'status/doser/{mid}'))
+    probes.append(('ac', None, 'status/ac'))
+
+    workers = min(8, max(1, len(probes)))
+
+    def run_probe(item: tuple[str, str | None, str]) -> tuple[str, str | None, bool | None]:
+        key, mid, subpath = item
+        return key, mid, probe_central_device_online(store_id, subpath)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(run_probe, item) for item in probes]
+        for future in as_completed(futures):
+            key, mid, online = future.result()
+            if key == 'ac':
+                summary['ac'] = online
+            elif mid is not None:
+                summary[key][mid] = online
 
 
 @app.route('/api/stores/<store_id>/agent/config', methods=['GET', 'OPTIONS'])
@@ -628,7 +655,7 @@ def api_gateway_status_summary(store_id: str):
     summary = build_default_status_summary(sid)
 
     try:
-        resp = forward_central_gateway('GET', f'/{sid}/status', timeout=30)
+        resp = forward_central_gateway('GET', f'/{sid}/status', timeout=15)
         data = parse_upstream_gateway_json(resp)
         if resp.status_code == 200 and isinstance(data.get('washers'), dict):
             summary['esp_online'] = True
@@ -644,13 +671,7 @@ def api_gateway_status_summary(store_id: str):
         summary['esp_error'] = str(exc)
         summary['esp_online'] = False
 
-    for mid in CENTRAL_GATEWAY_MACHINES['washers']:
-        summary['washers'][mid] = probe_central_device_online(sid, f'status/washer/{mid}')
-    for mid in CENTRAL_GATEWAY_MACHINES['dryers']:
-        summary['dryers'][mid] = probe_central_device_online(sid, f'status/dryer/{mid}')
-    for mid in CENTRAL_GATEWAY_MACHINES['dosers']:
-        summary['dosers'][mid] = probe_central_device_online(sid, f'status/doser/{mid}')
-    summary['ac'] = probe_central_device_online(sid, 'status/ac')
+    fill_status_summary_probes(sid, summary)
 
     any_online = any(
         value is True

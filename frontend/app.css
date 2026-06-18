@@ -4158,13 +4158,16 @@ a.topbar__tool {
   color: var(--muted);
 }
 
-body.gateway-busy {
-  cursor: wait;
+.gateway-panel--loading {
+  opacity: 0.92;
 }
 
-body.gateway-busy .device-card button,
-body.gateway-busy .gateway-toolbar button {
-  pointer-events: none;
-  opacity: 0.65;
+.gateway-panel--loading .device-card__status.pill--warn {
+  animation: gateway-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes gateway-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 

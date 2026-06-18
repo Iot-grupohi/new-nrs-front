@@ -11,7 +11,8 @@
   let catalog = null;
   let currentStore = '';
   let statusData = null;
-  let busy = false;
+  let statusLoading = false;
+  let actionBusy = false;
   const washerAm = {};
 
   function normalizeStoreId(value) {
@@ -35,9 +36,15 @@
     showToast._t = setTimeout(() => el.classList.add('hidden'), 4500);
   }
 
-  function setBusy(value) {
-    busy = value;
-    document.body.classList.toggle('gateway-busy', value);
+  function setStatusLoading(value) {
+    statusLoading = value;
+    const btn = $('btnRefreshStatus');
+    if (btn) {
+      btn.disabled = value;
+      btn.setAttribute('aria-busy', value ? 'true' : 'false');
+    }
+    $('summaryGrid')?.classList.toggle('gateway-panel--loading', value);
+    $('devicesPanel')?.classList.toggle('gateway-panel--loading', value);
   }
 
   function appendLog(label, ok, payload) {
@@ -338,8 +345,9 @@
       showToast('Selecione uma loja', false);
       return;
     }
+    if (statusLoading) return;
     $('statusTime').textContent = 'Status: carregando…';
-    setBusy(true);
+    setStatusLoading(true);
     try {
       const res = await panelFetch(`/api/gateway/${encodeURIComponent(currentStore)}/status-summary`);
       const data = await res.json();
@@ -358,7 +366,7 @@
       showToast(err.message, false);
       appendLog(`Status ${currentStore}`, false, err.message);
     } finally {
-      setBusy(false);
+      setStatusLoading(false);
     }
   }
 
@@ -384,12 +392,12 @@
   }
 
   async function runAction(label, fn) {
-    if (busy) return;
+    if (actionBusy) return;
     if (!currentStore) {
       showToast('Selecione uma loja', false);
       return;
     }
-    setBusy(true);
+    actionBusy = true;
     try {
       const data = await fn();
       showToast(`${label} — OK`);
@@ -400,7 +408,7 @@
       showToast(`${label}: ${friendlyUserMessage(err.message)}`, false);
       appendLog(label, false, err.payload || err.message);
     } finally {
-      setBusy(false);
+      actionBusy = false;
     }
   }
 
@@ -440,7 +448,7 @@
 
   async function handlePanelClick(event) {
     const btn = event.target.closest('[data-action]');
-    if (!btn || busy) return;
+    if (!btn || actionBusy) return;
 
     const action = btn.dataset.action;
     const machine = btn.dataset.machine;
