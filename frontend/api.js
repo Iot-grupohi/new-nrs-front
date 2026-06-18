@@ -1206,6 +1206,113 @@
     localStorage.setItem(OFFLINE_SINCE_KEY, JSON.stringify(map));
   }
 
+  const GATEWAY_CACHE_KEY = 'lav60:gateway:v1';
+  const GATEWAY_CACHE_VERSION = 1;
+  const GATEWAY_TTL_MS = 5 * 60 * 1000;
+
+  function loadGatewayCacheRoot() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(GATEWAY_CACHE_KEY) || '{}');
+      if (raw.version !== GATEWAY_CACHE_VERSION) {
+        return { version: GATEWAY_CACHE_VERSION, stores: {} };
+      }
+      return { version: GATEWAY_CACHE_VERSION, stores: raw.stores || {} };
+    } catch {
+      return { version: GATEWAY_CACHE_VERSION, stores: {} };
+    }
+  }
+
+  function saveGatewayCacheRoot(root) {
+    try {
+      localStorage.setItem(GATEWAY_CACHE_KEY, JSON.stringify(root));
+    } catch {
+      /* quota ou modo privado */
+    }
+  }
+
+  function getStoreGatewayCacheEntry(storeId) {
+    const sid = normalizeStoreId(storeId);
+    return loadGatewayCacheRoot().stores[sid]?.gateway || null;
+  }
+
+  function setStoreGatewayCacheEntry(storeId, entry) {
+    const sid = normalizeStoreId(storeId);
+    if (!sid) return null;
+    const root = loadGatewayCacheRoot();
+    if (!root.stores[sid]) root.stores[sid] = {};
+    const checkedAt = Date.now();
+    root.stores[sid].gateway = {
+      online: Boolean(entry.online),
+      error: entry.error || null,
+      checkedAt,
+    };
+    saveGatewayCacheRoot(root);
+    return root.stores[sid].gateway;
+  }
+
+  function isGatewayCacheFresh(checkedAt, ttlMs = GATEWAY_TTL_MS) {
+    return Number.isFinite(checkedAt) && Date.now() - checkedAt < ttlMs;
+  }
+
+  function formatGatewayCacheAge(checkedAt) {
+    if (!Number.isFinite(checkedAt)) return '';
+    const sec = Math.floor((Date.now() - checkedAt) / 1000);
+    if (sec < 45) return 'agora';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min === 1 ? 'há 1 min' : `há ${min} min`;
+    const hours = Math.floor(min / 60);
+    return hours === 1 ? 'há 1 h' : `há ${hours} h`;
+  }
+
+  function formatStoreGatewayError(storeId, detail) {
+    const code = String(storeId || '').toUpperCase();
+    const msg = String(detail || '').trim();
+    if (!msg) {
+      return `A loja ${code} não possui gateway online no momento. Apenas lojas com ESP8266 ativo no gateway central podem ser operadas por aqui.`;
+    }
+    if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
+      return `A loja ${code} não está cadastrada no gateway central ou o ESP8266 não está configurado.`;
+    }
+    return friendlyUserMessage(msg);
+  }
+
+  async function verifyStoreGatewayLed(storeId, fetchFn, { force = false } = {}) {
+    const sid = normalizeStoreId(storeId);
+    if (!sid) throw new Error('Loja inválida');
+    if (typeof fetchFn !== 'function') throw new Error('fetchFn obrigatório');
+
+    const cached = getStoreGatewayCacheEntry(sid);
+    if (!force && cached && isGatewayCacheFresh(cached.checkedAt)) {
+      return {
+        online: Boolean(cached.online),
+        error: cached.error || null,
+        fromCache: true,
+        checkedAt: cached.checkedAt,
+      };
+    }
+
+    const res = await fetchFn(`/api/gateway/${encodeURIComponent(sid)}/led/on`, {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (res.ok) {
+      const checkedAt = Date.now();
+      setStoreGatewayCacheEntry(sid, { online: true, error: null });
+      fetchFn(`/api/gateway/${encodeURIComponent(sid)}/led/off`, {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+      }).catch(() => {});
+      return { online: true, error: null, fromCache: false, checkedAt };
+    }
+
+    const detail = data.detail || data.error || data.message || `HTTP ${res.status}`;
+    const error = formatStoreGatewayError(sid, detail);
+    setStoreGatewayCacheEntry(sid, { online: false, error });
+    return { online: false, error, fromCache: false, checkedAt: Date.now() };
+  }
+
   function syncStoreOfflineSince(cards) {
     const map = loadOfflineSinceMap();
     const now = Date.now();
@@ -2368,5 +2475,12 @@
     agentRequest,
     attachSummary,
     formatOfflineDuration,
+    getStoreGatewayCacheEntry,
+    setStoreGatewayCacheEntry,
+    isGatewayCacheFresh,
+    formatGatewayCacheAge,
+    formatStoreGatewayError,
+    verifyStoreGatewayLed,
+    GATEWAY_TTL_MS,
   };
 })();

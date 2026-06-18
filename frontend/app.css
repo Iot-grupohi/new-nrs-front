@@ -489,6 +489,69 @@ select.btn {
   color: var(--bg);
 }
 
+.confirm-modal__box--channel {
+  max-width: 34rem;
+}
+
+.store-channel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0.85rem 0 0.25rem;
+  text-align: left;
+}
+
+.store-channel-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.45);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  text-align: left;
+}
+
+.store-channel-option:hover:not(:disabled) {
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(30, 41, 59, 0.55);
+  transform: translateY(-1px);
+}
+
+.store-channel-option:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.store-channel-option--gateway:not(:disabled) {
+  border-color: rgba(245, 158, 11, 0.28);
+}
+
+.store-channel-option__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.store-channel-option__title {
+  font-size: 0.88rem;
+}
+
+.store-channel-option__detail {
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .store-channel-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .hidden { display: none !important; }
 
 .visually-hidden {
@@ -2208,6 +2271,14 @@ a.topbar__tool {
 .store-card__cta--blocked {
   cursor: default;
   color: var(--danger);
+}
+
+.store-card__cta--alt {
+  color: #fbbf24;
+}
+
+.store-card--clickable:hover .store-card__cta--alt {
+  color: #fde68a;
 }
 
 .store-card__offline-note {

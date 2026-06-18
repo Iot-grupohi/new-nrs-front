@@ -12,7 +12,10 @@
     stopHeartbeatMonitor,
     machineMetaTitle,
     normalizeMachineStatus,
+    verifyStoreGatewayLed,
+    formatGatewayCacheAge,
   } = window.Lav60;
+  const panelFetch = window.Lav60Auth?.panelFetch;
   let offlineDurationTimer = null;
   let refreshInFlight = false;
   let allStores = [];
@@ -25,6 +28,8 @@
   let pageAbort = null;
   let storesBootstrapped = false;
   let currentPageMode = null;
+  let channelPickerGeneration = 0;
+  let channelModalReady = false;
 
   const KPI_PANEL_CONFIG = {
     'stores-online': {
@@ -245,10 +250,15 @@
     const ctaHtml =
       operable
         ? `<div class="store-card__cta">
-          <span>${suspended ? 'Abrir e operar localmente' : 'Abrir painel da loja'}</span>
+          <span>${suspended ? 'Abrir e operar localmente' : 'Escolher canal de operação'}</span>
           <span class="store-card__cta-icon" aria-hidden="true">→</span>
         </div>`
-        : `<div class="store-card__cta store-card__cta--blocked">
+        : !store.loading
+          ? `<div class="store-card__cta store-card__cta--alt">
+          <span>Escolher canal de operação</span>
+          <span class="store-card__cta-icon" aria-hidden="true">→</span>
+        </div>`
+          : `<div class="store-card__cta store-card__cta--blocked">
           <span>${suspended ? 'Aguardando agente' : 'Sem conexão com a loja'}</span>
         </div>`;
 
@@ -312,6 +322,7 @@
     const pct = healthPercent(summary);
     const suspended = isStoreSuspended(store);
     const accessible = store.accessible === true && !store.loading;
+    const canPickChannel = !store.loading;
     const isOfflineAlert = !store.loading && !accessible && !suspended;
     const state = store.loading ? 'unknown' : store.state || 'unreachable';
     const pillState = suspended ? 'suspended' : state;
@@ -324,7 +335,7 @@
       'store-card',
       'store-card--v2',
       `store-card--${suspended ? 'suspended' : state}`,
-      accessible ? 'store-card--clickable' : 'store-card--blocked',
+      canPickChannel ? 'store-card--clickable' : 'store-card--blocked',
       isOfflineAlert ? 'store-card--offline-alert' : '',
       store.loading ? 'store-card--loading' : '',
     ]
@@ -357,13 +368,11 @@
       ${bodyHtml}
     `;
 
-    if (accessible) {
+    if (canPickChannel) {
       card.setAttribute('role', 'button');
       card.setAttribute('tabindex', '0');
-      card.setAttribute('aria-label', `Abrir loja ${storeLabel}`);
-      const open = () => {
-        window.location.href = `store.html?store=${encodeURIComponent(store.id)}`;
-      };
+      card.setAttribute('aria-label', `Operar loja ${storeLabel}`);
+      const open = () => promptStoreChannel(store);
       card.addEventListener('click', open);
       card.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -532,6 +541,195 @@
 
   function storePageHref(storeId) {
     return `store.html?store=${encodeURIComponent(storeId)}`;
+  }
+
+  function gatewayPageHref(storeId) {
+    return `gateway.html?store=${encodeURIComponent(storeId)}`;
+  }
+
+  function findStoreById(storeId) {
+    const sid = String(storeId || '').trim().toLowerCase();
+    return allStores.find((s) => String(s.id).toLowerCase() === sid) || null;
+  }
+
+  function agentChannelSummary(store) {
+    if (!store || store.loading) return { ready: false, label: 'Carregando', detail: 'Aguardando dados do agente' };
+    if (store.accessible) {
+      const online = store.summary?.online ?? 0;
+      const total = store.summary?.total ?? 0;
+      return {
+        ready: true,
+        label: 'Online',
+        detail: total ? `${online} de ${total} equipamentos na rede` : 'Agente respondendo',
+      };
+    }
+    if (store.storeSuspended && !store.accessible) {
+      return { ready: false, label: 'Aguardando', detail: 'Agente offline — loja suspensa' };
+    }
+    if (store.agentUnavailable) {
+      return { ready: false, label: 'Sem agente', detail: noAgentMessage(store.id) };
+    }
+    return {
+      ready: false,
+      label: 'Offline',
+      detail: store.error || 'Agente indisponível no momento',
+    };
+  }
+
+  function hideStoreChannelModal() {
+    channelPickerGeneration += 1;
+    $('storeChannelModal')?.classList.add('hidden');
+  }
+
+  function buildChannelOptionHtml(type, { title, detail, statusLabel, statusClass, disabled, loading }) {
+    const pill = loading
+      ? '<span class="pill pill--warn">Verificando…</span>'
+      : `<span class="pill pill--${statusClass}">${escapeHtml(statusLabel)}</span>`;
+    return `
+      <button type="button" class="store-channel-option store-channel-option--${type}" data-channel="${type}" ${disabled ? 'disabled' : ''}>
+        <span class="store-channel-option__head">
+          <strong class="store-channel-option__title">${escapeHtml(title)}</strong>
+          ${pill}
+        </span>
+        <span class="store-channel-option__detail">${escapeHtml(detail)}</span>
+      </button>`;
+  }
+
+  function renderStoreChannelOptions(store, gatewayState) {
+    const options = $('storeChannelOptions');
+    if (!options) return;
+
+    const agent = agentChannelSummary(store);
+    const gatewayLoading = gatewayState?.loading;
+    const gatewayOnline = gatewayState?.online === true;
+    const gatewayDetail = gatewayLoading
+      ? 'Verificando ESP8266 (POST led/on)…'
+      : gatewayOnline
+        ? `Gateway central online${gatewayState.checkedAt ? ` · ${formatGatewayCacheAge(gatewayState.checkedAt)}` : ''}`
+        : gatewayState?.error || 'Gateway offline ou não configurado';
+
+    options.innerHTML = [
+      buildChannelOptionHtml('agent', {
+        title: 'Agente local',
+        detail: agent.detail,
+        statusLabel: agent.label,
+        statusClass: agent.ready ? 'on' : 'off',
+        disabled: !agent.ready,
+        loading: false,
+      }),
+      buildChannelOptionHtml('gateway', {
+        title: 'Gateway (redundância)',
+        detail: gatewayDetail,
+        statusLabel: gatewayLoading ? 'Verificando' : gatewayOnline ? 'Online' : 'Offline',
+        statusClass: gatewayLoading ? 'warn' : gatewayOnline ? 'on' : 'off',
+        disabled: gatewayLoading || !gatewayOnline,
+        loading: gatewayLoading,
+      }),
+    ].join('');
+  }
+
+  async function openStoreChannelPicker(store) {
+    const modal = $('storeChannelModal');
+    if (!store) return;
+    if (!modal) {
+      window.location.href = storePageHref(store.id);
+      return;
+    }
+    if (!panelFetch) {
+      showToast('Autenticação indisponível', false);
+      return;
+    }
+
+    const gen = ++channelPickerGeneration;
+    const label = store.name ? `${store.name} (${store.id.toUpperCase()})` : store.id.toUpperCase();
+    $('storeChannelTitle').textContent = label;
+    $('storeChannelSubtitle').textContent = 'Escolha como operar esta loja';
+    renderStoreChannelOptions(store, { loading: true });
+    modal.classList.remove('hidden');
+
+    let gatewayState = { loading: false, online: false, error: null, checkedAt: null };
+    try {
+      const result = await verifyStoreGatewayLed(store.id, panelFetch, { force: false });
+      if (gen !== channelPickerGeneration) return;
+      gatewayState = {
+        loading: false,
+        online: result.online,
+        error: result.error,
+        checkedAt: result.checkedAt,
+      };
+    } catch (err) {
+      if (gen !== channelPickerGeneration) return;
+      gatewayState = {
+        loading: false,
+        online: false,
+        error: friendlyUserMessage(err.message),
+        checkedAt: null,
+      };
+    }
+
+    renderStoreChannelOptions(store, gatewayState);
+
+    const agent = agentChannelSummary(store);
+    if (agent.ready) {
+      $('storeChannelSubtitle').textContent = 'Agente local disponível — gateway verificado';
+    } else if (gatewayState.online) {
+      $('storeChannelSubtitle').textContent = 'Agente indisponível — use o gateway de redundância';
+    } else {
+      $('storeChannelSubtitle').textContent = 'Nenhum canal operacional no momento';
+    }
+  }
+
+  function initStoreChannelModal() {
+    if (channelModalReady) return;
+    channelModalReady = true;
+    const modal = $('storeChannelModal');
+    if (!modal) return;
+
+    modal.addEventListener('click', (e) => {
+      if (e.target.closest('[data-channel-dismiss]')) {
+        hideStoreChannelModal();
+        return;
+      }
+      const option = e.target.closest('[data-channel]');
+      if (!option || option.disabled) return;
+      const storeId = modal.dataset.storeId;
+      if (!storeId) return;
+      if (option.dataset.channel === 'agent') {
+        window.location.href = storePageHref(storeId);
+        return;
+      }
+      if (option.dataset.channel === 'gateway') {
+        window.location.href = gatewayPageHref(storeId);
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !modal.classList.contains('hidden')) hideStoreChannelModal();
+    });
+  }
+
+  function promptStoreChannel(store) {
+    initStoreChannelModal();
+    const modal = $('storeChannelModal');
+    if (modal) modal.dataset.storeId = store.id;
+    void openStoreChannelPicker(store);
+  }
+
+  function promptStoreChannelById(storeId) {
+    const store = findStoreById(storeId);
+    if (store) {
+      promptStoreChannel(store);
+      return true;
+    }
+    promptStoreChannel({
+      id: String(storeId || '').trim().toLowerCase(),
+      name: String(storeId || '').toUpperCase(),
+      accessible: false,
+      loading: false,
+      agentUnavailable: true,
+      error: 'Dados do agente indisponíveis',
+    });
+    return false;
   }
 
   function groupDeviceEvents(items) {
@@ -820,6 +1018,17 @@
     if (!root) return;
 
     root.addEventListener('click', (e) => {
+      const storeLink = e.target.closest('a.kpi-event-item__store[href*="store.html"], a.kpi-event-group__store[href*="store.html"]');
+      if (storeLink) {
+        e.preventDefault();
+        try {
+          const storeId = new URL(storeLink.href, window.location.origin).searchParams.get('store');
+          if (storeId) promptStoreChannelById(storeId);
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       const card = e.target.closest('[data-kpi]');
       if (!card) return;
       toggleKpiEventsPanel(card.dataset.kpi);
@@ -912,6 +1121,7 @@
 
     initFilters(signal);
     initKpiEvents(signal);
+    initStoreChannelModal();
 
     if (mode === 'lojas') checkBlockedParam();
 

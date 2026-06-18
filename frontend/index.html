@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LAV60 — Painel</title>
-  <link rel="stylesheet" href="app.css?v=15">
+  <link rel="stylesheet" href="app.css?v=22">
 </head>
 <body class="page-panel page-dashboard auth-pending">
   <div class="app-layout">
@@ -44,10 +44,23 @@
 
   <div id="toast" class="toast hidden" role="status"></div>
 
+  <div id="storeChannelModal" class="confirm-modal confirm-modal--prompt hidden" role="dialog" aria-modal="true" aria-labelledby="storeChannelTitle">
+    <div class="confirm-modal__backdrop" data-channel-dismiss></div>
+    <div class="confirm-modal__box confirm-modal__box--channel">
+      <div class="confirm-modal__icon confirm-modal__icon--prompt" aria-hidden="true">⇄</div>
+      <h2 id="storeChannelTitle" class="confirm-modal__title">Como operar a loja?</h2>
+      <p id="storeChannelSubtitle" class="confirm-modal__message">Verificando canais disponíveis…</p>
+      <div class="store-channel-grid" id="storeChannelOptions"></div>
+      <div class="confirm-modal__actions">
+        <button type="button" class="btn btn--ghost" data-channel-dismiss>Cancelar</button>
+      </div>
+    </div>
+  </div>
+
   <script src="auth.js?v=6"></script>
   <script src="cache.js"></script>
-  <script src="api.js?v=2"></script>
-  <script src="stores.js?v=8"></script>
+  <script src="api.js?v=3"></script>
+  <script src="stores.js?v=9"></script>
   <script src="records.js?v=15"></script>
   <script src="router.js?v=3"></script>
 </body>
