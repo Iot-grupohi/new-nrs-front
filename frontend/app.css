@@ -4162,6 +4162,45 @@ a.topbar__tool {
   font-size: 0.9rem;
 }
 
+.gateway-alert strong {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.gateway-alert p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.gateway-alert--checking {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.1);
+  color: #fde68a;
+}
+
+.page-gateway .devices-panel--blocked {
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+}
+
+.page-gateway .devices-panel:not(.devices-panel--blocked) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.gateway-meta--ok {
+  color: var(--success);
+}
+
+.gateway-meta--err {
+  color: #fca5a5;
+}
+
+.gateway-meta--warn {
+  color: var(--warning);
+}
+
 .gateway-toolbar {
   margin-bottom: 1rem;
   padding: 1rem 1.1rem;

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LAV60 — Gateway (redundância)</title>
-  <link rel="stylesheet" href="app.css?v=18">
+  <link rel="stylesheet" href="app.css?v=19">
 </head>
 <body class="page-dashboard page-store page-gateway auth-pending">
   <div class="app-shell">
@@ -42,6 +42,15 @@
         Token da API central não configurado no servidor. Defina <code>GATEWAY_API_TOKEN</code> ou <code>API_TOKEN</code> no <code>.env</code> do painel.
       </section>
 
+      <section class="gateway-alert hidden" id="storeGatewayAlert" role="alert">
+        <strong>Gateway indisponível</strong>
+        <p id="storeGatewayAlertText">—</p>
+      </section>
+
+      <section class="gateway-alert gateway-alert--checking hidden" id="storeGatewayChecking" role="status">
+        Verificando gateway da loja…
+      </section>
+
       <section class="gateway-toolbar card">
         <div class="gateway-toolbar__row gateway-toolbar__row--store">
           <label class="gateway-field gateway-field--store">
@@ -54,11 +63,11 @@
         <div class="gateway-toolbar__meta">
           <span class="gateway-meta" id="apiHealthMeta">API: —</span>
           <span class="gateway-meta" id="storeMeta">Loja: —</span>
-          <span class="gateway-meta" id="storeEndpointMeta">Endpoint: —</span>
+          <span class="gateway-meta" id="storeGatewayMeta">Gateway loja: —</span>
         </div>
       </section>
 
-      <section class="devices-panel" id="devicesPanel">
+      <section class="devices-panel devices-panel--blocked" id="devicesPanel">
         <div class="devices-panel__section">
           <header class="devices-panel__head">
             <h2 class="devices-panel__title">Lavadoras</h2>
@@ -112,6 +121,6 @@
 
   <script src="api.js"></script>
   <script src="auth.js"></script>
-  <script src="gateway.js?v=19"></script>
+  <script src="gateway.js?v=20"></script>
 </body>
 </html>

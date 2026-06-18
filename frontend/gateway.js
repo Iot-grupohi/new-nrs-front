@@ -20,6 +20,9 @@
   let gatewayConfig = null;
   let catalog = null;
   let currentStore = '';
+  let storeGatewayReady = false;
+  let storeGatewayError = null;
+  let storeCheckGeneration = 0;
   let pingStatus = null;
   let actionBusy = false;
   const probingDevices = new Set();
@@ -68,7 +71,130 @@
   }
 
   function storeSelected() {
-    return Boolean(currentStore);
+    return Boolean(currentStore && storeGatewayReady);
+  }
+
+  function setDevicesPanelBlocked(blocked) {
+    $('devicesPanel')?.classList.toggle('devices-panel--blocked', blocked);
+  }
+
+  function showStoreGatewayChecking(show) {
+    $('storeGatewayChecking')?.classList.toggle('hidden', !show);
+  }
+
+  function showStoreGatewayAlert(message) {
+    const alert = $('storeGatewayAlert');
+    const text = $('storeGatewayAlertText');
+    if (text) text.textContent = message || 'Gateway da loja não está online.';
+    alert?.classList.remove('hidden');
+  }
+
+  function hideStoreGatewayAlert() {
+    $('storeGatewayAlert')?.classList.add('hidden');
+  }
+
+  function updateStoreGatewayMeta(state, detail = '') {
+    const el = $('storeGatewayMeta');
+    if (!el) return;
+    el.className = 'gateway-meta';
+    if (!currentStore || !state) {
+      el.textContent = 'Gateway loja: —';
+      return;
+    }
+    if (state === 'checking') {
+      el.textContent = 'Gateway loja: verificando…';
+      el.classList.add('gateway-meta--warn');
+    } else if (state === 'online') {
+      el.textContent = `Gateway loja: online (${currentStore.toUpperCase()})`;
+      el.classList.add('gateway-meta--ok');
+    } else if (state === 'offline') {
+      el.textContent = detail || `Gateway loja: offline (${currentStore.toUpperCase()})`;
+      el.classList.add('gateway-meta--err');
+    } else {
+      el.textContent = 'Gateway loja: —';
+    }
+  }
+
+  function formatStoreGatewayError(storeId, detail) {
+    const code = String(storeId || '').toUpperCase();
+    const msg = String(detail || '').trim();
+    if (!msg) {
+      return `A loja ${code} não possui gateway online no momento. Apenas lojas com ESP8266 ativo no gateway central podem ser operadas por aqui.`;
+    }
+    if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
+      return `A loja ${code} não está cadastrada no gateway central ou o ESP8266 não está configurado.`;
+    }
+    return `Gateway da loja ${code} não está online. ${friendlyUserMessage(msg)}`;
+  }
+
+  function applyGatewaySummaryToPingStatus(summary) {
+    if (!summary) return;
+    if (!pingStatus) resetPingStatus();
+    ['washers', 'dryers', 'dosers'].forEach((key) => {
+      const block = summary[key];
+      if (!block || typeof block !== 'object') return;
+      Object.entries(block).forEach(([id, val]) => {
+        if (val === true || val === false) pingStatus[key][id] = val;
+      });
+    });
+    if (summary.ac === true || summary.ac === false) {
+      pingStatus.ac = summary.ac;
+    }
+  }
+
+  async function verifyStoreGateway(storeId) {
+    const gen = ++storeCheckGeneration;
+    storeGatewayReady = false;
+    storeGatewayError = null;
+    hideStoreGatewayAlert();
+    showStoreGatewayChecking(true);
+    updateStoreGatewayMeta('checking');
+    setDevicesPanelBlocked(true);
+    renderDevices();
+
+    try {
+      const res = await panelFetch(`/api/gateway/${encodeURIComponent(storeId)}/status-summary`);
+      const data = await res.json().catch(() => ({}));
+      if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
+
+      const gatewayOnline =
+        data.esp_online === true &&
+        (data.status_source === 'aggregate' || data.status_source === 'probes');
+
+      if (gatewayOnline) {
+        storeGatewayReady = true;
+        storeGatewayError = null;
+        applyGatewaySummaryToPingStatus(data);
+        updateStoreGatewayMeta('online');
+        hideStoreGatewayAlert();
+        setDevicesPanelBlocked(false);
+        startBackgroundDeviceProbes();
+        gatewayDebug('Gateway da loja online', { store: storeId, source: data.status_source });
+        return true;
+      }
+
+      storeGatewayError = formatStoreGatewayError(
+        storeId,
+        data.esp_error || data.detail || data.message
+      );
+      showStoreGatewayAlert(storeGatewayError);
+      updateStoreGatewayMeta('offline');
+      setDevicesPanelBlocked(true);
+      gatewayDebug('Gateway da loja offline', { store: storeId, data });
+      return false;
+    } catch (err) {
+      if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
+      storeGatewayError = formatStoreGatewayError(storeId, err.message);
+      showStoreGatewayAlert(storeGatewayError);
+      updateStoreGatewayMeta('offline');
+      setDevicesPanelBlocked(true);
+      return false;
+    } finally {
+      if (gen === storeCheckGeneration) {
+        showStoreGatewayChecking(false);
+        renderDevices();
+      }
+    }
   }
 
   function deviceEndpointPath(deviceType, machine) {
@@ -78,14 +204,6 @@
 
   function fullGatewayPath(subpath) {
     return currentStore ? `${currentStore}/${subpath.replace(/^\//, '')}` : subpath;
-  }
-
-  function updateStoreEndpointMeta() {
-    const el = $('storeEndpointMeta');
-    if (!el) return;
-    el.textContent = currentStore
-      ? `Base: /api/gateway/${currentStore}/…`
-      : 'Endpoint: selecione a loja';
   }
 
   async function loadGatewayConfig() {
@@ -106,6 +224,9 @@
 
   async function gatewayRequest(method, subpath, body, options = {}) {
     if (!currentStore) throw new Error('Selecione uma loja');
+    if (!storeGatewayReady) {
+      throw new Error(storeGatewayError || 'Gateway da loja não está online');
+    }
     const url = `/api/gateway/${encodeURIComponent(currentStore)}/${subpath.replace(/^\//, '')}`;
     const fetchOptions = { method, headers: { Accept: 'application/json' } };
     if (body !== undefined) {
@@ -453,7 +574,7 @@
   }
 
   function startBackgroundDeviceProbes() {
-    if (!currentStore || !gatewayConfig) return;
+    if (!currentStore || !gatewayConfig || !storeGatewayReady) return;
     probeGeneration += 1;
     const generation = probeGeneration;
     probingDevices.clear();
@@ -476,6 +597,10 @@
     if (actionBusy) return;
     if (!currentStore) {
       showToast('Selecione uma loja', false);
+      return;
+    }
+    if (!storeGatewayReady) {
+      showToast(storeGatewayError || 'Gateway da loja não está online', false);
       return;
     }
     actionBusy = true;
@@ -784,13 +909,21 @@
     renderLed();
   }
 
-  function applyStore(next) {
+  async function applyStore(next) {
     next = normalizeStoreId(next);
+    probeGeneration += 1;
+    storeCheckGeneration += 1;
+    storeGatewayReady = false;
+    storeGatewayError = null;
+    probingDevices.clear();
+
     if (!next) {
       currentStore = '';
       $('storeMeta').textContent = 'Loja: —';
-      updateStoreEndpointMeta();
-      probingDevices.clear();
+      hideStoreGatewayAlert();
+      showStoreGatewayChecking(false);
+      updateStoreGatewayMeta(null);
+      setDevicesPanelBlocked(true);
       resetPingStatus();
       renderDevices();
       const url = new URL(window.location.href);
@@ -804,17 +937,17 @@
     const title = meta?.name ? `${meta.name} (${next.toUpperCase()})` : next.toUpperCase();
     $('storeMeta').textContent = `Loja: ${title}`;
     $('storeSelect').value = next;
-    updateStoreEndpointMeta();
     const url = new URL(window.location.href);
     url.searchParams.set('store', next);
     window.history.replaceState({}, '', url);
+    resetPingStatus();
     renderDevices();
-    startBackgroundDeviceProbes();
-    gatewayDebug('Loja selecionada', { store: currentStore });
+    gatewayDebug('Loja selecionada — verificando gateway', { store: currentStore });
+    await verifyStoreGateway(next);
   }
 
   function onStoreSelectChange() {
-    applyStore($('storeSelect').value);
+    void applyStore($('storeSelect').value);
   }
 
   function populateStoreSelect() {
@@ -839,6 +972,7 @@
       catalog = await loadCatalog();
       populateStoreSelect();
       resetPingStatus();
+      setDevicesPanelBlocked(true);
       renderDevices();
     } catch (err) {
       showToast(err.message, false);
@@ -849,7 +983,7 @@
     const initial = normalizeStoreId(new URLSearchParams(window.location.search).get('store'));
     if (initial) {
       $('storeSelect').value = initial;
-      applyStore(initial);
+      void applyStore(initial);
     }
 
     $('storeSelect').addEventListener('change', onStoreSelectChange);
