@@ -581,20 +581,30 @@
     $('storeChannelModal')?.classList.add('hidden');
   }
 
-  function buildChannelOptionHtml(type, { title, detail, statusLabel, statusClass, disabled, loading }) {
+  function buildChannelOptionHtml(type, { title, detail, statusLabel, statusClass, disabled, loading, ready }) {
+    const state = loading ? 'loading' : ready ? 'ready' : 'unavailable';
+    const pillMap = { on: 'ok', off: 'offline', warn: 'partial' };
+    const pillKind = pillMap[statusClass] || 'unknown';
     const pill = loading
-      ? '<span class="pill pill--warn">Verificando…</span>'
-      : `<span class="pill pill--${statusClass}">${escapeHtml(statusLabel)}</span>`;
+      ? '<span class="pill pill--partial">Verificando…</span>'
+      : `<span class="pill pill--${pillKind}">${escapeHtml(statusLabel)}</span>`;
     const icon = type === 'agent' ? '◫' : '⟲';
+    const cta = ready && !loading ? '<span class="store-channel-option__cta">Abrir painel →</span>' : '';
     return `
-      <button type="button" class="store-channel-option store-channel-option--${type}" data-channel="${type}" ${disabled ? 'disabled' : ''}>
-        <span class="store-channel-option__icon" aria-hidden="true">${icon}</span>
-        <span class="store-channel-option__body">
-          <span class="store-channel-option__head">
-            <strong class="store-channel-option__title">${escapeHtml(title)}</strong>
-            ${pill}
+      <button type="button" class="store-channel-option store-channel-option--${type} store-channel-option--${state}" data-channel="${type}" ${disabled ? 'disabled' : ''}>
+        <span class="store-channel-option__accent" aria-hidden="true"></span>
+        <span class="store-channel-option__inner">
+          <span class="store-channel-option__icon-wrap" aria-hidden="true">
+            <span class="store-channel-option__icon">${icon}</span>
           </span>
-          <span class="store-channel-option__detail">${escapeHtml(detail)}</span>
+          <span class="store-channel-option__content">
+            <span class="store-channel-option__head">
+              <strong class="store-channel-option__title">${escapeHtml(title)}</strong>
+              ${pill}
+            </span>
+            <span class="store-channel-option__detail">${escapeHtml(detail)}</span>
+            ${cta}
+          </span>
         </span>
       </button>`;
   }
@@ -620,6 +630,7 @@
         statusClass: agent.ready ? 'on' : 'off',
         disabled: !agent.ready,
         loading: false,
+        ready: agent.ready,
       }),
       buildChannelOptionHtml('gateway', {
         title: 'Gateway (redundância)',
@@ -628,6 +639,7 @@
         statusClass: gatewayLoading ? 'warn' : gatewayOnline ? 'on' : 'off',
         disabled: gatewayLoading || !gatewayOnline,
         loading: gatewayLoading,
+        ready: gatewayOnline && !gatewayLoading,
       }),
     ].join('');
   }
