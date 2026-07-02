@@ -57,9 +57,9 @@
         <header class="gateway-overview__head">
           <div>
             <h2 class="gateway-overview__title">Gateways por loja</h2>
-            <p class="gateway-overview__meta" id="gatewayOverviewMeta">Status do gateway de redundância por loja</p>
+            <p class="gateway-overview__meta" id="gatewayOverviewMeta">Somente lojas já verificadas · abra uma loja para testar o gateway</p>
           </div>
-          <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshGateways">Atualizar tudo</button>
+          <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshGateways">Atualizar painel</button>
         </header>
         <div class="stats-grid stats-grid--gateway" id="gatewayKpis">
           <article class="stat-card stat-card--success stat-card--clickable" data-kpi="gateway-online" tabindex="0" role="button" aria-expanded="false" aria-controls="gatewayKpiPanel">
@@ -71,7 +71,7 @@
             <strong class="stat-card__value" id="kpiGatewayOffline">—</strong>
           </article>
           <article class="stat-card stat-card--warn stat-card--clickable" data-kpi="gateway-pending" tabindex="0" role="button" aria-expanded="false" aria-controls="gatewayKpiPanel">
-            <span class="stat-card__label">Aguardando</span>
+            <span class="stat-card__label">Sem verificação</span>
             <strong class="stat-card__value" id="kpiGatewayPending">—</strong>
           </article>
         </div>
@@ -155,7 +155,7 @@
   <script src="auth.js"></script>
   <script src="device-ui.js?v=1"></script>
   <script src="audit.js?v=2"></script>
-  <script src="gateway-overview.js?v=2"></script>
-  <script src="gateway.js?v=35"></script>
+  <script src="gateway-overview.js?v=3"></script>
+  <script src="gateway.js?v=36"></script>
 </body>
 </html>

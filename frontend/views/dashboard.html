@@ -61,9 +61,9 @@
     <header class="gateway-overview__head dashboard-panel__head">
       <div>
         <h2 class="dashboard-panel__title">Redundância (gateway)</h2>
-        <p class="dashboard-panel__meta" id="gatewayOverviewMeta">Status do gateway de redundância por loja</p>
+        <p class="dashboard-panel__meta" id="gatewayOverviewMeta">Somente lojas já verificadas · abra uma loja para testar o gateway</p>
       </div>
-      <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshGateways">Atualizar</button>
+      <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshGateways">Atualizar painel</button>
     </header>
     <div class="stats-grid stats-grid--gateway stats-grid--dashboard-gateway" id="gatewayKpis">
       <article class="stat-card stat-card--success stat-card--clickable" data-kpi="gateway-online" tabindex="0" role="button" aria-expanded="false" aria-controls="gatewayKpiPanel">
@@ -75,7 +75,7 @@
         <strong class="stat-card__value" id="kpiGatewayOffline">—</strong>
       </article>
       <article class="stat-card stat-card--warn stat-card--clickable" data-kpi="gateway-pending" tabindex="0" role="button" aria-expanded="false" aria-controls="gatewayKpiPanel">
-        <span class="stat-card__label">Aguardando</span>
+        <span class="stat-card__label">Sem verificação</span>
         <strong class="stat-card__value" id="kpiGatewayPending">—</strong>
       </article>
     </div>

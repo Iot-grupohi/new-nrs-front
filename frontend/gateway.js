@@ -157,6 +157,10 @@
     window.Lav60GatewayOverview?.render();
   }
 
+  function syncGatewayOverviewStore(storeId, entry) {
+    window.Lav60GatewayOverview?.noteStoreStatus?.(storeId, entry);
+  }
+
   async function postStoreLedOn(storeId) {
     const sid = normalizeStoreId(storeId);
     const res = await panelFetch(`/api/gateway/${encodeURIComponent(sid)}/led/on`, {
@@ -267,8 +271,8 @@
         hideStoreGatewayAlert();
         setDevicesPanelBlocked(false);
         gatewayDebug('ESP8266 em cache (online)', { store: storeId, age: formatCacheAge(cached.checkedAt) });
+        syncGatewayOverviewStore(storeId, cached);
         startBackgroundDeviceProbes({ force });
-        refreshGatewayOverview();
         renderDevices();
         return true;
       }
@@ -276,6 +280,7 @@
       showStoreGatewayAlert(storeGatewayError);
       updateStoreGatewayMeta('offline');
       setDevicesPanelBlocked(true);
+      syncGatewayOverviewStore(storeId, cached);
       refreshGatewayOverview();
       renderDevices();
       return false;
@@ -302,6 +307,7 @@
         gatewayDebug('ESP8266 respondeu (led/on)', { store: storeId, data });
 
         revertStoreLedTest(storeId);
+        syncGatewayOverviewStore(storeId, { online: true, error: null, checkedAt: Date.now() });
         startBackgroundDeviceProbes({ force });
         refreshGatewayOverview();
         return true;
@@ -310,6 +316,11 @@
       const detail = data.detail || data.error || data.message || `HTTP ${status}`;
       storeGatewayError = formatStoreGatewayError(storeId, detail);
       setStoreGatewayEntry(storeId, { online: false, error: storeGatewayError });
+      syncGatewayOverviewStore(storeId, {
+        online: false,
+        error: storeGatewayError,
+        checkedAt: Date.now(),
+      });
       showStoreGatewayAlert(storeGatewayError);
       updateStoreGatewayMeta('offline');
       setDevicesPanelBlocked(true);
@@ -320,6 +331,11 @@
       if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
       storeGatewayError = formatStoreGatewayError(storeId, err.message);
       setStoreGatewayEntry(storeId, { online: false, error: storeGatewayError });
+      syncGatewayOverviewStore(storeId, {
+        online: false,
+        error: storeGatewayError,
+        checkedAt: Date.now(),
+      });
       showStoreGatewayAlert(storeGatewayError);
       updateStoreGatewayMeta('offline');
       setDevicesPanelBlocked(true);
@@ -1237,6 +1253,7 @@
   function updateStoreStatusBarVisibility() {
     $('storeStatusBar')?.classList.toggle('hidden', !currentStore);
     $('gatewayNoStore')?.classList.toggle('hidden', Boolean(currentStore));
+    $('gatewayOverview')?.classList.toggle('hidden', Boolean(currentStore));
   }
 
   async function applyStore(next) {
@@ -1302,10 +1319,6 @@
       window.Lav60GatewayOverview?.mount({
         fetchFn: panelFetch,
         getStores: () => catalog?.stores || [],
-        onRefresh: () => {
-          if (currentStore) void verifyStoreGateway(currentStore, { force: true });
-        },
-        skipStores: initial || null,
       });
       if (initial) {
         void applyStore(initial);

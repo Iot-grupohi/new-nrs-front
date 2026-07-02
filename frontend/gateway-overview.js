@@ -22,8 +22,8 @@
       empty: 'Nenhuma loja com gateway offline.',
     },
     'gateway-pending': {
-      title: 'Aguardando verificação',
-      empty: 'Todas as lojas já foram verificadas.',
+      title: 'Sem verificação recente',
+      empty: 'Todas as lojas já foram verificadas antes.',
     },
   };
 
@@ -85,7 +85,7 @@
         error: status?.error,
         checking: Boolean(status?.checking),
       };
-      if (!status || status.checking || status.online == null) pending.push(entry);
+      if (!status || status.online == null) pending.push(entry);
       else if (status.online) online.push(entry);
       else offline.push(entry);
     });
@@ -136,7 +136,7 @@
     return `<ul class="kpi-event-list kpi-event-list--stores">
       ${items
         .map((entry) => {
-          const sub = entry.checking ? 'Verificando…' : 'Aguardando verificação';
+          const sub = entry.checking ? 'Verificando…' : 'Ainda não verificada nesta sessão';
           return `
         <li class="kpi-event-item">
           <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
@@ -205,7 +205,7 @@
     let pending = 0;
     stores.forEach((meta) => {
       const status = overviewStatusForStore(meta.id);
-      if (!status || status.checking || status.online == null) pending += 1;
+      if (!status || status.online == null) pending += 1;
       else if (status.online) online += 1;
       else offline += 1;
     });
@@ -221,10 +221,27 @@
     const el = $('gatewayOverviewMeta');
     if (!el) return;
     if (scanning) {
-      el.textContent = 'Verificando gateways…';
+      el.textContent = 'Atualizando painel…';
       return;
     }
-    el.textContent = 'Status do gateway de redundância por loja';
+    el.textContent = 'Somente lojas já verificadas · abra uma loja para testar o gateway';
+  }
+
+  function noteStoreStatus(storeId, entry = {}) {
+    const sid = normalizeStoreId(storeId);
+    if (!sid) return;
+    storeOverviewStatus[sid] = {
+      online: Boolean(entry.online),
+      error: entry.error || null,
+      checkedAt: entry.checkedAt || Date.now(),
+      checking: false,
+    };
+    render();
+  }
+
+  function refreshFromCache() {
+    hydrateOverviewFromCache();
+    render();
   }
 
   function render() {
@@ -309,9 +326,8 @@
         return;
       }
       if (e.target.closest('#btnRefreshGateways')) {
-        void scanAll({ force: true }).then(() => {
-          if (typeof onRefresh === 'function') onRefresh();
-        });
+        refreshFromCache();
+        if (typeof onRefresh === 'function') onRefresh();
         return;
       }
       const card = e.target.closest('[data-kpi]');
@@ -337,7 +353,6 @@
     bindEvents();
     hydrateOverviewFromCache();
     render();
-    if (fetchFn) void scanAll({ force: false, skipStores: options.skipStores || null });
   }
 
   function destroy() {
@@ -346,5 +361,13 @@
     closeGatewayKpiPanel();
   }
 
-  window.Lav60GatewayOverview = { mount, destroy, render, scanAll, refresh: render };
+  window.Lav60GatewayOverview = {
+    mount,
+    destroy,
+    render,
+    scanAll,
+    noteStoreStatus,
+    refreshFromCache,
+    refresh: render,
+  };
 })();
