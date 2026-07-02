@@ -1284,26 +1284,24 @@
       };
     }
 
-    const res = await fetchFn(`/api/gateway/${encodeURIComponent(sid)}/led/on`, {
-      method: 'POST',
+    const res = await fetchFn(`/api/gateway/${encodeURIComponent(sid)}/status-summary`, {
+      method: 'GET',
       headers: { Accept: 'application/json' },
     });
     const data = await res.json().catch(() => ({}));
 
-    if (res.ok) {
-      const checkedAt = Date.now();
-      setStoreGatewayCacheEntry(sid, { online: true, error: null });
-      fetchFn(`/api/gateway/${encodeURIComponent(sid)}/led/off`, {
-        method: 'POST',
-        headers: { Accept: 'application/json' },
-      }).catch(() => {});
-      return { online: true, error: null, fromCache: false, checkedAt };
+    if (!res.ok) {
+      const detail = data.detail || data.error || data.message || `HTTP ${res.status}`;
+      const error = formatStoreGatewayError(sid, detail);
+      setStoreGatewayCacheEntry(sid, { online: false, error });
+      return { online: false, error, fromCache: false, checkedAt: Date.now() };
     }
 
-    const detail = data.detail || data.error || data.message || `HTTP ${res.status}`;
-    const error = formatStoreGatewayError(sid, detail);
-    setStoreGatewayCacheEntry(sid, { online: false, error });
-    return { online: false, error, fromCache: false, checkedAt: Date.now() };
+    const online = data.esp_online === true;
+    const detail = data.esp_error || null;
+    const error = online ? null : formatStoreGatewayError(sid, detail);
+    setStoreGatewayCacheEntry(sid, { online, error });
+    return { online, error, fromCache: false, checkedAt: Date.now() };
   }
 
   function syncStoreOfflineSince(cards) {

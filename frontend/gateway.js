@@ -12,6 +12,8 @@
     fetchStoreStatusFromHeartbeat,
     canOperateMachineStatus,
     isDeviceVisibleInFrontend,
+    verifyStoreGatewayLed,
+    formatStoreGatewayError,
   } = window.Lav60;
   const { guardPage, mountUserMenu, panelFetch } = window.Lav60Auth;
 
@@ -157,24 +159,6 @@
     window.Lav60GatewayOverview?.render();
   }
 
-  async function postStoreLedOn(storeId) {
-    const sid = normalizeStoreId(storeId);
-    const res = await panelFetch(`/api/gateway/${encodeURIComponent(sid)}/led/on`, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-    });
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, status: res.status, data };
-  }
-
-  function revertStoreLedTest(storeId) {
-    const sid = normalizeStoreId(storeId);
-    panelFetch(`/api/gateway/${encodeURIComponent(sid)}/led/off`, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-    }).catch(() => {});
-  }
-
   function escapeHtml(text) {
     return String(text ?? '')
       .replace(/&/g, '&amp;')
@@ -239,47 +223,11 @@
     }
   }
 
-  function formatStoreGatewayError(storeId, detail) {
-    const code = String(storeId || '').toUpperCase();
-    const msg = String(detail || '').trim();
-    if (!msg) {
-      return `A loja ${code} não possui redundância disponível no momento.`;
-    }
-    if (msg.toLowerCase().includes('not found') || msg.includes('404')) {
-      return `A loja ${code} não está disponível na redundância.`;
-    }
-    return `Redundância da loja ${code} indisponível. ${friendlyUserMessage(msg)}`;
-  }
-
   async function verifyStoreGateway(storeId, { force = false } = {}) {
     const gen = ++storeCheckGeneration;
     storeGatewayReady = false;
     storeGatewayError = null;
     hideStoreGatewayAlert();
-
-    const cached = getStoreGatewayEntry(storeId);
-    if (!force && cached && isCacheFresh(cached.checkedAt, GATEWAY_TTL_MS)) {
-      if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
-      if (cached.online) {
-        storeGatewayReady = true;
-        storeGatewayError = null;
-        updateStoreGatewayMeta('online');
-        hideStoreGatewayAlert();
-        setDevicesPanelBlocked(false);
-        gatewayDebug('ESP8266 em cache (online)', { store: storeId, age: formatCacheAge(cached.checkedAt) });
-        startBackgroundDeviceProbes({ force });
-        refreshGatewayOverview();
-        renderDevices();
-        return true;
-      }
-      storeGatewayError = cached.error || formatStoreGatewayError(storeId, '');
-      showStoreGatewayAlert(storeGatewayError);
-      updateStoreGatewayMeta('offline');
-      setDevicesPanelBlocked(true);
-      refreshGatewayOverview();
-      renderDevices();
-      return false;
-    }
 
     showStoreGatewayChecking(true);
     updateStoreGatewayMeta('checking');
@@ -287,33 +235,30 @@
     renderDevices();
 
     try {
-      gatewayDebug('Verificando ESP8266', { store: storeId, method: 'POST', path: `${storeId}/led/on` });
+      gatewayDebug('Verificando gateway', { store: storeId, method: 'GET', path: `${storeId}/status-summary` });
 
-      const { ok, status, data } = await postStoreLedOn(storeId);
+      const result = await verifyStoreGatewayLed(storeId, panelFetch, { force });
       if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
 
-      if (ok) {
-        setStoreGatewayEntry(storeId, { online: true, error: null });
+      if (result.online) {
         storeGatewayReady = true;
         storeGatewayError = null;
         updateStoreGatewayMeta('online');
         hideStoreGatewayAlert();
         setDevicesPanelBlocked(false);
-        gatewayDebug('ESP8266 respondeu (led/on)', { store: storeId, data });
+        gatewayDebug('Gateway online', { store: storeId, fromCache: result.fromCache });
 
-        revertStoreLedTest(storeId);
         startBackgroundDeviceProbes({ force });
         refreshGatewayOverview();
         return true;
       }
 
-      const detail = data.detail || data.error || data.message || `HTTP ${status}`;
-      storeGatewayError = formatStoreGatewayError(storeId, detail);
+      storeGatewayError = result.error || formatStoreGatewayError(storeId, '');
       setStoreGatewayEntry(storeId, { online: false, error: storeGatewayError });
       showStoreGatewayAlert(storeGatewayError);
       updateStoreGatewayMeta('offline');
       setDevicesPanelBlocked(true);
-      gatewayDebug('ESP8266 offline (led/on)', { store: storeId, status, data });
+      gatewayDebug('Gateway offline', { store: storeId, error: storeGatewayError });
       refreshGatewayOverview();
       return false;
     } catch (err) {
