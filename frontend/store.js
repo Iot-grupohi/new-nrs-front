@@ -49,6 +49,8 @@
   let washerLocks = {};
   let uiReady = false;
 
+  const $ = (id) => document.getElementById(id);
+
   const confirmUI = Lav60DeviceUI.createConfirmUI({
     $,
     onToast: (message, ok = true) => showToast(message, ok),
@@ -71,8 +73,6 @@
 
   const DRYER_LOCK_STORAGE_KEY = 'lav60_dryer_locks';
   const WASHER_LOCK_STORAGE_KEY = 'lav60_washer_locks';
-
-  const $ = (id) => document.getElementById(id);
 
   function showOperatorError(label, error) {
     const msg = error?.message || String(error || '');
