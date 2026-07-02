@@ -64,7 +64,7 @@
   let probeQueueRunner = null;
 
   const GATEWAY_CACHE_KEY = 'lav60:gateway:v1';
-  const GATEWAY_CACHE_VERSION = 1;
+  const GATEWAY_CACHE_VERSION = 2;
   const GATEWAY_TTL_MS = 5 * 60 * 1000;
   const DEVICES_TTL_MS = 10 * 60 * 1000;
 
