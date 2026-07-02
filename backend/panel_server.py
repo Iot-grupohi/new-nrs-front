@@ -6,7 +6,7 @@ import os
 import queue
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -27,6 +27,13 @@ from panel_audit import (
     list_audit_operators,
     log_audit_event,
     log_audit_event_async,
+)
+from panel_store_status import (
+    enrich_catalog_stores,
+    firestore_status_available,
+    list_store_statuses,
+    record_agent_seen,
+    record_gateway_status,
 )
 from panel_auth import (
     auth_verify_mode,
@@ -386,7 +393,11 @@ def catalog_stores_from_heartbeats() -> list[dict]:
 def build_panel_catalog_payload() -> dict:
     config = load_catalog()
     payload = {k: v for k, v in config.items() if k != 'stores'}
-    payload['stores'] = catalog_stores_from_heartbeats()
+    stores = catalog_stores_from_heartbeats()
+    payload['stores'] = enrich_catalog_stores(
+        stores,
+        heartbeat_timeout_seconds=heartbeat_timeout_seconds(),
+    )
     return payload
 
 
@@ -437,6 +448,7 @@ def api_heartbeat():
 
     payload_name = str(body.get('store_name') or body.get('name') or store_id.upper()).strip()
     upsert_known_store(store_id, payload_name or store_id.upper())
+    record_agent_seen(store_id, name=payload_name or store_id.upper())
 
     broadcast_sse({
         'type': 'heartbeat',
@@ -852,6 +864,62 @@ def api_gateway_status_summary(store_id: str):
             summary['esp_error'] = None
 
     return jsonify(summary), 200
+
+
+@app.route('/api/gateway/<store_id>/verify', methods=['POST', 'OPTIONS'])
+def api_gateway_verify(store_id: str):
+    """Verifica ESP8266 via led/on e persiste status no banco."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    sid, err = require_registered_store(store_id)
+    if err:
+        return err
+
+    online = False
+    detail: str | None = None
+    try:
+        resp = forward_central_gateway('POST', f'/{sid}/led/on', timeout=20)
+        data = parse_upstream_gateway_json(resp)
+        online = resp.status_code == 200
+        if online:
+            try:
+                forward_central_gateway('POST', f'/{sid}/led/off', timeout=10)
+            except Exception:
+                pass
+        else:
+            detail = str(
+                data.get('detail') or data.get('error') or data.get('message') or f'HTTP {resp.status_code}'
+            ).strip() or f'HTTP {resp.status_code}'
+    except ValueError as exc:
+        return jsonify({'detail': str(exc)}), 503
+    except requests.Timeout as exc:
+        detail = friendly_gateway_transport_error(exc)
+    except requests.RequestException as exc:
+        detail = friendly_gateway_transport_error(exc)
+
+    row = record_gateway_status(
+        sid,
+        online,
+        detail,
+        heartbeat_timeout_seconds=heartbeat_timeout_seconds(),
+    )
+    return jsonify(row), 200
+
+
+@app.route('/api/stores/status', methods=['GET'])
+def api_stores_status():
+    """Status persistido das lojas (agente + gateway)."""
+    stores = catalog_stores_from_heartbeats()
+    store_ids = [s['id'] for s in stores if s.get('id')]
+    items = list_store_statuses(
+        store_ids,
+        heartbeat_timeout_seconds=heartbeat_timeout_seconds(),
+    )
+    return jsonify({
+        'items': items,
+        'firestore': firestore_status_available(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+    }), 200
 
 
 @app.route('/api/gateway/<store_id>/<path:subpath>', methods=['GET', 'POST', 'OPTIONS'])

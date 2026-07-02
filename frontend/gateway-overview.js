@@ -9,6 +9,9 @@
     verifyStoreGatewayLed,
     formatGatewayCacheAge,
     formatStoreGatewayError,
+    fetchStoreStatuses,
+    applyStoreStatusRows,
+    formatOfflineDuration,
     GATEWAY_TTL_MS,
   } = window.Lav60;
 
@@ -84,9 +87,15 @@
         checkedAt: status?.checkedAt,
         error: status?.error,
         checking: Boolean(status?.checking),
+        online: status?.online,
+        agentAlive: status?.agentAlive,
+        agentOfflineSinceMs: status?.agentOfflineSinceMs,
+        gatewayOfflineSinceMs: status?.gatewayOfflineSinceMs,
       };
-      if (!status || status.online == null) pending.push(entry);
-      else if (status.online) online.push(entry);
+      if (!status || status.online == null) {
+        if (status?.agentAlive === false) offline.push(entry);
+        else pending.push(entry);
+      } else if (status.online) online.push(entry);
       else offline.push(entry);
     });
     const sort = (a, b) => a.store.localeCompare(b.store);
@@ -113,14 +122,32 @@
     </ul>`;
   }
 
+  function offlineDetail(entry) {
+    const parts = [];
+    if (entry.agentAlive === false && entry.agentOfflineSinceMs) {
+      parts.push(`Agente offline há ${formatOfflineDuration(entry.agentOfflineSinceMs)}`);
+    }
+    if (entry.online === false) {
+      if (entry.error) parts.push(entry.error);
+      else if (entry.gatewayOfflineSinceMs) {
+        parts.push(`Gateway offline há ${formatOfflineDuration(entry.gatewayOfflineSinceMs)}`);
+      } else {
+        parts.push('Gateway offline');
+      }
+    } else if (entry.agentAlive === false && !parts.length) {
+      parts.push('Agente offline');
+    }
+    return parts.join(' · ') || 'Sem conexão';
+  }
+
   function renderGatewayOfflineEvents(items) {
     if (!items?.length) return '';
     return `<ul class="kpi-event-list kpi-event-list--stores">
       ${items
         .map((entry) => {
           const age = entry.checkedAt ? formatGatewayCacheAge(entry.checkedAt) : '';
-          const reason = entry.error || 'Gateway offline';
-          const sub = age ? `${reason} · ${age}` : reason;
+          const reason = offlineDetail(entry);
+          const sub = age ? `${reason} · verificado ${age}` : reason;
           return `
         <li class="kpi-event-item kpi-event-item--alert">
           <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
@@ -205,8 +232,10 @@
     let pending = 0;
     stores.forEach((meta) => {
       const status = overviewStatusForStore(meta.id);
-      if (!status || status.online == null) pending += 1;
-      else if (status.online) online += 1;
+      if (!status || status.online == null) {
+        if (status?.agentAlive === false) offline += 1;
+        else pending += 1;
+      } else if (status.online) online += 1;
       else offline += 1;
     });
     const onlineEl = $('kpiGatewayOnline');
@@ -239,9 +268,34 @@
     render();
   }
 
+  async function loadOverviewFromServer() {
+    if (!fetchFn || typeof fetchStoreStatuses !== 'function') return;
+    try {
+      const rows = await fetchStoreStatuses(fetchFn);
+      if (typeof applyStoreStatusRows === 'function') applyStoreStatusRows(rows);
+      rows.forEach((row) => {
+        const sid = normalizeStoreId(row?.store);
+        if (!sid) return;
+        storeOverviewStatus[sid] = {
+          online: row.gateway_online === true ? true : (row.gateway_online === false ? false : null),
+          error: row.gateway_error || null,
+          checkedAt: row.gateway_checked_at_ms || null,
+          checking: false,
+          agentAlive: row.agent_alive,
+          agentOfflineSinceMs: row.agent_offline_since_ms || null,
+          gatewayOfflineSinceMs: row.gateway_offline_since_ms || null,
+        };
+      });
+      render();
+    } catch {
+      /* mantém cache local */
+    }
+  }
+
   function refreshFromCache() {
     hydrateOverviewFromCache();
     render();
+    void loadOverviewFromServer();
   }
 
   function render() {
@@ -265,6 +319,7 @@
         error: result.error,
         checkedAt: result.checkedAt,
         checking: false,
+        gatewayOfflineSinceMs: result.online ? null : result.checkedAt,
       };
     } catch (err) {
       const error = formatStoreGatewayError(sid, err.message);
@@ -353,6 +408,7 @@
     bindEvents();
     hydrateOverviewFromCache();
     render();
+    void loadOverviewFromServer();
   }
 
   function destroy() {

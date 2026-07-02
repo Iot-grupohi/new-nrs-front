@@ -994,6 +994,10 @@
           ? noAgentMessage(meta.id)
           : friendlyUserMessage(error)
         : null,
+      agent_offline_since_ms: meta.agent_offline_since_ms ?? null,
+      gateway_online: meta.gateway_online ?? null,
+      gateway_error: meta.gateway_error ?? null,
+      gateway_offline_since_ms: meta.gateway_offline_since_ms ?? null,
       ...extra,
     };
     return normalizeCardAccess(card);
@@ -1200,7 +1204,7 @@
   }
 
   const GATEWAY_CACHE_KEY = 'lav60:gateway:v1';
-  const GATEWAY_CACHE_VERSION = 3;
+  const GATEWAY_CACHE_VERSION = 4;
   const GATEWAY_TTL_MS = 5 * 60 * 1000;
 
   function loadGatewayCacheRoot() {
@@ -1284,26 +1288,47 @@
       };
     }
 
-    const res = await fetchFn(`/api/gateway/${encodeURIComponent(sid)}/led/on`, {
+    const res = await fetchFn(`/api/gateway/${encodeURIComponent(sid)}/verify`, {
       method: 'POST',
       headers: { Accept: 'application/json' },
     });
     const data = await res.json().catch(() => ({}));
 
-    if (res.ok) {
-      const checkedAt = Date.now();
-      setStoreGatewayCacheEntry(sid, { online: true, error: null });
-      fetchFn(`/api/gateway/${encodeURIComponent(sid)}/led/off`, {
-        method: 'POST',
-        headers: { Accept: 'application/json' },
-      }).catch(() => {});
-      return { online: true, error: null, fromCache: false, checkedAt };
+    if (!res.ok) {
+      const detail = data.detail || data.error || data.message || `HTTP ${res.status}`;
+      const error = formatStoreGatewayError(sid, detail);
+      setStoreGatewayCacheEntry(sid, { online: false, error });
+      return { online: false, error, fromCache: false, checkedAt: Date.now() };
     }
 
-    const detail = data.detail || data.error || data.message || `HTTP ${res.status}`;
-    const error = formatStoreGatewayError(sid, detail);
-    setStoreGatewayCacheEntry(sid, { online: false, error });
-    return { online: false, error, fromCache: false, checkedAt: Date.now() };
+    const online = data.gateway_online === true;
+    const error = online ? null : formatStoreGatewayError(sid, data.gateway_error);
+    const checkedAt = data.gateway_checked_at_ms || Date.now();
+    setStoreGatewayCacheEntry(sid, { online, error });
+    return { online, error, fromCache: false, checkedAt };
+  }
+
+  async function fetchStoreStatuses(fetchFn) {
+    if (typeof fetchFn !== 'function') return [];
+    const res = await fetchFn('/api/stores/status', {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return [];
+    return Array.isArray(data.items) ? data.items : [];
+  }
+
+  function applyStoreStatusRows(rows) {
+    if (!Array.isArray(rows)) return;
+    rows.forEach((row) => {
+      const sid = normalizeStoreId(row?.store);
+      if (!sid || row.gateway_checked_at_ms == null) return;
+      setStoreGatewayCacheEntry(sid, {
+        online: row.gateway_online === true,
+        error: row.gateway_error || null,
+      });
+    });
   }
 
   function syncStoreOfflineSince(cards) {
@@ -1315,11 +1340,16 @@
       if (card.loading) return;
 
       if (!card.accessible) {
-        if (!map[card.id]) {
+        const serverSince = card.agent_offline_since_ms;
+        if (serverSince) {
+          card.offlineSince = serverSince;
+        } else if (!map[card.id]) {
           map[card.id] = now;
           changed = true;
+          card.offlineSince = map[card.id];
+        } else {
+          card.offlineSince = map[card.id];
         }
-        card.offlineSince = map[card.id];
       } else if (map[card.id]) {
         delete map[card.id];
         changed = true;
@@ -2475,6 +2505,8 @@
     formatGatewayCacheAge,
     formatStoreGatewayError,
     verifyStoreGatewayLed,
+    fetchStoreStatuses,
+    applyStoreStatusRows,
     GATEWAY_TTL_MS,
   };
 })();
