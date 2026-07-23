@@ -1,0 +1,25 @@
+[Unit]
+Description=LAV60 Painel (frontend + API FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/lav60-panel
+EnvironmentFile=/root/lav60-panel/.env
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/root/lav60-panel/.venv/bin/gunicorn \
+    -w 1 \
+    --worker-class uvicorn.workers.UvicornWorker \
+    -b 127.0.0.1:3000 \
+    --access-logfile - \
+    --error-logfile - \
+    --timeout 0 \
+    --keep-alive 65 \
+    backend.panel_server:app
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
