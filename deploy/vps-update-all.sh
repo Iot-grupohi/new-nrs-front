@@ -52,6 +52,12 @@ echo "==> Removendo artefatos do Firebase antigo (hipag-02)"
 rm -f "$APP_DIR/hipag-02-firebase-adminsdk-fbsvc-888378701a.json" 2>/dev/null || true
 rm -f "$APP_DIR/service-account.json" 2>/dev/null || true
 
+echo "==> Restaurando registry de monitoramento (VPS/Database)"
+mkdir -p "$APP_DIR/backend/panel/data"
+if [[ -f "$APP_DIR/deploy/infra_registry.json" ]]; then
+  cp "$APP_DIR/deploy/infra_registry.json" "$APP_DIR/backend/panel/data/infra_registry.json"
+fi
+
 systemctl restart lav60-panel
 sleep 2
 
@@ -61,6 +67,7 @@ curl -s "http://127.0.0.1:3000/api/auth/config" | python3 -c "import sys,json; d
 curl -s "http://127.0.0.1:3000/api/audit/status" | python3 -m json.tool || true
 echo ""
 curl -s "http://127.0.0.1:3000/api/audit/logs?limit=3" | python3 -c "import sys,json; d=json.load(sys.stdin); print('logs:', len(d.get('items') or []), 'available:', d.get('available'))" || true
+curl -s "http://127.0.0.1:3000/api/infra/metrics?window=3600&include_databases=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print('infra vps:', len(d.get('vps') or []), 'databases:', len(d.get('databases') or []))" || true
 echo ""
 git log -1 --oneline
 systemctl is-active lav60-panel

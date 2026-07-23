@@ -18,6 +18,7 @@ DO_API_BASE = "https://api.digitalocean.com/v2"
 METRICS_INTERVAL_SEC = 300
 DB_POLL_INTERVAL_SEC = 60
 REGISTRY_PATH = DATA_DIR / "infra_registry.json"
+DEPLOY_REGISTRY_PATH = Path(__file__).resolve().parent.parent / "deploy" / "infra_registry.json"
 _DB_HISTORY_PATH = DATA_DIR / "db_metrics_history.json"
 _VPS_STORE_PATH = DATA_DIR / "vps_metrics_store.json"
 _DB_STORE_PATH = DATA_DIR / "db_metrics_store.json"
@@ -155,8 +156,31 @@ def _read_stored_registry() -> dict[str, list[str]]:
     }
 
 
+def _env_id_list(key: str) -> list[str]:
+    raw = env_value(key)
+    if not raw:
+        return []
+    return [part.strip() for part in raw.replace(";", ",").split(",") if part.strip()]
+
+
+def _bootstrap_registry_if_empty(stored: dict[str, list[str]]) -> dict[str, list[str]]:
+    if stored["host_ids"] or stored["db_ids"]:
+        return stored
+    if not DEPLOY_REGISTRY_PATH.is_file():
+        return stored
+    data = read_json_file(DEPLOY_REGISTRY_PATH, _default_registry()) or _default_registry()
+    payload = {
+        "host_ids": [str(x).strip() for x in data.get("host_ids") or [] if str(x).strip()],
+        "db_ids": [str(x).strip() for x in data.get("db_ids") or [] if str(x).strip()],
+    }
+    if payload["host_ids"] or payload["db_ids"]:
+        save_registry(payload)
+        return payload
+    return stored
+
+
 def load_registry() -> dict[str, list[str]]:
-    stored = _read_stored_registry()
+    stored = _bootstrap_registry_if_empty(_read_stored_registry())
     host_ids = list(stored["host_ids"])
     db_ids = list(stored["db_ids"])
     env_host = env_value("HOST_ID")
@@ -165,6 +189,12 @@ def load_registry() -> dict[str, list[str]]:
         host_ids.insert(0, env_host)
     if env_db and env_db not in db_ids:
         db_ids.insert(0, env_db)
+    for hid in _env_id_list("INFRA_HOST_IDS"):
+        if hid not in host_ids:
+            host_ids.append(hid)
+    for did in _env_id_list("INFRA_DB_IDS"):
+        if did not in db_ids:
+            db_ids.append(did)
     return {"host_ids": host_ids, "db_ids": db_ids}
 
 
