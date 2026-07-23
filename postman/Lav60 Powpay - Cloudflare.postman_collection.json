@@ -1,0 +1,958 @@
+{
+  "info": {
+    "_postman_id": "8c7b1977-8503-4f84-87c7-a30ef23631be",
+    "name": "Lav60 Powpay - Cloudflare",
+    "description": "API do agente de loja exposta via **Cloudflare Tunnel** em `https://{loja}.powpay.com.br`.\n\nVia servidor unificado: `{{serverUrl}}/powpay/{{storeCode}}/...`\n\n## Variáveis\n| Variável | Exemplo | Descrição |\n|----------|---------|------------|\n| `serverUrl` | `http://127.0.0.1:3100` | Servidor local unificado |\n| `storeCode` | `pb05` | Código da loja (minúsculas) |\n| `token` | `CLOUDFLARE_API_TOKEN` | Header `X-Token` |\n| `washerId` / `dryerId` / `doserId` | `321` / `765` / `321` | IDs numéricos |\n\n## Autenticação\nHeader `X-Token: {{token}}` nas rotas operacionais quando `API_TOKEN` estiver configurado no agente.\n\nRotas públicas (sem token): `/`, `/health`, `/api/health`, `/api/agent/config`, `/debug`, `/tunnel-status`, `/api/tunnel-status`, `/tunnel-test`.\n\n## Importante\n- Use sempre **HTTPS** em produção — requisições `http://` são redirecionadas e **POST pode perder o corpo JSON**.\n- Trocar de loja: altere só `storeCode`.\n\nDocumentação: `docs/guides/controle-remoto-powpay.md`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "6806954"
+  },
+  "item": [
+    {
+      "name": "1 — Saúde & metadados",
+      "item": [
+        {
+          "name": "GET / (info serviço)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                ""
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /health",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/health",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/health",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/api/health",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/agent/config",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/api/agent/config",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "api",
+                "agent",
+                "config"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /debug",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/debug",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "debug"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Rotas públicas — não exigem X-Token."
+    },
+    {
+      "name": "2 — Status & rede",
+      "item": [
+        {
+          "name": "GET /{store}/status (completo)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/status",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /{store}/status/washer/{id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/status/washer/{{washerId}}",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "status",
+                "washer",
+                "{{washerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /{store}/status/dryer/{id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/status/dryer/{{dryerId}}",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "status",
+                "dryer",
+                "{{dryerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /{store}/status/doser/{id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/status/doser/{{doserId}}",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "status",
+                "doser",
+                "{{doserId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /{store}/status/ac",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/status/ac",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "status",
+                "ac"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /{store}/devices (IPs)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/devices",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "devices"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/devices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/api/devices",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "api",
+                "devices"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/network-status (todos)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/api/network-status",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "api",
+                "network-status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/network-status?machine&type",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/api/network-status?machine={{washerId}}&type=washer",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "api",
+                "network-status"
+              ],
+              "query": [
+                {
+                  "key": "machine",
+                  "value": "{{washerId}}"
+                },
+                {
+                  "key": "type",
+                  "value": "washer"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /ping-status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/ping-status",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "ping-status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /{store}/doser/{id}/device-status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/device-status",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "device-status"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3 — Comandos (POST)",
+      "item": [
+        {
+          "name": "POST lavadora",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"am\": \"am01-1\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/washer/{{washerId}}",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "washer",
+                "{{washerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST lavadora (sem dosagem)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/washer/{{washerId}}",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "washer",
+                "{{washerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST secadora (30 min)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minutes\": 30\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/dryer/{{dryerId}}",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "dryer",
+                "{{dryerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST secadora (15 min)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minutes\": 15\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/dryer/{{dryerId}}",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "dryer",
+                "{{dryerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST secadora (45 min)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minutes\": 45\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/dryer/{{dryerId}}",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "dryer",
+                "{{dryerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST ar-condicionado (22°C)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temperature\": \"22\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/ac",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "ac"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST ar-condicionado (desligar)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temperature\": \"off\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/ac",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "ac"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Liberação de equipamentos na rede local da loja."
+    },
+    {
+      "name": "4 — Dosadora",
+      "item": [
+        {
+          "name": "POST dosadora (type)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"softener1\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST dosadora — bomba sabão (rele1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pump\": 1\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/bomba",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "bomba"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST dosadora — bomba floral (rele2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pump\": 2\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/bomba",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "bomba"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST dosadora — amaciante (number)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"number\": 1\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/amaciante",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "amaciante"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST dosadora — dosagem am01-1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endpoint\": \"am01-1\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/dosagem",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "dosagem"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET dosadora — consulta tempos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/consulta",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "consulta"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST dosadora — settime sabão",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seconds\": 5.5\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/settime/sabao",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "settime",
+                "sabao"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST dosadora — settime floral",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seconds\": 3\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/settime/floral",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "settime",
+                "floral"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST dosadora — settime sport",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seconds\": 3\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/settime/sport",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "settime",
+                "sport"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints HTTP das dosadoras ESP8266. Ver docs/DOSADORAS.md."
+    },
+    {
+      "name": "5 — Túnel Cloudflare",
+      "item": [
+        {
+          "name": "GET /tunnel-status",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/tunnel-status",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "tunnel-status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/tunnel-status",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/api/tunnel-status",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "api",
+                "tunnel-status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /tunnel-test",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/tunnel-test",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "tunnel-test"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /tunnel-monitoring",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/powpay/{{storeCode}}/tunnel-monitoring",
+              "host": [
+                "{{serverUrl}}/powpay/{{storeCode}}"
+              ],
+              "path": [
+                "tunnel-monitoring"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Diagnóstico do túnel cloudflared na loja."
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "value",
+        "value": "{{token}}",
+        "type": "string"
+      },
+      {
+        "key": "key",
+        "value": "X-Token",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "serverUrl",
+      "value": "http://127.0.0.1:3100"
+    },
+    {
+      "key": "storeCode",
+      "value": "pb05"
+    },
+    {
+      "key": "token",
+      "value": "COLE_SEU_API_TOKEN_AQUI"
+    },
+    {
+      "key": "washerId",
+      "value": "321"
+    },
+    {
+      "key": "dryerId",
+      "value": "765"
+    },
+    {
+      "key": "doserId",
+      "value": "321"
+    }
+  ]
+}

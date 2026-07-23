@@ -1,0 +1,645 @@
+{
+  "info": {
+    "name": "Lav60 App API",
+    "description": "Collection da API Lavanderia 60 Minutos — baseada em endpoints.md",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://sistema.lavanderia60minutos.com.br" },
+    { "key": "api_token", "value": "" },
+    { "key": "access_token", "value": "" },
+    { "key": "email", "value": "" },
+    { "key": "password", "value": "" },
+    { "key": "admin_id", "value": "" },
+    { "key": "store_code", "value": "LOJA01" },
+    { "key": "tax_id", "value": "12345678000199" },
+    { "key": "device_name", "value": "Postman" },
+    { "key": "order_id", "value": "1" },
+    { "key": "invoice_id", "value": "1" },
+    { "key": "delivery_address_id", "value": "1" },
+    { "key": "payment_id", "value": "" },
+    { "key": "omie_customer_id", "value": "" },
+    { "key": "omie_order_id", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.request.headers.upsert({ key: 'X-Token', value: pm.collectionVariables.get('api_token') });"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "01 - Autenticação",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const j = pm.response.json();",
+                  "  pm.collectionVariables.set('access_token', j.access_token);",
+                  "  if (j.admin?.data?.id) pm.collectionVariables.set('admin_id', j.admin.data.id);",
+                  "  if (j.admin?.data?.stores?.[0]?.code) pm.collectionVariables.set('store_code', j.admin.data.stores[0].code);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/sign_in/authenticate_multi_account?email={{email}}&password={{password}}"
+          }
+        },
+        {
+          "name": "Registrar device name",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{base_url}}/api/v1/sign_in/access_token/device_name?device_name={{device_name}}"
+          }
+        },
+        {
+          "name": "Token notificação push",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"token_notification\": \"fcm_token_exemplo\"\n}"
+            },
+            "url": "{{base_url}}/api/v1/sign_in/token_notification"
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - Usuários",
+      "item": [
+        {
+          "name": "Cadastro",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nome Completo\",\n  \"email\": \"novo@email.com\",\n  \"password\": \"senha123\"\n}"
+            },
+            "url": "{{base_url}}/users"
+          }
+        },
+        {
+          "name": "Atualizar perfil",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Novo Nome\"\n}"
+            },
+            "url": "{{base_url}}/users/"
+          }
+        },
+        {
+          "name": "Upload avatar",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [{ "key": "avatar", "type": "file", "src": "" }]
+            },
+            "url": "{{base_url}}/users/avatar"
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Admin e Lojas",
+      "item": [
+        {
+          "name": "Admin por ID",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/admins/by_admin_id?admin_id={{admin_id}}"
+          }
+        },
+        {
+          "name": "Lojas por admin",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/stores/by_admin_id?admin_id={{admin_id}}"
+          }
+        },
+        {
+          "name": "Company ID (suporte)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/stores/get_company_id?store_code={{store_code}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Dashboard",
+      "item": [
+        {
+          "name": "Receita anual",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/revenues/by_admin_id?admin_id={{admin_id}}&revenue_type=yearly&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Receita mensal",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/revenues/by_admin_id?admin_id={{admin_id}}&revenue_type=monthly&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Receita últimos 12 meses",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/revenues/by_admin_id?admin_id={{admin_id}}&revenue_type=last_12_month&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Média últimos 12 meses",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/revenues/by_admin_id?admin_id={{admin_id}}&revenue_type=average_last_12_month&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Série últimos 12 meses",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/revenues/by_admin_id/last_12_months?admin_id={{admin_id}}&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Status contrato",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/home/by_admin_id/status_store_contract?admin_id={{admin_id}}&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Status limpeza",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/home/by_admin_id/status_store_cleaner?admin_id={{admin_id}}&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Frequência clientes",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/home/by_admin_id/customer_frequency?admin_id={{admin_id}}&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Gênero clientes",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/home/by_admin_id/customer_gender?admin_id={{admin_id}}&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Idade clientes",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/home/by_admin_id/customer_age?admin_id={{admin_id}}&store_code={{store_code}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 - Financeiro",
+      "item": [
+        {
+          "name": "Vendas",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/sales/by_admin_id?admin_id={{admin_id}}&month=7&year=2026&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Total vendas",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/sales/total_value/by_admin_id?admin_id={{admin_id}}&month=7&year=2026&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Compras de crédito",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/credit_purchases/by_admin_id?admin_id={{admin_id}}&day=14&month=7&year=2026&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Total créditos",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/credit_purchases/total_value/by_admin_id?admin_id={{admin_id}}&day=14&month=7&year=2026&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Despesas",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/stores/expenditures/by_admin_id?admin_id={{admin_id}}&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Despesas (filtro mês/ano)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/stores/expenditures/by_admin_id?admin_id={{admin_id}}&month=7&year=2026&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Faturamento anual (detalhe)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/revenues/by_admin_id?admin_id={{admin_id}}&revenue_type=yearly&year=2026&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Faturamento mensal (detalhe)",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/revenues/by_admin_id?admin_id={{admin_id}}&revenue_type=monthly&month=7&year=2026&store_code={{store_code}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 - Faturas",
+      "item": [
+        {
+          "name": "Listar faturas",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/invoices/by_admin_id?admin_id={{admin_id}}&store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Faturas não pagas",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/invoices/by_admin_id?admin_id={{admin_id}}&store_code={{store_code}}&status=not_paid"
+          }
+        },
+        {
+          "name": "Faturas vencidas",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/invoices/by_admin_id?admin_id={{admin_id}}&store_code={{store_code}}&status=overdue"
+          }
+        },
+        {
+          "name": "Status fatura",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/invoices?invoice_id={{invoice_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 - Notificações",
+      "item": [
+        {
+          "name": "Listar notificações",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/notifications?store_code={{store_code}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 - Máquinas e Blynk",
+      "item": [
+        {
+          "name": "Listar máquinas",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/machines?store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Atualizar tempo dosagem",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"store_code\": \"{{store_code}}\",\n  \"name\": \"432\",\n  \"time_dosage\": \"30\"\n}"
+            },
+            "url": "{{base_url}}/api/v1/machines/update/dosage"
+          }
+        },
+        {
+          "name": "Limpar dosadora",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/blynk/dosage_pump_clear?store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Ativar dosadora",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/blynk/dosage_pump_activate?store_code={{store_code}}&machine=432&pump=1"
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 - Sale HiPlim",
+      "item": [
+        {
+          "name": "Produtos fixos",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/sale_hi_plim/products/fixed_products"
+          }
+        },
+        {
+          "name": "Listar produtos",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/sale_hi_plim/products?page=1&per_page=20&active=true"
+          }
+        },
+        {
+          "name": "Listar pedidos",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/sale_hi_plim/orders?admin_id={{admin_id}}&store_code={{store_code}}&page=1&per_page=20"
+          }
+        },
+        {
+          "name": "Pedido por ID",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/sale_hi_plim/orders/{{order_id}}"
+          }
+        },
+        {
+          "name": "Criar pedido",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"admin_id\": \"{{admin_id}}\",\n  \"store_code\": \"{{store_code}}\",\n  \"items\": [\n    { \"product_code\": \"12345\", \"quantity\": 2, \"unit_price\": 29.90 }\n  ]\n}"
+            },
+            "url": "{{base_url}}/api/v1/sale_hi_plim/orders/create_order"
+          }
+        },
+        {
+          "name": "Atualizar pedido",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "order_id", "value": "{{order_id}}" },
+                { "key": "admin_id", "value": "{{admin_id}}" },
+                { "key": "store_code", "value": "{{store_code}}" },
+                { "key": "items[][product_code]", "value": "12345" },
+                { "key": "items[][quantity]", "value": "2" },
+                { "key": "items[][unit_price]", "value": "29.90" }
+              ]
+            },
+            "url": "{{base_url}}/api/v1/sale_hi_plim/orders/update_order"
+          }
+        },
+        {
+          "name": "Listar endereços",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/sale_hi_plim/delivery_addresses?store_code={{store_code}}"
+          }
+        },
+        {
+          "name": "Endereço por ID",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/sale_hi_plim/delivery_addresses/{{delivery_address_id}}"
+          }
+        },
+        {
+          "name": "Criar endereço",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"store_code\": \"{{store_code}}\",\n  \"company_name\": \"Razão Social\",\n  \"street\": \"Rua Exemplo\",\n  \"number\": \"100\",\n  \"neighborhood\": \"Centro\",\n  \"zipcode\": \"01310100\",\n  \"state\": \"SP\",\n  \"city\": \"São Paulo\",\n  \"phone\": \"11999999999\"\n}"
+            },
+            "url": "{{base_url}}/api/v1/sale_hi_plim/delivery_addresses"
+          }
+        },
+        {
+          "name": "Atualizar endereço",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"11988887777\"\n}"
+            },
+            "url": "{{base_url}}/api/v1/sale_hi_plim/delivery_addresses/{{delivery_address_id}}"
+          }
+        },
+        {
+          "name": "Excluir endereço",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/sale_hi_plim/delivery_addresses/{{delivery_address_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 - Omie",
+      "item": [
+        {
+          "name": "Consultar cliente por CNPJ",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"page\": 1,\n  \"resgister_by_page\": 1,\n  \"omie_customer_cnpj\": \"{{tax_id}}\"\n}"
+            },
+            "url": "{{base_url}}/api/v1/omies/consult_customer_by_cnpj"
+          }
+        },
+        {
+          "name": "Atualizar cliente",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"codigo_cliente_omie\": {{omie_customer_id}},\n  \"enderecoEntrega\": {\n    \"entRazaoSocial\": \"Nome\",\n    \"entEndereco\": \"Rua\",\n    \"entNumero\": \"100\",\n    \"entBairro\": \"Centro\",\n    \"entCEP\": \"01310100\",\n    \"entEstado\": \"SP\",\n    \"entCidade\": \"São Paulo\",\n    \"entSepararEndereco\": \"S\",\n    \"entTelefone\": \"11999999999\"\n  }\n}"
+            },
+            "url": "{{base_url}}/api/v1/omies/update_customer"
+          }
+        },
+        {
+          "name": "Consultar produtos",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"produto_servico_list_request\": {\n    \"page\": 1,\n    \"resgister_by_page\": 50\n  }\n}"
+            },
+            "url": "{{base_url}}/api/v1/omies/consult_products"
+          }
+        },
+        {
+          "name": "Cliente por taxId",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/omies/client/{{tax_id}}"
+          }
+        },
+        {
+          "name": "Consultar pedidos",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"page\": 1,\n  \"resgister_by_page\": 1000,\n  \"omie_customer_id\": {{omie_customer_id}}\n}"
+            },
+            "url": "{{base_url}}/api/v1/omies/consult_orders"
+          }
+        },
+        {
+          "name": "Consultar pedido",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"omie_order_id\": {{omie_order_id}}\n}"
+            },
+            "url": "{{base_url}}/api/v1/omies/consult_order"
+          }
+        },
+        {
+          "name": "Atualizar pedido Omie",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order_id\": \"{{order_id}}\",\n  \"admin_id\": \"{{admin_id}}\",\n  \"store_code\": \"{{store_code}}\",\n  \"body_order\": {\n    \"cabecalho\": { \"codigo_pedido\": {{omie_order_id}}, \"quantidade_itens\": 1 },\n    \"frete\": { \"codigo_transportadora\": 123, \"quantidade_volumes\": 1, \"modalidade\": \"0\", \"outras_despesas\": 0 },\n    \"informacoes_adicionais\": { \"codigo_categoria\": \"1.01.03\", \"codigo_conta_corrente\": 9797285866, \"consumidor_final\": \"S\", \"enviar_email\": \"N\" },\n    \"det\": []\n  }\n}"
+            },
+            "url": "{{base_url}}/api/v1/omies/update_order"
+          }
+        },
+        {
+          "name": "Transportadora por cidade/UF",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/omies/transporter_by_state?city_and_state=São Paulo (SP)"
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 - Pagamentos",
+      "item": [
+        {
+          "name": "Gerar PIX HiPlim",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 150.00,\n  \"order_number\": \"12345\",\n  \"code_order_number\": \"ABC123\",\n  \"store_code\": \"{{store_code}}\"\n}"
+            },
+            "url": "{{base_url}}/api/v1/payments/hiplim_pix"
+          }
+        },
+        {
+          "name": "Status PIX HiPlim",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/payments/status_hiplim_pix?payment_id={{payment_id}}&order_number=12345&order_number_integration=67890&code_order_number=ABC123"
+          }
+        },
+        {
+          "name": "Pagamento cartão HiPlim",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_cnpj\": \"{{tax_id}}\",\n  \"customer_name\": \"Nome Cartão\",\n  \"store_code\": \"{{store_code}}\",\n  \"amount\": \"154.47\",\n  \"code_order_number\": \"ABC123\",\n  \"order_number\": \"12345\",\n  \"order_number_integration\": \"67890\",\n  \"card_name\": \"Nome Cartão\",\n  \"card_number\": \"4111111111111111\",\n  \"card_month\": \"12\",\n  \"card_year\": \"2028\",\n  \"card_cvv\": \"123\",\n  \"card_billing_address_street\": \"Rua\",\n  \"card_billing_address_number\": \"100\",\n  \"card_billing_address_neighborhood\": \"Centro\",\n  \"card_billing_address_zip_code\": \"01310100\",\n  \"card_billing_address_city\": \"São Paulo\",\n  \"card_billing_address_state\": \"SP\",\n  \"pay_installments\": \"1\",\n  \"other_expenses\": \"4.47\"\n}"
+            },
+            "url": "{{base_url}}/api/v1/payments/card_hiplim"
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 - APIs Externas",
+      "item": [
+        {
+          "name": "ViaCEP",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": "https://viacep.com.br/ws/01310100/json/"
+          }
+        },
+        {
+          "name": "DBFrete Login",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "url": "https://dbfreteapi.dyndns-web.com/login"
+          }
+        },
+        {
+          "name": "DBFrete Tracking",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": "https://dbfreteapi.dyndns-web.com/ocorrencias/tracking/CHAVE_ACESSO"
+          }
+        }
+      ]
+    }
+  ]
+}

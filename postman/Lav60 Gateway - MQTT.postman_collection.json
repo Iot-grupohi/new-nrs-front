@@ -1,0 +1,944 @@
+{
+  "info": {
+    "_postman_id": "5bd73a84-c504-4352-a84e-52d04aa301ec",
+    "name": "Lav60 Gateway - MQTT",
+    "description": "API de controle remoto via **MQTT** — lavadoras, secadoras, ar-condicionado e dosadoras.\n\n**Via servidor unificado:** `{{serverUrl}}/gateway/{{storeCode}}/...`  \n**Direto:** `https://gateway.lav60.com` · [Swagger](https://gateway.lav60.com/docs)\n\nDocumentação: `docs/guides/controle-remoto-gateway.md`\n\n## Variáveis\n| Variável | Exemplo | Descrição |\n|----------|---------|------------|\n| `serverUrl` | `http://127.0.0.1:3100` | Servidor local unificado |\n| `storeCode` | `pb05` | Código da loja (minúsculas) |\n| `token` | `GATEWAY_API_TOKEN` | Header `X-Token` |\n| `washerId` / `dryerId` / `doserId` | `321` / `765` / `432` | IDs numéricos |\n\n## Autenticação\nTodos os endpoints **exceto** `GET /` exigem:\n```\nX-Token: {{token}}\n```\n\nPOST com body JSON exige também `Content-Type: application/json`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "6806954"
+  },
+  "item": [
+    {
+      "name": "Saúde",
+      "item": [
+        {
+          "name": "GET / (online)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/gateway/",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                ""
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Status",
+      "item": [
+        {
+          "name": "GET /{store}/status (todos)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/status",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /{store}/status/washer/{id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/status/washer/{{washerId}}",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "status",
+                "washer",
+                "{{washerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /{store}/status/dryer/{id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/status/dryer/{{dryerId}}",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "status",
+                "dryer",
+                "{{dryerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /{store}/status/doser/{id}",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/status/doser/{{doserId}}",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "status",
+                "doser",
+                "{{doserId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /{store}/status/ac",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/status/ac",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "status",
+                "ac"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "LED",
+      "item": [
+        {
+          "name": "POST /{store}/led/on",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/led/on",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "led",
+                "on"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /{store}/led/off",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/led/off",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "led",
+                "off"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /{store}/led (command ON)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"command\": \"ON\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/led",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "led"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /{store}/led (command OFF)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"command\": \"OFF\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/led",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "led"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Comandos",
+      "item": [
+        {
+          "name": "POST lavadora (liberar)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/washer/{{washerId}}",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "washer",
+                "{{washerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST lavadora + dosagem AM",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"am\": \"am01-1\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/washer/{{washerId}}",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "washer",
+                "{{washerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST secadora (15 min)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minutes\": 15\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/dryer/{{dryerId}}",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "dryer",
+                "{{dryerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST secadora (30 min)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minutes\": 30\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/dryer/{{dryerId}}",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "dryer",
+                "{{dryerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST secadora (45 min)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minutes\": 45\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/dryer/{{dryerId}}",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "dryer",
+                "{{dryerId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST ar-condicionado (22°C)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temperature\": \"22\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/ac",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "ac"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST ar-condicionado (18°C)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temperature\": \"18\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/ac",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "ac"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST ar-condicionado (desligar)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"temperature\": \"off\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/ac",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "ac"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Dosadora",
+      "item": [
+        {
+          "name": "POST dosadora (type softener1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"softener1\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST dosadora (type am01-1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"am01-1\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST dosadora (type rele1on)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"rele1on\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST amaciante (number 2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"number\": 2\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/amaciante",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "amaciante"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST amaciante (endpoint softener2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endpoint\": \"softener2\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/amaciante",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "amaciante"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST dosagem (am02-1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endpoint\": \"am02-1\"\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/dosagem",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "dosagem"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST bomba (pump 1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pump\": 1\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/bomba",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "bomba"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST bomba (pump 2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pump\": 2\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/bomba",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "bomba"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST bomba (pump 3)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pump\": 3\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/bomba",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "bomba"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET consulta tempos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/consulta",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "consulta"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET device-status (HTTP dosadora)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/device-status",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "device-status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST settime (rele + seconds)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rele\": 1,\n  \"seconds\": 11\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/settime",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "settime"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST settime/sabao",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seconds\": 11\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/settime/sabao",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "settime",
+                "sabao"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST settime/floral",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seconds\": 13\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/settime/floral",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "settime",
+                "floral"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST settime/sport",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seconds\": 12\n}"
+            },
+            "url": {
+              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/settime/sport",
+              "host": [
+                "{{serverUrl}}/gateway"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "doser",
+                "{{doserId}}",
+                "settime",
+                "sport"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "value",
+        "value": "{{token}}",
+        "type": "string"
+      },
+      {
+        "key": "key",
+        "value": "X-Token",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "serverUrl",
+      "value": "http://127.0.0.1:3100"
+    },
+    {
+      "key": "storeCode",
+      "value": "pb05"
+    },
+    {
+      "key": "token",
+      "value": "COLE_SEU_GATEWAY_API_TOKEN_AQUI"
+    },
+    {
+      "key": "washerId",
+      "value": "321"
+    },
+    {
+      "key": "dryerId",
+      "value": "765"
+    },
+    {
+      "key": "doserId",
+      "value": "432"
+    }
+  ]
+}

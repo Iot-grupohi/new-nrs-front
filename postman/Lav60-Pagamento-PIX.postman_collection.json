@@ -1,0 +1,162 @@
+{
+  "info": {
+    "_postman_id": "a7b8c9d0-e1f2-3456-0123-567890123456",
+    "name": "Lav60 - Pagamento PIX",
+    "description": "Collection para **gerar pagamento PIX** (HiPag) e compra de crédito.\n\n## Fluxo\n\n1. Configure variáveis (`x_token`, credenciais, `store_code`, `pix_amount`).\n2. **Login com CPF** → salva JWT.\n3. **Criar PIX** → retorna QR Code.\n\nRequer loja com HiBank configurado.\n\nDocumentação: `docs/guides/pagamento-pix.md`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "serverUrl",
+      "value": "http://127.0.0.1:3100"
+    },
+    {
+      "key": "x_token",
+      "value": "SEU_X_TOKEN",
+      "type": "string"
+    },
+    {
+      "key": "tax_id_number",
+      "value": "05791897405",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "sua_senha",
+      "type": "string"
+    },
+    {
+      "key": "pix_amount",
+      "value": "50.00",
+      "type": "string"
+    },
+    {
+      "key": "coupon_code",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "product_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customer_jwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "pix_payment_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "storeCode",
+      "value": "pb05"
+    }
+  ],
+  "item": [
+    {
+      "name": "Passo 1 — Login",
+      "item": [
+        {
+          "name": "Login com CPF",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data ?? {};",
+                  "    pm.collectionVariables.set('customer_jwt', data.token);",
+                  "    pm.test('JWT salvo', () => pm.expect(data.token).to.not.be.empty);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tax_id_number\": \"{{tax_id_number}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{serverUrl}}/totem/api/v1/customers/auth/login"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Passo 2 — PIX",
+      "item": [
+        {
+          "name": "Criar PIX",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "if (!pm.collectionVariables.get('customer_jwt')) {",
+                  "    console.warn('⚠ Execute Login com CPF primeiro.');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data ?? pm.response.json();",
+                  "    pm.collectionVariables.set('pix_payment_id', data.id ?? '');",
+                  "    pm.test('PIX criado', () => pm.expect(data.pix_qr_code || data.id).to.exist);",
+                  "    console.log('ID:', data.id, '| Status:', data.status, '| R$', data.amount);",
+                  "    if (data.pix_qr_code) console.log('PIX:', data.pix_qr_code.slice(0, 60) + '...');",
+                  "} else if (pm.response.code === 400) {",
+                  "    console.warn('400: verifique HiBank da loja ou credenciais HiPag');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customer_jwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"store_code\": \"{{storeCode}}\",\n  \"amount\": {{pix_amount}},\n  \"product_id\": \"{{product_id}}\",\n  \"coupon_code\": \"{{coupon_code}}\"\n}"
+            },
+            "url": "{{serverUrl}}/totem/api/v1/payments/pix_to_hipag",
+            "description": "Remove campos vazios (`product_id`, `coupon_code`) manualmente se não usar."
+          }
+        }
+      ]
+    }
+  ]
+}

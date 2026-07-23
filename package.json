@@ -1,0 +1,26 @@
+{
+  "name": "lav60-api-clients",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "powershell -ExecutionPolicy Bypass -File ./serve.ps1",
+    "start": "powershell -ExecutionPolicy Bypass -File ./serve.ps1",
+    "login": "node scripts/totem/login.js",
+    "account": "node scripts/totem/account.js",
+    "access": "node scripts/totem/access.js",
+    "stores": "node scripts/totem/stores.js",
+    "products": "node scripts/totem/products.js",
+    "coupon": "node scripts/totem/coupon.js",
+    "pix": "node scripts/totem/pix.js",
+    "pix:check": "node scripts/totem/pix-check.js",
+    "sale": "node scripts/totem/sale.js",
+    "sales:history": "node scripts/totem/sales-history.js",
+    "oauth:test": "node scripts/totem/oauth-test.js",
+    "postman:generate": "node scripts/postman/generate-unified-postman.js",
+    "postman:simplify": "node scripts/postman/simplify-postman-vars.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7"
+  }
+}

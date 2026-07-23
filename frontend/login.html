@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAV60 — Entrar</title>
+  <link rel="dns-prefetch" href="https://www.gstatic.com">
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://identitytoolkit.googleapis.com">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body class="page-dashboard page-login">
+  <div class="app-shell">
+    <header class="topbar topbar--dashboard">
+      <div class="topbar__row">
+        <div class="topbar__brand">
+          <div class="topbar__logo" aria-hidden="true">L60</div>
+          <div class="topbar__identity">
+            <span class="topbar__eyebrow">Painel central</span>
+            <h1 class="topbar__title">LAV60 Gateway</h1>
+          </div>
+        </div>
+      </div>
+      <div class="topbar__meta">
+        <p class="topbar__subtitle">Acesso ao monitoramento das lojas</p>
+      </div>
+    </header>
+
+    <main class="main-content login-page">
+      <section class="panel panel--login">
+        <div class="settings-panel__head">
+          <h2>Entrar</h2>
+          <p class="settings-panel__lead">Use o e-mail e a senha cadastrados para acessar o painel operacional.</p>
+        </div>
+
+        <form id="loginForm" class="login-form" novalidate>
+          <div class="settings-section login-form__section">
+            <div class="panel__grid">
+              <label class="field field--wide">
+                <span>E-mail</span>
+                <input type="email" id="loginEmail" autocomplete="username" required placeholder="seu@email.com">
+              </label>
+              <label class="field field--wide">
+                <span>Senha</span>
+                <input type="password" id="loginPassword" autocomplete="current-password" required placeholder="••••••••">
+              </label>
+            </div>
+            <p id="loginError" class="login-form__error hidden" role="alert"></p>
+            <div class="login-form__actions">
+              <button type="submit" id="loginSubmit" class="btn btn--primary">Entrar</button>
+            </div>
+          </div>
+        </form>
+
+        <p id="loginHint" class="login-card__hint hidden"></p>
+      </section>
+    </main>
+  </div>
+
+  <script src="auth.js?v=7"></script>
+  <script src="login.js?v=2"></script>
+</body>
+</html>

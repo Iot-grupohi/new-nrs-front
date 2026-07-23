@@ -1,0 +1,428 @@
+{
+  "info": {
+    "_postman_id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+    "name": "Lav60 - Acesso à Conta do Cliente",
+    "description": "Collection para o fluxo de **acesso à conta do cliente** (CPF + senha → consulta de saldo e dados).\n\n## Fluxo recomendado\n\n1. Configure as variáveis da collection:\n   - `base_url`\n   - `x_token`\n   - `tax_id_number` e `password` (ou `email` e `password`)\n2. Execute **Login com CPF** (ou **Login com Email**).\n3. O JWT é salvo automaticamente em `customer_jwt`.\n4. Execute **Obter Conta do Cliente**.\n\n## Runner (fluxo automático)\n\nSelecione a pasta **Fluxo completo** → Run → os dois passos rodam em sequência.\n\n## Autenticação\n\n| Passo | Headers necessários |\n|-------|---------------------|\n| Login | `X-Token` |\n| Consulta conta | `X-Token` + `Authorization: Bearer {{customer_jwt}}` |\n\n## URL base\n\n```\nhttps://staging.lavanderia60minutos.com.br\n```\n\n> Domínio correto: **lavanderia** (com **a**), não lavenderia.\n\nDocumentação: `docs/guides/acesso-conta-cliente.md`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "serverUrl",
+      "value": "http://127.0.0.1:3100"
+    },
+    {
+      "key": "x_token",
+      "value": "SEU_X_TOKEN",
+      "type": "string"
+    },
+    {
+      "key": "tax_id_number",
+      "value": "05791897405",
+      "type": "string"
+    },
+    {
+      "key": "email",
+      "value": "joao.silva@example.com",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "sua_senha",
+      "type": "string"
+    },
+    {
+      "key": "customer_jwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customer_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customer_email",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "token_expires_at",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "storeCode",
+      "value": "pb05"
+    }
+  ],
+  "item": [
+    {
+      "name": "Passo 1 — Login",
+      "description": "Autentica o cliente e obtém JWT válido por 30 minutos.\n\nConfigure `tax_id_number` + `password` **ou** `email` + `password` nas variáveis da collection.",
+      "item": [
+        {
+          "name": "Login com CPF",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    const data = json.data ?? {};",
+                  "",
+                  "    pm.collectionVariables.set('customer_jwt', data.token);",
+                  "    pm.collectionVariables.set('customer_id', data.id);",
+                  "    pm.collectionVariables.set('customer_email', data.email ?? '');",
+                  "    pm.collectionVariables.set('token_expires_at', data.time ?? '');",
+                  "",
+                  "    pm.test('Login OK — JWT salvo', function () {",
+                  "        pm.expect(data.token).to.be.a('string').and.not.empty;",
+                  "        pm.expect(data.id).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "",
+                  "    console.log('Cliente ID :', data.id);",
+                  "    console.log('Email      :', data.email);",
+                  "    console.log('Expira em  :', data.time);",
+                  "    console.log('Próximo passo: execute \"Obter Conta do Cliente\"');",
+                  "} else if (pm.response.code === 401) {",
+                  "    pm.test('401 — verifique X-Token', function () {",
+                  "        pm.expect.fail('X-Token ausente ou inválido');",
+                  "    });",
+                  "} else if (pm.response.code === 404) {",
+                  "    pm.test('404 — cliente não encontrado', function () {",
+                  "        pm.expect.fail('CPF ou credenciais incorretos');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tax_id_number\": \"{{tax_id_number}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/customers/auth/login",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "**Passo 1 do fluxo de acesso à conta.**\n\nAutentica o cliente usando CPF/CNPJ e senha.\n\n### Body\n\n| Campo | Obrigatório | Descrição |\n|-------|-------------|----------|\n| `tax_id_number` | Sim* | CPF ou CNPJ |\n| `password` | Sim | Senha do cliente |\n\n*Use email **ou** CPF — nunca ambos.\n\n### Resposta\n\nSalva automaticamente:\n- `customer_jwt`\n- `customer_id`\n- `customer_email`\n- `token_expires_at`"
+          },
+          "response": []
+        },
+        {
+          "name": "Login com Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    const data = json.data ?? {};",
+                  "",
+                  "    pm.collectionVariables.set('customer_jwt', data.token);",
+                  "    pm.collectionVariables.set('customer_id', data.id);",
+                  "    pm.collectionVariables.set('customer_email', data.email ?? '');",
+                  "    pm.collectionVariables.set('token_expires_at', data.time ?? '');",
+                  "",
+                  "    pm.test('Login OK — JWT salvo', function () {",
+                  "        pm.expect(data.token).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "",
+                  "    console.log('Cliente ID :', data.id);",
+                  "    console.log('Expira em  :', data.time);",
+                  "} else if (pm.response.code === 401) {",
+                  "    console.warn('401: verifique X-Token');",
+                  "} else if (pm.response.code === 404) {",
+                  "    console.warn('404: email ou senha incorretos');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/customers/auth/login",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Alternativa ao login por CPF — autentica usando **email** e senha.\n\nSalva `customer_jwt` automaticamente para o passo 2."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Passo 2 — Consultar Conta",
+      "description": "Retorna dados completos do cliente autenticado, incluindo saldo de créditos.\n\n**Requer:** executar o Passo 1 antes (JWT em `customer_jwt`).",
+      "item": [
+        {
+          "name": "Obter Conta do Cliente",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const jwt = pm.collectionVariables.get('customer_jwt');",
+                  "",
+                  "if (!jwt) {",
+                  "    console.warn('⚠ customer_jwt vazio — execute \"Login com CPF\" ou \"Login com Email\" primeiro.');",
+                  "} else {",
+                  "    const expires = pm.collectionVariables.get('token_expires_at');",
+                  "    if (expires) {",
+                  "        console.log('JWT expira em:', expires);",
+                  "    }",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    const data = json.data ?? {};",
+                  "    const attrs = data.attributes ?? {};",
+                  "",
+                  "    pm.test('Conta consultada com sucesso', function () {",
+                  "        pm.expect(data.id).to.be.a('string').and.not.empty;",
+                  "        pm.expect(attrs.credits).to.exist;",
+                  "    });",
+                  "",
+                  "    const nome = [attrs['first-name'], attrs['last-name']].filter(Boolean).join(' ');",
+                  "",
+                  "    console.log('\\n--- Conta do cliente ---');",
+                  "    console.log('ID                :', data.id);",
+                  "    console.log('Nome              :', nome);",
+                  "    console.log('Email             :', attrs.email);",
+                  "    console.log('CPF/CNPJ          :', attrs['tax-id-number']);",
+                  "    console.log('Saldo de créditos : R$', attrs.credits);",
+                  "    console.log('Status            :', attrs.status);",
+                  "    console.log('Loja de cadastro  :', attrs['registration-store-code']);",
+                  "    console.log('------------------------\\n');",
+                  "} else if (pm.response.code === 401) {",
+                  "    pm.test('401 — JWT expirado ou inválido', function () {",
+                  "        pm.expect.fail('Execute o login novamente (JWT expira em 30 min)');",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customer_jwt}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/customers/bubble/customer",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "bubble",
+                "customer"
+              ]
+            },
+            "description": "**Passo 2 do fluxo de acesso à conta.**\n\nRetorna dados completos do cliente logado.\n\n### Autenticação (dupla)\n\n```\nX-Token: {{x_token}}\nAuthorization: Bearer {{customer_jwt}}\n```\n\n### Campos principais da resposta\n\n| Campo | Descrição |\n|-------|----------|\n| `attributes.credits` | Saldo de créditos |\n| `attributes.first-name` | Nome |\n| `attributes.last-name` | Sobrenome |\n| `attributes.email` | Email |\n| `attributes.status` | Status da conta |\n| `attributes.registration-store-code` | Loja de cadastro |"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Fluxo completo",
+      "description": "Execute esta pasta com **Collection Runner** (Run in order) para simular o fluxo completo:\n\n1. Login com CPF\n2. Obter Conta do Cliente\n\nConfigure `x_token`, `tax_id_number` e `password` antes de rodar.",
+      "item": [
+        {
+          "name": "1. Login com CPF",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data ?? {};",
+                  "    pm.collectionVariables.set('customer_jwt', data.token);",
+                  "    pm.collectionVariables.set('customer_id', data.id);",
+                  "    pm.collectionVariables.set('customer_email', data.email ?? '');",
+                  "    pm.collectionVariables.set('token_expires_at', data.time ?? '');",
+                  "    pm.test('Login OK', () => pm.expect(data.token).to.not.be.empty);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tax_id_number\": \"{{tax_id_number}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/customers/auth/login",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2. Obter Conta do Cliente",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const attrs = pm.response.json().data.attributes ?? {};",
+                  "    pm.test('Saldo disponível', () => pm.expect(attrs.credits).to.exist);",
+                  "    console.log('Saldo de créditos: R$', attrs.credits);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customer_jwt}}"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/customers/bubble/customer",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "bubble",
+                "customer"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+{
+  "info": {
+    "_postman_id": "e5f6a7b8-c9d0-1234-ef01-345678901234",
+    "name": "Lav60 - Listar Lojas",
+    "description": "Collection para consultar **lojas cadastradas** no sistema.\n\n## Fluxo recomendado\n\n1. Configure `base_url` e `x_token`.\n2. Execute **Listar Lojas** ou **Listar Lojas (ativas)**.\n3. Use o `code` retornado como `store_code` nos próximos passos (produtos, PIX, vendas).\n\nDocumentação: `docs/guides/listar-lojas.md`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "serverUrl",
+      "value": "http://127.0.0.1:3100"
+    },
+    {
+      "key": "x_token",
+      "value": "SEU_X_TOKEN",
+      "type": "string"
+    },
+    {
+      "key": "store_status",
+      "value": "active",
+      "type": "string"
+    },
+    {
+      "key": "storeCode",
+      "value": "pb05"
+    }
+  ],
+  "item": [
+    {
+      "name": "Listar Lojas",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "    const stores = pm.response.json().data ?? [];",
+              "",
+              "    pm.test('Lojas retornadas', function () {",
+              "        pm.expect(stores).to.be.an('array');",
+              "    });",
+              "",
+              "    console.log('\\n--- Lojas ---');",
+              "    stores.slice(0, 20).forEach((s) => {",
+              "        const a = s.attributes ?? {};",
+              "        console.log(`[${a.code}] ${a.name} — ${a.city}/${a.state} (${a.status})`);",
+              "    });",
+              "    if (stores.length > 20) console.log(`... e mais ${stores.length - 20} lojas`);",
+              "",
+              "    if (stores[0]?.attributes?.code) {",
+              "        pm.collectionVariables.set('storeCode', stores[0].attributes.code);",
+              "        console.log('\\nstoreCode salvo:', stores[0].attributes.code);",
+              "    }",
+              "    console.log('-------------\\n');",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Token",
+            "value": "{{x_token}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{serverUrl}}/totem/api/v1/stores",
+          "host": [
+            "{{serverUrl}}/totem"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "stores"
+          ]
+        },
+        "description": "Retorna todas as lojas ordenadas por código.\n\nSalva o primeiro `store_code` na variável da collection."
+      },
+      "response": []
+    },
+    {
+      "name": "Listar Lojas (ativas)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "    const stores = pm.response.json().data ?? [];",
+              "    console.log('Lojas ativas:', stores.length);",
+              "    if (stores[0]?.attributes?.code) {",
+              "        pm.collectionVariables.set('storeCode', stores[0].attributes.code);",
+              "    }",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Token",
+            "value": "{{x_token}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{serverUrl}}/totem/api/v1/stores?status={{store_status}}",
+          "host": [
+            "{{serverUrl}}/totem"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "stores"
+          ],
+          "query": [
+            {
+              "key": "status",
+              "value": "{{store_status}}",
+              "description": "active | suspended | implantation | point | rental | paused | cancellation"
+            }
+          ]
+        },
+        "description": "Filtra lojas por status. Padrão: `active`."
+      },
+      "response": []
+    }
+  ]
+}

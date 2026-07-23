@@ -1,0 +1,63 @@
+<header class="page-header page-header--sites-monitor">
+  <div class="page-header__head">
+    <nav class="page-header__nav" aria-label="Navegação da página">
+      <button type="button" class="page-header__back" data-page-back="dashboard">← Painel LAV60</button>
+    </nav>
+    <h1 class="page-header__title">Monitoramento de sites</h1>
+    <p class="page-header__subtitle" id="sitesMonitorSubtitle">Status e última verificação dos sites</p>
+  </div>
+  <div class="page-header__actions page-header__actions--infra">
+    <button type="button" class="btn btn--sm btn--ghost" id="btnSitesMonitorRefresh">Atualizar</button>
+  </div>
+</header>
+
+<main class="main-content main-content--sites-monitor">
+  <section class="records-audit-banner hidden" id="sitesMonitorBanner" role="alert"></section>
+
+  <section class="sites-monitor-kpis" id="sitesMonitorKpis" aria-label="Resumo">
+    <article class="sites-monitor-kpi">
+      <span class="sites-monitor-kpi__label">Total</span>
+      <strong class="sites-monitor-kpi__value" id="sitesKpiTotal">—</strong>
+    </article>
+    <article class="sites-monitor-kpi sites-monitor-kpi--ok">
+      <span class="sites-monitor-kpi__label">Online</span>
+      <strong class="sites-monitor-kpi__value" id="sitesKpiOnline">—</strong>
+    </article>
+    <article class="sites-monitor-kpi sites-monitor-kpi--danger">
+      <span class="sites-monitor-kpi__label">Offline</span>
+      <strong class="sites-monitor-kpi__value" id="sitesKpiOffline">—</strong>
+    </article>
+    <article class="sites-monitor-kpi sites-monitor-kpi--muted">
+      <span class="sites-monitor-kpi__label">Atualização</span>
+      <strong class="sites-monitor-kpi__value" id="sitesKpiInterval">—</strong>
+    </article>
+  </section>
+
+  <section class="stores-panel sites-monitor-panel">
+    <div class="stores-panel__toolbar">
+      <div class="stores-panel__head">
+        <h2 class="stores-panel__title">Sites monitorados</h2>
+        <span class="stores-panel__meta" id="sitesMonitorMeta">—</span>
+      </div>
+      <div class="stores-panel__controls">
+        <label class="search-field">
+          <span class="visually-hidden">Buscar site</span>
+          <span class="search-field__icon" aria-hidden="true">⌕</span>
+          <input type="search" id="sitesMonitorSearch" placeholder="Buscar por URL ou nome…" autocomplete="off">
+        </label>
+        <div class="filter-chips" id="sitesMonitorFilters" role="tablist">
+          <button type="button" class="chip chip--active" data-sites-filter="all">Todos</button>
+          <button type="button" class="chip" data-sites-filter="online">Online</button>
+          <button type="button" class="chip" data-sites-filter="offline">Offline</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sites-monitor-grid" id="sitesMonitorGrid">
+      <div class="stores-empty-state">
+        <div class="spinner" aria-hidden="true"></div>
+        <p>Carregando sites…</p>
+      </div>
+    </div>
+  </section>
+</main>

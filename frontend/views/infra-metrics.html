@@ -1,0 +1,36 @@
+<header class="page-header page-header--infra">
+  <div class="page-header__head">
+    <h1 class="page-header__title">Infraestrutura</h1>
+    <p class="page-header__subtitle" id="infraMetricsSubtitle">Métricas da VPS SOAP (DigitalOcean)</p>
+  </div>
+  <div class="page-header__actions">
+    <button type="button" class="btn btn--sm btn--ghost" id="btnInfraRefresh">Atualizar</button>
+  </div>
+</header>
+
+<main class="main-content main-content--infra-metrics">
+  <section class="records-audit-banner hidden" id="infraMetricsBanner" role="alert"></section>
+
+  <div class="infra-metrics-toolbar panel">
+    <p class="infra-metrics-toolbar__meta" id="infraMetricsMeta">Carregando…</p>
+  </div>
+
+  <section class="infra-kpi-section hidden" id="infraKpiSection" aria-label="Resumo da VPS">
+    <div class="infra-kpi-head panel" id="infraKpiHead"></div>
+    <div class="infra-kpi-grid" id="infraKpiGrid"></div>
+  </section>
+
+  <div id="infraMetricsLoading" class="credit-reports-content-loading hidden" aria-live="polite">
+    <div class="spinner" aria-hidden="true"></div>
+    <p>Consultando métricas da VPS…</p>
+  </div>
+
+  <section class="infra-metrics-panel" id="infraPanelVps" aria-label="Métricas VPS">
+    <div class="infra-metrics-grid" id="infraVpsGrid"></div>
+    <p class="infra-metrics-empty hidden" id="infraVpsEmpty">Nenhuma VPS configurada (HOST_ID no servidor).</p>
+  </section>
+</main>
+
+<footer class="app-footer">
+  <span>LAV60 · Infraestrutura</span>
+</footer>

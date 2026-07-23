@@ -1,0 +1,312 @@
+{
+  "info": {
+    "_postman_id": "f6a7b8c9-d0e1-2345-f012-456789012345",
+    "name": "Lav60 - Validar Cupom",
+    "description": "Collection para **validar cupom** de um cliente em uma loja.\n\n## Fluxo recomendado\n\n1. Configure `base_url`, `x_token`, `tax_id_number`, `password`, `store_code` e `coupon_code`.\n2. Execute **Login com CPF** → salva `customer_id`.\n3. Execute **Validar Cupom**.\n\nOu use a pasta **Fluxo completo** no Collection Runner.\n\n## Importante\n\n- A validação **não aplica** o cupom — apenas confirma disponibilidade.\n- Após validar, use `coupon_code` no endpoint PIX.\n\nDocumentação: `docs/guides/validar-cupom.md`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "serverUrl",
+      "value": "http://127.0.0.1:3100"
+    },
+    {
+      "key": "x_token",
+      "value": "SEU_X_TOKEN",
+      "type": "string"
+    },
+    {
+      "key": "tax_id_number",
+      "value": "05791897405",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "sua_senha",
+      "type": "string"
+    },
+    {
+      "key": "coupon_code",
+      "value": "ABC1234",
+      "type": "string"
+    },
+    {
+      "key": "customer_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customer_jwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "storeCode",
+      "value": "pb05"
+    }
+  ],
+  "item": [
+    {
+      "name": "Passo 1 — Login",
+      "item": [
+        {
+          "name": "Login com CPF",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data ?? {};",
+                  "    pm.collectionVariables.set('customer_id', data.id);",
+                  "    pm.collectionVariables.set('customer_jwt', data.token);",
+                  "    pm.test('customer_id salvo', () => pm.expect(data.id).to.not.be.empty);",
+                  "    console.log('customer_id:', data.id);",
+                  "    console.log('Próximo passo: Validar Cupom');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tax_id_number\": \"{{tax_id_number}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/customers/auth/login",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Obtém `customer_id` necessário para validar o cupom."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Passo 2 — Validar Cupom",
+      "item": [
+        {
+          "name": "Validar Cupom",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get('customer_id')) {",
+                  "    console.warn('⚠ customer_id vazio — execute Login com CPF primeiro.');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data ?? {};",
+                  "    const attrs = data.attributes ?? {};",
+                  "    pm.test('Cupom válido', () => pm.expect(attrs.code).to.exist);",
+                  "    console.log('\\n--- Cupom válido ---');",
+                  "    console.log('Código    :', attrs.code);",
+                  "    console.log('Tipo      :', attrs['coupon-type']);",
+                  "    console.log('Aplicação :', attrs['apply-method']);",
+                  "    console.log('Valor     : R$', attrs.value);",
+                  "    console.log('Horário   :', attrs.start_time, '-', attrs.end_time);",
+                  "    console.log('--------------------\\n');",
+                  "} else if (pm.response.code === 400) {",
+                  "    console.warn('400: cupom inválido para este cliente/loja');",
+                  "} else if (pm.response.code === 404) {",
+                  "    console.warn('404: cupom ou cliente não encontrado');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"store_code\": \"{{storeCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/coupons/{{coupon_code}}/validate",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coupons",
+                "{{coupon_code}}",
+                "validate"
+              ]
+            },
+            "description": "Valida se o cupom pode ser usado pelo cliente na loja.\n\n**Não aplica o cupom** — use `coupon_code` no PIX após validar."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Fluxo completo",
+      "description": "Run in order: Login → Validar Cupom",
+      "item": [
+        {
+          "name": "1. Login com CPF",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data ?? {};",
+                  "    pm.collectionVariables.set('customer_id', data.id);",
+                  "    pm.test('Login OK', () => pm.expect(data.id).to.not.be.empty);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tax_id_number\": \"{{tax_id_number}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/customers/auth/login",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "2. Validar Cupom",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const attrs = pm.response.json().data.attributes ?? {};",
+                  "    console.log('Cupom OK:', attrs.code, 'R$', attrs.value);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"store_code\": \"{{storeCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/coupons/{{coupon_code}}/validate",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coupons",
+                "{{coupon_code}}",
+                "validate"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

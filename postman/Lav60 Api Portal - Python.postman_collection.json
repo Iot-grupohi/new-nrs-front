@@ -1,0 +1,658 @@
+{
+  "info": {
+    "_postman_id": "24b5f943-d991-44d1-ab99-31a2839b2628",
+    "name": "Lav60 Api Portal - Python",
+    "description": "Proxy local para **sistema.lavanderia60minutos.com.br**\n\n## Configuração\n1. Importe esta coleção no Postman\n2. Em **Variables** da coleção, defina `token` com o valor de `LAV60_API_TOKEN` do `.env`\n3. Inicie o servidor: `python lav60_api_server.py`\n\n## Variáveis\n| Variável | Descrição |\n|----------|------------|\n| `baseUrl` | URL local (padrão `http://127.0.0.1:3100`) |\n| `token` | Token de autenticação (header `X-Token`) |\n| `storeCode` | Código da loja (`UF##`, ex.: PB05) |\n| `startDate` / `endDate` | Período no formato `DD/MM/AAAA` |\n\n## Auth\n- **Health** e **Upstream**: sem autenticação\n- Demais rotas: header `X-Token: {{token}}` (herdado da coleção)\n\n## Respostas de créditos\nConsultas de faturamento incluem `total_credits` (soma em R$ do período ou da página).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "6806954"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health (/health)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/health",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Health (/api/health)",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/health",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Upstream URLs",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/upstream",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "upstream"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Lojas",
+      "item": [
+        {
+          "name": "Códigos ativos (parseado)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/stores/codes",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stores",
+                "codes"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Códigos ativos (forçar cache)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/stores/codes?force=1",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stores",
+                "codes"
+              ],
+              "query": [
+                {
+                  "key": "force",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Códigos ativos (raw Lav60)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/stores/codes?parsed=0",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stores",
+                "codes"
+              ],
+              "query": [
+                {
+                  "key": "parsed",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Detalhe da loja (parseado)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/stores/{{storeCode}}",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stores",
+                "{{storeCode}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Detalhe da loja (raw Lav60)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/stores/{{storeCode}}?parsed=0",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stores",
+                "{{storeCode}}"
+              ],
+              "query": [
+                {
+                  "key": "parsed",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Perfil completo (loja + HiBank)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/stores/{{storeCode}}/profile",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stores",
+                "{{storeCode}}",
+                "profile"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "HiBank",
+      "item": [
+        {
+          "name": "Status HiBank (parseado)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/hi-banks/account?store_code={{storeCode}}",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hi-banks",
+                "account"
+              ],
+              "query": [
+                {
+                  "key": "store_code",
+                  "value": "{{storeCode}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "HiBank (raw Lav60)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/hi-banks/account?store_code={{storeCode}}&raw=1",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "hi-banks",
+                "account"
+              ],
+              "query": [
+                {
+                  "key": "store_code",
+                  "value": "{{storeCode}}"
+                },
+                {
+                  "key": "raw",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Máquinas",
+      "item": [
+        {
+          "name": "Status Lav60 (ok/suspended)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/machines?store_code={{storeCode}}",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "machines"
+              ],
+              "query": [
+                {
+                  "key": "store_code",
+                  "value": "{{storeCode}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Máquinas (raw Lav60)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/machines?store_code={{storeCode}}&raw=1",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "machines"
+              ],
+              "query": [
+                {
+                  "key": "store_code",
+                  "value": "{{storeCode}}"
+                },
+                {
+                  "key": "raw",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Faturamento",
+      "item": [
+        {
+          "name": "Compras — página 1 (parseado + total_credits)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/report_credit_purchases?store_code={{storeCode}}&start_date={{startDate}}&end_date={{endDate}}&page=1&per_page=20",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "report_credit_purchases"
+              ],
+              "query": [
+                {
+                  "key": "store_code",
+                  "value": "{{storeCode}}"
+                },
+                {
+                  "key": "start_date",
+                  "value": "{{startDate}}"
+                },
+                {
+                  "key": "end_date",
+                  "value": "{{endDate}}"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "20"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Compras — raw página 1",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/report_credit_purchases?store_code={{storeCode}}&start_date={{startDate}}&end_date={{endDate}}&raw=1&page=1&per_page=100",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "report_credit_purchases"
+              ],
+              "query": [
+                {
+                  "key": "store_code",
+                  "value": "{{storeCode}}"
+                },
+                {
+                  "key": "start_date",
+                  "value": "{{startDate}}"
+                },
+                {
+                  "key": "end_date",
+                  "value": "{{endDate}}"
+                },
+                {
+                  "key": "raw",
+                  "value": "1"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Compras — período completo (all=1 + total_credits)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/report_credit_purchases?store_code={{storeCode}}&start_date={{startDate}}&end_date={{endDate}}&all=1",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "report_credit_purchases"
+              ],
+              "query": [
+                {
+                  "key": "store_code",
+                  "value": "{{storeCode}}"
+                },
+                {
+                  "key": "start_date",
+                  "value": "{{startDate}}"
+                },
+                {
+                  "key": "end_date",
+                  "value": "{{endDate}}"
+                },
+                {
+                  "key": "all",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Compras — período completo (all=1 raw)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/report_credit_purchases?store_code={{storeCode}}&start_date={{startDate}}&end_date={{endDate}}&raw=1&all=1&per_page=100",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "report_credit_purchases"
+              ],
+              "query": [
+                {
+                  "key": "store_code",
+                  "value": "{{storeCode}}"
+                },
+                {
+                  "key": "start_date",
+                  "value": "{{startDate}}"
+                },
+                {
+                  "key": "end_date",
+                  "value": "{{endDate}}"
+                },
+                {
+                  "key": "raw",
+                  "value": "1"
+                },
+                {
+                  "key": "all",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "100"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resumo / KPIs (summary + total_credits)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/report_credit_purchases/summary?store_code={{storeCode}}&start_date={{startDate}}&end_date={{endDate}}&compare=1",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "report_credit_purchases",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "store_code",
+                  "value": "{{storeCode}}"
+                },
+                {
+                  "key": "start_date",
+                  "value": "{{startDate}}"
+                },
+                {
+                  "key": "end_date",
+                  "value": "{{endDate}}"
+                },
+                {
+                  "key": "compare",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resumo sem comparação",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{serverUrl}}/api/v1/report_credit_purchases/summary?store_code={{storeCode}}&start_date={{startDate}}&end_date={{endDate}}&compare=0",
+              "host": [
+                "{{serverUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "report_credit_purchases",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "store_code",
+                  "value": "{{storeCode}}"
+                },
+                {
+                  "key": "start_date",
+                  "value": "{{startDate}}"
+                },
+                {
+                  "key": "end_date",
+                  "value": "{{endDate}}"
+                },
+                {
+                  "key": "compare",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "value",
+        "value": "{{token}}",
+        "type": "string"
+      },
+      {
+        "key": "key",
+        "value": "X-Token",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "requests": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "serverUrl",
+      "value": "http://127.0.0.1:3100"
+    },
+    {
+      "key": "token",
+      "value": "COLE_SEU_LAV60_API_TOKEN_AQUI"
+    },
+    {
+      "key": "storeCode",
+      "value": "PB05"
+    },
+    {
+      "key": "startDate",
+      "value": "01/07/2026"
+    },
+    {
+      "key": "endDate",
+      "value": "10/07/2026"
+    }
+  ]
+}

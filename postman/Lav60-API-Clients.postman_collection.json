@@ -1,0 +1,794 @@
+{
+  "info": {
+    "_postman_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+    "name": "Lav60 - API Clients",
+    "description": "Collection completa da API Lavanderia 60 Minutos.\n\n## Dois contextos de autenticação\n\n### Totem / Web App\n- Header `X-Token`: token da API\n- Header `Authorization: Bearer {{customer_jwt}}`: JWT do cliente (30 min)\n\n**Fluxo recomendado (totem):**\n1. Configure `x_token`, `store_code` e credenciais do cliente.\n2. Execute **Login Cliente** → salva `customer_jwt` e `customer_id`.\n3. Consulte lojas, produtos e saldo do cliente.\n4. Valide cupom (opcional) → PIX ou venda com créditos.\n\n### Security API (relatórios)\n- OAuth2 `client_credentials` com escopo `report_read`\n\n**Fluxo recomendado (integração backend):**\n1. Configure `client_id` e `client_secret`.\n2. Execute **OAuth2 - Obter Access Token** → salva `access_token`.\n3. Chame endpoints em **Relatórios (OAuth2)**.\n\n## Ambientes\n- **Staging:** `https://staging.lavanderia60minutos.com.br`\n- **Produção:** ajuste `base_url` conforme credencial fornecida.\n\nDocumentação: pasta `docs/`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "serverUrl",
+      "value": "http://127.0.0.1:3100"
+    },
+    {
+      "key": "x_token",
+      "value": "SEU_X_TOKEN",
+      "type": "string"
+    },
+    {
+      "key": "client_id",
+      "value": "SEU_CLIENT_ID",
+      "type": "string"
+    },
+    {
+      "key": "client_secret",
+      "value": "SEU_CLIENT_SECRET",
+      "type": "string"
+    },
+    {
+      "key": "scope",
+      "value": "report_read",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customer_jwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "customer_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "coupon_code",
+      "value": "ABC1234",
+      "type": "string"
+    },
+    {
+      "key": "product_id",
+      "value": "uuid-do-produto",
+      "type": "string"
+    },
+    {
+      "key": "storeCode",
+      "value": "pb05"
+    }
+  ],
+  "item": [
+    {
+      "name": "Autenticação OAuth2 (Security API)",
+      "description": "Fluxo OAuth2 client_credentials para integrações backend com escopo `report_read`.",
+      "item": [
+        {
+          "name": "OAuth2 - Obter Access Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', json.access_token);",
+                  "    pm.test('Token obtido com sucesso', function () {",
+                  "        pm.expect(json.access_token).to.be.a('string').and.not.empty;",
+                  "        pm.expect(json.token_type).to.eql('Bearer');",
+                  "    });",
+                  "    console.log('access_token salvo. Expira em', json.expires_in, 'segundos.');",
+                  "} else {",
+                  "    pm.test('Falha ao obter token', function () {",
+                  "        pm.expect.fail('Status: ' + pm.response.code);",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{client_secret}}",
+                  "type": "text"
+                },
+                {
+                  "key": "scope",
+                  "value": "{{scope}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/oauth/token",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "oauth",
+                "token"
+              ]
+            },
+            "description": "Solicita access token via OAuth2 **client_credentials**.\n\n**Pré-requisitos:** Security API ativa no painel com escopo `report_read`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Autenticação Cliente (Totem)",
+      "description": "Login do cliente no totem. Retorna JWT válido por 30 minutos.",
+      "item": [
+        {
+          "name": "Login Cliente (email)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.collectionVariables.set('customer_jwt', json.data.token);",
+                  "    pm.collectionVariables.set('customer_id', json.data.id);",
+                  "    pm.test('Login realizado com sucesso', function () {",
+                  "        pm.expect(json.data.token).to.be.a('string').and.not.empty;",
+                  "        pm.expect(json.data.id).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "    console.log('customer_jwt e customer_id salvos automaticamente.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"joao.silva@example.com\",\n  \"password\": \"sua_senha\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/customers/auth/login",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Autentica cliente por **email** e senha.\n\nInforme exatamente um: `email` **ou** `tax_id_number` (não ambos).\n\nSalva automaticamente `customer_jwt` e `customer_id`."
+          },
+          "response": []
+        },
+        {
+          "name": "Login Cliente (CPF/CNPJ)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.collectionVariables.set('customer_jwt', json.data.token);",
+                  "    pm.collectionVariables.set('customer_id', json.data.id);",
+                  "    pm.test('Login realizado com sucesso', function () {",
+                  "        pm.expect(json.data.token).to.be.a('string').and.not.empty;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tax_id_number\": \"123.456.789-00\",\n  \"password\": \"sua_senha\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/customers/auth/login",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Autentica cliente por **CPF/CNPJ** e senha.\n\nSalva automaticamente `customer_jwt` e `customer_id`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Lojas",
+      "description": "Listagem de lojas cadastradas no sistema.",
+      "item": [
+        {
+          "name": "Listar Lojas",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/stores",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stores"
+              ]
+            },
+            "description": "Retorna todas as lojas ordenadas por código.\n\n**Query opcional:** `status` — active, suspended, implantation, point, rental, paused, cancellation"
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Lojas (filtro status)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/stores?status=active",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "stores"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "active",
+                  "description": "active | suspended | implantation | point | rental | paused | cancellation"
+                }
+              ]
+            },
+            "description": "Lista lojas filtradas por status."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Produtos",
+      "description": "Catálogo de produtos do totem.",
+      "item": [
+        {
+          "name": "Listar Produtos (totem)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/products",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "products"
+              ]
+            },
+            "description": "Retorna produtos do escopo **totem** (padrão).\n\nInclui `billing-method-name` e `coupon_value` quando aplicável."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Produtos (new_totem + loja)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/products?scope=new_totem&store_code={{storeCode}}",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "scope",
+                  "value": "new_totem",
+                  "description": "totem | virtual_store | new_totem"
+                },
+                {
+                  "key": "store_code",
+                  "value": "{{storeCode}}"
+                }
+              ]
+            },
+            "description": "Produtos com escopo **new_totem**. O `value` pode refletir promoção da loja quando `store_code` é informado."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Clientes",
+      "description": "Dados do cliente autenticado. Requer dupla autenticação (X-Token + JWT).",
+      "item": [
+        {
+          "name": "Obter Cliente Autenticado",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customer_jwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/customers/bubble/customer",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "customers",
+                "bubble",
+                "customer"
+              ]
+            },
+            "description": "Retorna dados completos do cliente logado, incluindo saldo de créditos (`attributes.credits`).\n\nExecute **Login Cliente** antes."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Cupons",
+      "description": "Validação de cupons antes de compras de crédito.",
+      "item": [
+        {
+          "name": "Validar Cupom",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"store_code\": \"{{storeCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/coupons/{{coupon_code}}/validate",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coupons",
+                "{{coupon_code}}",
+                "validate"
+              ]
+            },
+            "description": "Valida se o cupom pode ser usado pelo cliente na loja.\n\n**Não converte** o cupom em crédito — após validar, informe o código nos endpoints de compra.\n\n**Erros:**\n- 404: cliente ou cupom não encontrado\n- 400: cupom inválido para cliente/loja"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Pagamentos",
+      "description": "Pagamento PIX via HiPag para compra de créditos no totem.",
+      "item": [
+        {
+          "name": "PIX to HiPag",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customer_jwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"store_code\": \"{{storeCode}}\",\n  \"amount\": 50.00,\n  \"product_id\": \"{{product_id}}\",\n  \"coupon_code\": \"{{coupon_code}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/payments/pix_to_hipag",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payments",
+                "pix_to_hipag"
+              ]
+            },
+            "description": "Cria pagamento PIX e compra de crédito associada.\n\n**Obrigatório:** `store_code`, `amount`\n**Opcional:** `product_id`, `coupon_code`\n\nRetorna QR Code PIX (`pix_qr_code`, `pix_qr_code_base64`). O `data.id` é usado como `id_ref` da CreditPurchase."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Vendas",
+      "description": "Criação de vendas a partir do totem físico.",
+      "item": [
+        {
+          "name": "Criar Venda Totem",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customer_jwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"store_code\": \"{{storeCode}}\",\n  \"released_machine\": false,\n  \"sale_items\": [\n    {\n      \"value\": \"25.00\",\n      \"quantity\": \"1\",\n      \"product_id\": \"{{product_id}}\",\n      \"soap_type\": \"floral\",\n      \"machines\": [\n        { \"code\": \"M01\" }\n      ]\n    }\n  ],\n  \"payments\": [\n    {\n      \"value\": \"25.00\",\n      \"payment_method\": \"credits\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/sales/totem_sales",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "sales",
+                "totem_sales"
+              ]
+            },
+            "description": "Cria venda no totem: valida saldo, reserva máquinas, debita créditos e agenda ativação.\n\n**Cálculo do total:**\n`total = Σ (value × quantity × número_de_máquinas)`\n\n**soap_type (opcional):** floral, sport, smelless\n**payment_method:** credits, pix, credit_card\n\nEm caso de erro, máquinas reservadas são liberadas automaticamente."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Relatórios (X-Token)",
+      "description": "Relatório de compras de crédito autenticado via X-Token.",
+      "item": [
+        {
+          "name": "Report Credit Purchases",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/report_credit_purchases?store_code={{storeCode}}&start_date=01/01/2024&end_date=31/01/2024&page=1&per_page=20",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "report_credit_purchases"
+              ],
+              "query": [
+                {
+                  "key": "store_code",
+                  "value": "{{storeCode}}",
+                  "description": "Obrigatório"
+                },
+                {
+                  "key": "start_date",
+                  "value": "01/01/2024",
+                  "description": "DD/MM/YYYY — opcional"
+                },
+                {
+                  "key": "end_date",
+                  "value": "31/01/2024",
+                  "description": "DD/MM/YYYY — opcional"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "per_page",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Relatório paginado de compras de crédito por loja e período.\n\n**Datas (DD/MM/YYYY):**\n- Só `start_date`: do início do dia até agora\n- Só `end_date`: últimos 5 anos até fim do dia\n- Ambos: intervalo completo\n- Nenhum: apenas o dia atual"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Relatórios (OAuth2)",
+      "description": "Endpoints protegidos por OAuth2 com escopo `report_read`. Execute **OAuth2 - Obter Access Token** antes.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{access_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Customers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/reports/customers",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "customers"
+              ]
+            },
+            "description": "Relatório de clientes. Requer Bearer token OAuth com escopo `report_read`."
+          },
+          "response": []
+        },
+        {
+          "name": "Credit Purchases",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/reports/credit_purchases",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "credit_purchases"
+              ]
+            },
+            "description": "Relatório de compras de crédito via Security API."
+          },
+          "response": []
+        },
+        {
+          "name": "Sales",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/reports/sales",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "sales"
+              ]
+            },
+            "description": "Relatório de vendas via Security API."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Integrações",
+      "description": "Health check para validar conectividade e credenciais OAuth.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{access_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/integrations/health",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "health"
+              ]
+            },
+            "description": "Verifica saúde da integração. Útil para homologação após obter o token OAuth."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,271 @@
+<header class="page-header page-header--dashboard page-header--split">
+  <div class="page-header__head">
+    <p class="dashboard-eyebrow">Operação em tempo real</p>
+    <h1 class="page-header__title">Dashboard</h1>
+    <p class="page-header__subtitle" id="dashboardSubtitle">Visão geral do monitoramento</p>
+  </div>
+  <div class="dashboard-header__aside">
+    <div class="dashboard-header__status">
+      <span class="dashboard-live-badge dashboard-live-badge--pending" id="dashboardLiveBadge">Conectando</span>
+      <span class="dashboard-sync-time" id="dashboardSyncTime">—</span>
+    </div>
+    <nav class="dashboard-quick-nav" aria-label="Atalhos">
+      <a href="index.html#/lojas" class="dashboard-quick-nav__link" data-route="lojas">Lojas</a>
+      <a href="index.html#/registros" class="dashboard-quick-nav__link" data-route="registros">Registros</a>
+      <a href="index.html#/monitor-sites" class="dashboard-quick-nav__link" data-route="monitor-sites">Sites</a>
+    </nav>
+  </div>
+</header>
+
+<main class="main-content main-content--dashboard">
+  <section class="dashboard-hero" aria-label="Resumo da rede">
+    <article class="dashboard-health-card dashboard-health-card--idle" id="dashboardHealthCard">
+      <div class="dashboard-health-card__head">
+        <span class="dashboard-health-card__label">Saúde da rede</span>
+        <span class="dashboard-health-card__badge" id="dashboardHealthBadge">—</span>
+      </div>
+      <strong class="dashboard-health-card__value" id="kpiNetworkHealth">—</strong>
+      <div class="dashboard-health-card__bar" aria-hidden="true">
+        <div class="dashboard-health-card__bar-fill" id="kpiNetworkHealthBar" style="width:0%"></div>
+      </div>
+      <p class="dashboard-health-card__sub" id="kpiNetworkHealthSub">Equipamentos operacionais na rede</p>
+      <div class="dashboard-health-card__foot">
+        <div class="dashboard-health-card__metric">
+          <span class="dashboard-health-card__metric-label">Equipamentos online</span>
+          <strong class="dashboard-health-card__metric-value" id="kpiDevicesOnlineTotal">—</strong>
+          <span class="dashboard-health-card__metric-sub" id="kpiDevicesOnlineSub">—</span>
+        </div>
+      </div>
+    </article>
+
+    <div class="dashboard-summary-tiles">
+      <article class="dashboard-summary-tile dashboard-summary-tile--ok">
+        <span class="dashboard-summary-tile__label">Lojas online</span>
+        <strong class="dashboard-summary-tile__value" id="dashboardTileStoresOnline">—</strong>
+        <span class="dashboard-summary-tile__meta" id="dashboardTileStoresOnlineMeta">—</span>
+      </article>
+      <article class="dashboard-summary-tile dashboard-summary-tile--warn">
+        <span class="dashboard-summary-tile__label">Lojas offline</span>
+        <strong class="dashboard-summary-tile__value" id="dashboardTileStoresOffline">—</strong>
+        <span class="dashboard-summary-tile__meta" id="dashboardTileStoresOfflineMeta">Sem conexão</span>
+      </article>
+      <article class="dashboard-summary-tile dashboard-summary-tile--info">
+        <span class="dashboard-summary-tile__label">Equipamentos</span>
+        <strong class="dashboard-summary-tile__value" id="dashboardTileDevicesOnline">—</strong>
+        <span class="dashboard-summary-tile__meta" id="dashboardTileDevicesOnlineMeta">—</span>
+      </article>
+      <article class="dashboard-summary-tile dashboard-summary-tile--alert">
+        <span class="dashboard-summary-tile__label">Pontos de atenção</span>
+        <strong class="dashboard-summary-tile__value" id="dashboardTileAlerts">—</strong>
+        <span class="dashboard-summary-tile__meta" id="dashboardTileAlertsMeta">Offline, parciais e suspensas</span>
+      </article>
+    </div>
+  </section>
+
+  <section class="dashboard-section" aria-label="Agentes e equipamentos">
+    <header class="dashboard-section__head">
+      <h2 class="dashboard-section__title">Agentes e equipamentos</h2>
+      <p class="dashboard-section__meta">Clique em um card para abrir o relatório detalhado</p>
+    </header>
+    <div class="dashboard-panel dashboard-panel--agent" id="dashboard">
+      <div class="dashboard-bento__agent dashboard-bento__agent--horizontal">
+        <div class="dashboard-kpi-group">
+          <p class="dashboard-kpi-group__title">Lojas</p>
+          <div class="dashboard-kpi-group__grid dashboard-kpi-group__grid--row">
+            <article class="stat-card stat-card--success stat-card--clickable stat-card--compact" data-kpi="stores-online" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+              <span class="stat-card__label">Online</span>
+              <strong class="stat-card__value" id="kpiStoresOnline">—</strong>
+            </article>
+            <article class="stat-card stat-card--orange stat-card--clickable stat-card--compact" data-kpi="stores-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+              <span class="stat-card__label">Offline</span>
+              <strong class="stat-card__value" id="kpiStoresOffline">—</strong>
+            </article>
+            <article class="stat-card stat-card--yellow stat-card--clickable stat-card--compact" data-kpi="stores-partial" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+              <span class="stat-card__label">Parciais</span>
+              <strong class="stat-card__value" id="kpiStoresPartial">—</strong>
+            </article>
+            <article class="stat-card stat-card--danger stat-card--clickable stat-card--compact" data-kpi="stores-suspended" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+              <span class="stat-card__label">Suspensas</span>
+              <strong class="stat-card__value" id="kpiStoresSuspended">—</strong>
+            </article>
+          </div>
+        </div>
+
+        <div class="dashboard-kpi-group">
+          <p class="dashboard-kpi-group__title">Equipamentos</p>
+          <div class="dashboard-kpi-group__grid dashboard-kpi-group__grid--row">
+            <article class="stat-card stat-card--danger stat-card--clickable stat-card--compact" data-kpi="devices-suspended" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+              <span class="stat-card__label">Suspensas</span>
+              <strong class="stat-card__value" id="kpiDevicesSuspended">—</strong>
+            </article>
+            <article class="stat-card stat-card--yellow stat-card--clickable stat-card--compact" data-kpi="devices-occupied" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+              <span class="stat-card__label">Ocupadas</span>
+              <strong class="stat-card__value" id="kpiDevicesOccupied">—</strong>
+            </article>
+            <article class="stat-card stat-card--available stat-card--clickable stat-card--compact" data-kpi="devices-available" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+              <span class="stat-card__label">Disponíveis</span>
+              <strong class="stat-card__value" id="kpiDevicesAvailable">—</strong>
+            </article>
+            <article class="stat-card stat-card--orange stat-card--clickable stat-card--compact" data-kpi="devices-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+              <span class="stat-card__label">Offline rede</span>
+              <strong class="stat-card__value" id="kpiDevicesOffline">—</strong>
+            </article>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="dashboard-section" aria-label="Plataforma e infraestrutura">
+    <header class="dashboard-section__head">
+      <h2 class="dashboard-section__title">Plataforma e infraestrutura</h2>
+      <p class="dashboard-section__meta">Gateway, servidores e capacidade operacional</p>
+    </header>
+    <div class="dashboard-stack dashboard-stack--horizontal">
+      <section class="gateway-overview dashboard-panel dashboard-panel--gateway" id="gatewayOverview">
+        <header class="gateway-overview__head dashboard-panel__head dashboard-panel__head--split">
+          <div>
+            <h3 class="dashboard-panel__title">Gateway</h3>
+            <p class="dashboard-panel__meta" id="gatewayOverviewMeta">Clique no card para ver o relatório</p>
+          </div>
+          <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshGateways">Atualizar</button>
+        </header>
+        <div class="dashboard-chip-row stats-grid stats-grid--gateway stats-grid--dashboard-gateway" id="gatewayKpis">
+          <article class="stat-card stat-card--success stat-card--clickable stat-card--chip" data-kpi="gateway-online" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+            <span class="stat-card__label">Online</span>
+            <strong class="stat-card__value" id="kpiGatewayOnline">—</strong>
+          </article>
+          <article class="stat-card stat-card--danger stat-card--clickable stat-card--chip" data-kpi="gateway-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+            <span class="stat-card__label">Offline</span>
+            <strong class="stat-card__value" id="kpiGatewayOffline">—</strong>
+          </article>
+          <article class="stat-card stat-card--warn stat-card--clickable stat-card--chip" data-kpi="gateway-pending" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+            <span class="stat-card__label">Pendentes</span>
+            <strong class="stat-card__value" id="kpiGatewayPending">—</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="dashboard-panel dashboard-panel--infra" id="dashboardInfra" aria-label="Infraestrutura">
+        <header class="dashboard-panel__head dashboard-panel__head--split">
+          <div>
+            <h3 class="dashboard-panel__title">Servidores</h3>
+            <p class="dashboard-panel__meta" id="dashboardInfraMeta">VPS e databases · carregando…</p>
+          </div>
+          <div class="dashboard-panel__actions">
+            <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshInfra">Atualizar</button>
+          </div>
+        </header>
+        <div class="dashboard-chip-row stats-grid stats-grid--dashboard-infra">
+          <article class="stat-card stat-card--primary stat-card--chip">
+            <span class="stat-card__label">VPS</span>
+            <strong class="stat-card__value" id="kpiInfraVps">—</strong>
+            <span class="stat-card__sub" id="kpiInfraVpsSub">—</span>
+          </article>
+          <article class="stat-card stat-card--primary stat-card--chip">
+            <span class="stat-card__label">Databases</span>
+            <strong class="stat-card__value" id="kpiInfraDb">—</strong>
+            <span class="stat-card__sub" id="kpiInfraDbSub">—</span>
+          </article>
+          <article class="stat-card stat-card--warn stat-card--chip">
+            <span class="stat-card__label">Alertas</span>
+            <strong class="stat-card__value" id="kpiInfraAlerts">—</strong>
+            <span class="stat-card__sub" id="kpiInfraAlertsSub">—</span>
+          </article>
+        </div>
+        <div class="dashboard-infra-columns">
+          <div class="dashboard-infra-group">
+            <div class="dashboard-infra-group__head">
+              <h4 class="dashboard-infra-group__title">VPS</h4>
+              <a href="index.html#/infra/vps" class="dashboard-panel__link dashboard-panel__link--inline" data-route="infra-vps">Ver todas</a>
+            </div>
+            <ul class="dashboard-infra-list dashboard-infra-list--horizontal" id="dashboardInfraVpsList"></ul>
+          </div>
+          <div class="dashboard-infra-group">
+            <div class="dashboard-infra-group__head">
+              <h4 class="dashboard-infra-group__title">Databases</h4>
+              <a href="index.html#/infra/database" class="dashboard-panel__link dashboard-panel__link--inline" data-route="infra-database">Ver todas</a>
+            </div>
+            <ul class="dashboard-infra-list dashboard-infra-list--horizontal" id="dashboardInfraDbList"></ul>
+          </div>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <section class="dashboard-section" aria-label="Sites e alertas">
+    <header class="dashboard-section__head dashboard-section__head--split">
+      <div>
+        <h2 class="dashboard-section__title">Sites monitorados</h2>
+        <p class="dashboard-section__meta" id="dashboardSitesMeta">SSL e domínio · carregando…</p>
+      </div>
+      <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshDashboardSites">Atualizar</button>
+    </header>
+    <section class="dashboard-panel dashboard-panel--sites" id="dashboardSites">
+      <div class="dashboard-audit-grid dashboard-audit-grid--compact dashboard-sites-summary-grid">
+        <div class="dashboard-audit-stat">
+          <span class="dashboard-audit-stat__label">Total</span>
+          <strong class="dashboard-audit-stat__value" id="kpiSitesTotal">—</strong>
+        </div>
+        <div class="dashboard-audit-stat">
+          <span class="dashboard-audit-stat__label">Online</span>
+          <strong class="dashboard-audit-stat__value dashboard-sites-stat--ok" id="kpiSitesOnline">—</strong>
+        </div>
+        <div class="dashboard-audit-stat">
+          <span class="dashboard-audit-stat__label">Offline</span>
+          <strong class="dashboard-audit-stat__value dashboard-sites-stat--danger" id="kpiSitesOffline">—</strong>
+        </div>
+        <div class="dashboard-audit-stat">
+          <span class="dashboard-audit-stat__label">Alertas SSL/dom.</span>
+          <strong class="dashboard-audit-stat__value dashboard-sites-stat--warn" id="kpiSitesAlerts">—</strong>
+        </div>
+      </div>
+      <ul class="dashboard-list dashboard-list--sites" id="dashboardSitesList">
+        <li class="dashboard-list__empty">Carregando sites…</li>
+      </ul>
+      <a href="index.html#/monitor-sites" class="dashboard-panel__link" data-route="monitor-sites">Ver monitoramento completo →</a>
+    </section>
+  </section>
+
+  <section class="dashboard-section" aria-label="Detalhes operacionais">
+    <header class="dashboard-section__head">
+      <h2 class="dashboard-section__title">Detalhes operacionais</h2>
+      <p class="dashboard-section__meta">Offline prolongado e auditoria recente</p>
+    </header>
+    <div class="dashboard-insights dashboard-insights--duo">
+      <article class="dashboard-panel dashboard-panel--insight">
+        <header class="dashboard-panel__head">
+          <h3 class="dashboard-panel__title">Offline prolongado</h3>
+          <p class="dashboard-panel__meta" id="dashboardOfflineMeta">—</p>
+        </header>
+        <ul class="dashboard-list" id="dashboardOfflineList"></ul>
+      </article>
+
+      <article class="dashboard-panel dashboard-panel--insight">
+        <header class="dashboard-panel__head">
+          <h3 class="dashboard-panel__title">Auditoria</h3>
+          <p class="dashboard-panel__meta" id="dashboardAuditMeta">Últimos 7 dias</p>
+        </header>
+        <div class="dashboard-audit-grid dashboard-audit-grid--compact">
+          <div class="dashboard-audit-stat">
+            <span class="dashboard-audit-stat__label">Total</span>
+            <strong class="dashboard-audit-stat__value" id="dashboardAuditTotal">—</strong>
+          </div>
+          <div class="dashboard-audit-stat">
+            <span class="dashboard-audit-stat__label">Sucesso</span>
+            <strong class="dashboard-audit-stat__value" id="dashboardAuditSuccessRate">—</strong>
+          </div>
+          <div class="dashboard-audit-stat dashboard-audit-stat--wide">
+            <span class="dashboard-audit-stat__label">Operador</span>
+            <strong class="dashboard-audit-stat__value" id="dashboardAuditTopOperator">—</strong>
+          </div>
+          <div class="dashboard-audit-stat dashboard-audit-stat--wide">
+            <span class="dashboard-audit-stat__label">Loja</span>
+            <strong class="dashboard-audit-stat__value" id="dashboardAuditTopStore">—</strong>
+          </div>
+        </div>
+        <a href="index.html#/registros" class="dashboard-panel__link" data-route="registros">Ver registros →</a>
+      </article>
+    </div>
+  </section>
+</main>

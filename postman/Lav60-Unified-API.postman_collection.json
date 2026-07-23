@@ -1,0 +1,1081 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-unified-lav60-api",
+    "name": "Lav60 Unified API",
+    "description": "Collection unificada — **todas** as APIs via servidor local `lav60_api_server.py`.\n\n## Servidor\n```\npython lav60_api_server.py\nhttp://127.0.0.1:3100\n```\n\n## Prefixos\n| Pasta | Prefixo | Token |\n|-------|---------|-------|\n| Portal | `/api/v1` | `x_token` |\n| Totem | `/totem` | `x_token` + `customer_jwt` |\n| OAuth | `/totem/oauth` | `client_id` / `client_secret` |\n| Gateway MQTT | `/gateway` | `gateway_token` |\n| Powpay | `/powpay/{loja}` | `cloudflare_token` |\n\nEnvironment: `postman/Lav60-Unified.postman_environment.json`\n\nDocs: `docs/guides/collection-unificada.md` · `docs/guides/servidor-unificado.md`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0 — Servidor (descoberta)",
+      "description": "Rotas públicas — sem autenticação.",
+      "item": [
+        {
+          "name": "GET / (mapa de rotas)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{serverUrl}}/",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/routes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{serverUrl}}/api/routes",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{serverUrl}}/health",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/upstream (portal)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{serverUrl}}/api/v1/upstream",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/gateway (meta)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{serverUrl}}/api/v1/gateway",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/powpay (meta)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{serverUrl}}/api/v1/powpay?store_code={{storeCode}}",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/totem (meta)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{serverUrl}}/api/v1/totem",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1 — Portal (/api/v1)",
+      "description": "Upstream: sistema.lavanderia60minutos.com.br",
+      "item": [
+        {
+          "name": "Lojas e máquinas",
+          "item": [
+            {
+              "name": "GET stores/codes",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/api/v1/stores/codes"
+              },
+              "response": []
+            },
+            {
+              "name": "GET stores/codes?force=1",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/api/v1/stores/codes?force=1"
+              },
+              "response": []
+            },
+            {
+              "name": "GET stores/{{storeCode}}",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/api/v1/stores/{{storeCode}}"
+              },
+              "response": []
+            },
+            {
+              "name": "GET stores/{{storeCode}}/profile",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/api/v1/stores/{{storeCode}}/profile"
+              },
+              "response": []
+            },
+            {
+              "name": "GET hi-banks/account",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/api/v1/hi-banks/account?store_code={{storeCode}}"
+              },
+              "response": []
+            },
+            {
+              "name": "GET machines",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/api/v1/machines?store_code={{storeCode}}"
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Relatório créditos",
+          "item": [
+            {
+              "name": "GET report_credit_purchases",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/api/v1/report_credit_purchases?store_code={{storeCode}}&start_date={{startDate}}&end_date={{endDate}}&page=1&per_page=20"
+              },
+              "response": []
+            },
+            {
+              "name": "GET report_credit_purchases?all=1",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/api/v1/report_credit_purchases?store_code={{storeCode}}&start_date={{startDate}}&end_date={{endDate}}&all=1"
+              },
+              "response": []
+            },
+            {
+              "name": "GET report_credit_purchases/summary",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/api/v1/report_credit_purchases/summary?store_code={{storeCode}}&start_date={{startDate}}&end_date={{endDate}}&compare=1"
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2 — Totem (/totem)",
+      "description": "Upstream: staging.lavanderia60minutos.com.br",
+      "item": [
+        {
+          "name": "Login e conta",
+          "item": [
+            {
+              "name": "POST login (CPF)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tax_id_number\": \"{{tax_id_number}}\",\n  \"password\": \"{{password}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{serverUrl}}/totem/api/v1/customers/auth/login"
+              },
+              "response": []
+            },
+            {
+              "name": "GET conta cliente",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{customer_jwt}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/totem/api/v1/customers/bubble/customer"
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Catálogo",
+          "item": [
+            {
+              "name": "GET stores",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/totem/api/v1/stores"
+              },
+              "response": []
+            },
+            {
+              "name": "GET stores?status=active",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/totem/api/v1/stores?status=active"
+              },
+              "response": []
+            },
+            {
+              "name": "GET products",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/totem/api/v1/products"
+              },
+              "response": []
+            },
+            {
+              "name": "GET products totem loja",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/totem/api/v1/products?scope=new_totem&store_code={{storeCode}}"
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Cupom, PIX e venda",
+          "item": [
+            {
+              "name": "POST validar cupom",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"customer_id\": \"{{customer_id}}\",\n  \"store_code\": \"{{storeCode}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{serverUrl}}/totem/api/v1/coupons/{{coupon_code}}/validate"
+              },
+              "response": []
+            },
+            {
+              "name": "POST PIX",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{customer_jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"store_code\": \"{{storeCode}}\",\n  \"amount\": 50,\n  \"product_id\": \"{{product_id}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{serverUrl}}/totem/api/v1/payments/pix_to_hipag"
+              },
+              "response": []
+            },
+            {
+              "name": "POST venda totem",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{x_token}}"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{customer_jwt}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"store_code\": \"{{storeCode}}\",\n  \"released_machine\": false,\n  \"sale_items\": [\n    {\n      \"value\": \"25.00\",\n      \"quantity\": \"1\",\n      \"product_id\": \"{{product_id}}\",\n      \"soap_type\": \"floral\",\n      \"machines\": [\n        {\n          \"code\": \"{{machine_code}}\"\n        }\n      ]\n    }\n  ],\n  \"payments\": [\n    {\n      \"value\": \"25.00\",\n      \"payment_method\": \"credits\"\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{serverUrl}}/totem/api/v1/sales/totem_sales"
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3 — OAuth / Security (/totem)",
+      "description": "OAuth2 client_credentials",
+      "item": [
+        {
+          "name": "POST oauth/token",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "grant_type=client_credentials&client_id={{client_id}}&client_secret={{client_secret}}&scope=report_read",
+              "options": {
+                "raw": {
+                  "language": "text"
+                }
+              }
+            },
+            "url": "{{serverUrl}}/totem/oauth/token"
+          },
+          "response": []
+        },
+        {
+          "name": "GET reports/sales",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": "{{serverUrl}}/totem/api/v1/reports/sales?store_code={{storeCode}}"
+          },
+          "response": []
+        },
+        {
+          "name": "GET reports/customers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": "{{serverUrl}}/totem/api/v1/reports/customers"
+          },
+          "response": []
+        },
+        {
+          "name": "GET reports/credit_purchases",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": "{{serverUrl}}/totem/api/v1/reports/credit_purchases"
+          },
+          "response": []
+        },
+        {
+          "name": "GET integrations/health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": "{{serverUrl}}/totem/api/v1/integrations/health"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4 — Gateway MQTT (/gateway)",
+      "description": "Upstream: gateway.lav60.com",
+      "item": [
+        {
+          "name": "Saúde",
+          "item": [
+            {
+              "name": "GET / (online)",
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "GET",
+                "header": [],
+                "url": "{{serverUrl}}/gateway/"
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Status",
+          "item": [
+            {
+              "name": "GET status completo",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{gateway_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/gateway/{{storeCode}}/status"
+              },
+              "response": []
+            },
+            {
+              "name": "GET status washer",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{gateway_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/gateway/{{storeCode}}/status/washer/{{washerId}}"
+              },
+              "response": []
+            },
+            {
+              "name": "GET status dryer",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{gateway_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/gateway/{{storeCode}}/status/dryer/{{dryerId}}"
+              },
+              "response": []
+            },
+            {
+              "name": "GET status doser",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{gateway_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/gateway/{{storeCode}}/status/doser/{{doserId}}"
+              },
+              "response": []
+            },
+            {
+              "name": "GET status ac",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{gateway_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/gateway/{{storeCode}}/status/ac"
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Comandos",
+          "item": [
+            {
+              "name": "POST lavadora",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{gateway_token}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"am\": \"am01-1\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{serverUrl}}/gateway/{{storeCode}}/washer/{{washerId}}"
+              },
+              "response": []
+            },
+            {
+              "name": "POST secadora 30min",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{gateway_token}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"minutes\": 30\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{serverUrl}}/gateway/{{storeCode}}/dryer/{{dryerId}}"
+              },
+              "response": []
+            },
+            {
+              "name": "POST ar-condicionado 22C",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{gateway_token}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"temperature\": \"22\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{serverUrl}}/gateway/{{storeCode}}/ac"
+              },
+              "response": []
+            },
+            {
+              "name": "POST LED on",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{gateway_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/gateway/{{storeCode}}/led/on"
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Dosadora",
+          "item": [
+            {
+              "name": "POST dosadora type",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{gateway_token}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"type\": \"softener1\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}"
+              },
+              "response": []
+            },
+            {
+              "name": "GET consulta tempos",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{gateway_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/consulta"
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5 — Powpay Cloudflare (/powpay)",
+      "description": "Upstream: {loja}.powpay.com.br",
+      "item": [
+        {
+          "name": "Saúde e túnel",
+          "item": [
+            {
+              "name": "GET /health",
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "GET",
+                "header": [],
+                "url": "{{serverUrl}}/powpay/{{storeCode}}/health"
+              },
+              "response": []
+            },
+            {
+              "name": "GET tunnel-status",
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "GET",
+                "header": [],
+                "url": "{{serverUrl}}/powpay/{{storeCode}}/tunnel-status"
+              },
+              "response": []
+            },
+            {
+              "name": "GET api/agent/config",
+              "request": {
+                "auth": {
+                  "type": "noauth"
+                },
+                "method": "GET",
+                "header": [],
+                "url": "{{serverUrl}}/powpay/{{storeCode}}/api/agent/config"
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Status e rede",
+          "item": [
+            {
+              "name": "GET status completo",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{cloudflare_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/status"
+              },
+              "response": []
+            },
+            {
+              "name": "GET devices",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{cloudflare_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/devices"
+              },
+              "response": []
+            },
+            {
+              "name": "GET api/network-status",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{cloudflare_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/powpay/{{storeCode}}/api/network-status"
+              },
+              "response": []
+            },
+            {
+              "name": "GET ping-status",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{cloudflare_token}}"
+                  }
+                ],
+                "url": "{{serverUrl}}/powpay/{{storeCode}}/ping-status"
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Comandos",
+          "item": [
+            {
+              "name": "POST lavadora",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{cloudflare_token}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"am\": \"am01-1\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/washer/{{washerId}}"
+              },
+              "response": []
+            },
+            {
+              "name": "POST secadora 30min",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{cloudflare_token}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"minutes\": 30\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/dryer/{{dryerId}}"
+              },
+              "response": []
+            },
+            {
+              "name": "POST dosadora bomba",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Token",
+                    "value": "{{cloudflare_token}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"pump\": 1\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/bomba"
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const path = pm.request.url.getPath();",
+          "if (path.includes('/customers/auth/login') && pm.response.code === 200) {",
+          "  const j = pm.response.json();",
+          "  if (j.token) pm.collectionVariables.set('customer_jwt', j.token);",
+          "  if (j.id) pm.collectionVariables.set('customer_id', j.id);",
+          "}",
+          "if (path.includes('/oauth/token') && pm.response.code === 200) {",
+          "  const j = pm.response.json();",
+          "  if (j.access_token) pm.collectionVariables.set('access_token', j.access_token);",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "serverUrl",
+      "value": "http://127.0.0.1:3100"
+    },
+    {
+      "key": "x_token",
+      "value": "COLE_X_TOKEN_AQUI"
+    },
+    {
+      "key": "gateway_token",
+      "value": "COLE_GATEWAY_API_TOKEN_AQUI"
+    },
+    {
+      "key": "cloudflare_token",
+      "value": "COLE_CLOUDFLARE_API_TOKEN_AQUI"
+    },
+    {
+      "key": "storeCode",
+      "value": "pb05"
+    },
+    {
+      "key": "startDate",
+      "value": "01/07/2026"
+    },
+    {
+      "key": "endDate",
+      "value": "10/07/2026"
+    },
+    {
+      "key": "tax_id_number",
+      "value": ""
+    },
+    {
+      "key": "password",
+      "value": ""
+    },
+    {
+      "key": "customer_jwt",
+      "value": ""
+    },
+    {
+      "key": "customer_id",
+      "value": ""
+    },
+    {
+      "key": "access_token",
+      "value": ""
+    },
+    {
+      "key": "client_id",
+      "value": ""
+    },
+    {
+      "key": "client_secret",
+      "value": ""
+    },
+    {
+      "key": "coupon_code",
+      "value": "CODIGO"
+    },
+    {
+      "key": "product_id",
+      "value": ""
+    },
+    {
+      "key": "machine_code",
+      "value": "432"
+    },
+    {
+      "key": "washerId",
+      "value": "321"
+    },
+    {
+      "key": "dryerId",
+      "value": "765"
+    },
+    {
+      "key": "doserId",
+      "value": "432"
+    }
+  ]
+}

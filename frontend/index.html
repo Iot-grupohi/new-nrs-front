@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAV60 — Painel</title>
+  <link rel="stylesheet" href="app.css?v=60">
+  <link rel="stylesheet" href="portal-layout.css?v=2">
+  <link rel="stylesheet" href="dashboard-bento.css?v=10">
+  <link rel="stylesheet" href="support.css?v=5">
+  <link rel="stylesheet" href="sites-monitor.css?v=6">
+</head>
+<body class="page-panel page-dashboard auth-pending">
+  <div class="app-layout">
+    <aside class="sidebar" id="portalSidebar" aria-label="Menu principal">
+      <div class="sidebar__brand">
+        <span class="sidebar__logo" aria-hidden="true">L60</span>
+        <div class="sidebar__identity">
+          <strong class="sidebar__title">LAV60</strong>
+          <span class="sidebar__eyebrow">Painel central</span>
+        </div>
+      </div>
+      <nav class="sidebar__nav" aria-label="Navegação">
+        <p class="sidebar__section">Operação</p>
+        <a href="index.html" class="sidebar__link sidebar__link--active" data-route="dashboard" aria-current="page">
+          <span class="sidebar__icon" aria-hidden="true">▣</span>
+          <span class="sidebar__label">Dashboard</span>
+        </a>
+        <a href="index.html#/lojas" class="sidebar__link" data-route="lojas">
+          <span class="sidebar__icon" aria-hidden="true">◫</span>
+          <span class="sidebar__label">Lojas</span>
+        </a>
+        <a href="index.html#/registros" class="sidebar__link" data-route="registros">
+          <span class="sidebar__icon" aria-hidden="true">☰</span>
+          <span class="sidebar__label">Registros</span>
+        </a>
+        <a href="index.html#/suporte" class="sidebar__link" data-route="suporte">
+          <span class="sidebar__icon" aria-hidden="true">?</span>
+          <span class="sidebar__label">Suporte</span>
+        </a>
+        <p class="sidebar__section">Monitoramento</p>
+        <a href="index.html#/monitor-sites" class="sidebar__link sidebar__link--monitor" data-route="monitor-sites">
+          <span class="sidebar__icon" aria-hidden="true">◎</span>
+          <span class="sidebar__label">Sites</span>
+        </a>
+        <a href="index.html#/infra/vps" class="sidebar__link sidebar__link--monitor" data-route="infra-vps">
+          <span class="sidebar__icon" aria-hidden="true">▣</span>
+          <span class="sidebar__label">VPS</span>
+        </a>
+        <a href="index.html#/infra/database" class="sidebar__link sidebar__link--monitor" data-route="infra-database">
+          <span class="sidebar__icon" aria-hidden="true">◉</span>
+          <span class="sidebar__label">Database</span>
+        </a>
+      </nav>
+      <div class="sidebar__footer" id="sidebarUser"></div>
+    </aside>
+
+    <div class="portal-backdrop" id="portalBackdrop" aria-hidden="true"></div>
+
+    <div class="app-main">
+      <header class="portal-topbar" id="portalTopbar" aria-label="Barra superior">
+        <button type="button" class="portal-topbar__menu" id="btnPortalMenu" aria-label="Abrir menu">☰</button>
+        <div class="portal-topbar__brand">
+          <span class="portal-topbar__logo" aria-hidden="true">L60</span>
+          <span class="portal-topbar__title" id="portalTopbarTitle">Dashboard</span>
+        </div>
+      </header>
+      <div class="app-view" id="appView" aria-live="polite"></div>
+      <footer class="app-footer portal-footer" id="portalFooter">
+        <span id="portalFooterLabel">LAV60 · Painel operacional</span>
+        <span id="sitesMonitorUpdatedAt" class="portal-footer__hint hidden"></span>
+        <strong id="recordsAppFooterTotal" class="records-app-footer-total"></strong>
+      </footer>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+
+  <div id="agentKpiModal" class="credit-day-modal agent-kpi-modal hidden" role="dialog" aria-modal="true" aria-labelledby="agentKpiModalTitle">
+    <div class="credit-day-modal__backdrop" data-agent-kpi-dismiss tabindex="-1"></div>
+    <div class="credit-day-modal__panel">
+      <header class="credit-day-modal__head">
+        <div class="credit-day-modal__intro">
+          <span class="credit-day-modal__eyebrow">Relatório operacional</span>
+          <h2 id="agentKpiModalTitle" class="credit-day-modal__title">—</h2>
+          <p id="agentKpiModalSubtitle" class="credit-day-modal__subtitle">—</p>
+        </div>
+        <button type="button" class="credit-day-modal__close" data-agent-kpi-dismiss aria-label="Fechar">×</button>
+      </header>
+      <div class="agent-kpi-modal__toolbar hidden" id="agentKpiModalToolbar">
+        <label class="agent-kpi-modal__search search-field">
+          <span class="search-field__icon" aria-hidden="true">⌕</span>
+          <span class="visually-hidden">Buscar no relatório</span>
+          <input type="search" id="agentKpiModalSearch" placeholder="Buscar loja, equipamento…" autocomplete="off" enterkeyhint="search">
+        </label>
+      </div>
+      <div class="credit-day-modal__body agent-kpi-modal__body" id="agentKpiModalBody"></div>
+    </div>
+  </div>
+
+  <div id="storeChannelModal" class="store-channel-modal hidden" role="dialog" aria-modal="true" aria-labelledby="storeChannelTitle">
+    <div class="store-channel-modal__backdrop" data-channel-dismiss tabindex="-1"></div>
+    <div class="store-channel-modal__panel">
+      <header class="store-channel-modal__head">
+        <div class="store-channel-modal__intro">
+          <span class="store-channel-modal__eyebrow">Canal de operação</span>
+          <h2 id="storeChannelTitle" class="store-channel-modal__title">—</h2>
+          <p id="storeChannelSubtitle" class="store-channel-modal__subtitle">Verificando canais disponíveis…</p>
+        </div>
+        <button type="button" class="store-channel-modal__close" data-channel-dismiss aria-label="Fechar">×</button>
+      </header>
+      <div class="store-channel-grid" id="storeChannelOptions"></div>
+      <footer class="store-channel-modal__foot">
+        <button type="button" class="btn btn--ghost btn--sm" id="btnRefreshChannelGateway">Verificar redundância</button>
+        <button type="button" class="btn btn--ghost btn--sm" data-channel-dismiss>Cancelar</button>
+      </footer>
+    </div>
+  </div>
+
+  <script src="auth.js?v=8"></script>
+  <script src="cache.js"></script>
+  <script src="api.js?v=13"></script>
+  <script src="gateway-overview.js?v=9"></script>
+  <script src="stores.js?v=31"></script>
+  <script src="records.js?v=20"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+  <script src="infra-period.js?v=1"></script>
+  <script src="infra-vps.js?v=8"></script>
+  <script src="infra-database.js?v=15"></script>
+  <script src="support-catalog.js?v=3"></script>
+  <script src="support.js?v=7"></script>
+  <script src="sites-monitor.js?v=8"></script>
+  <script src="portal-layout.js?v=2"></script>
+  <script src="router.js?v=30"></script>
+</body>
+</html>

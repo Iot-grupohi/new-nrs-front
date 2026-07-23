@@ -1,0 +1,238 @@
+/* Portal — shell, navegação e ritmo visual unificado */
+
+.page-panel {
+  --portal-content-max: 1480px;
+  --portal-gutter: clamp(1rem, 2.4vw, 1.75rem);
+  --sidebar-width: 260px;
+}
+
+.app-view {
+  width: 100%;
+}
+
+.app-view > .page-header,
+.app-view > .support-header,
+.app-view > .main-content {
+  width: 100%;
+  max-width: var(--portal-content-max);
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+}
+
+.app-view > .page-header {
+  padding: 1.1rem var(--portal-gutter) 0.9rem;
+}
+
+.page-panel .main-content,
+.page-records.page-panel .main-content {
+  padding: 1.15rem var(--portal-gutter) 1.35rem;
+}
+
+.page-header--split,
+.page-header.page-header--infra,
+.page-header.page-header--sites-monitor {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.page-header--split .page-header__head,
+.page-header.page-header--infra .page-header__head,
+.page-header.page-header--sites-monitor .page-header__head {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.page-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* Sidebar — seções */
+.sidebar__section {
+  margin: 0.85rem 0 0.35rem;
+  padding: 0 0.85rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.72);
+}
+
+.sidebar__section:first-child {
+  margin-top: 0.15rem;
+}
+
+.sidebar__link--monitor {
+  padding-left: 0.85rem;
+}
+
+.sidebar__link--monitor .sidebar__icon {
+  opacity: 0.78;
+}
+
+/* Topbar mobile */
+.portal-topbar {
+  display: none;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem var(--portal-gutter);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(26, 35, 50, 0.96);
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 0;
+  z-index: 120;
+}
+
+.portal-topbar__menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.35rem;
+  height: 2.35rem;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 20, 25, 0.55);
+  color: var(--text);
+  font-size: 1.05rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.portal-topbar__menu:hover {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.portal-topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.portal-topbar__logo {
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #3b82f6, #6366f1);
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.portal-topbar__title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.portal-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 190;
+  background: rgba(2, 6, 23, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+/* Footer único no shell */
+.portal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: auto;
+  padding: 0.85rem var(--portal-gutter);
+  max-width: none;
+  width: 100%;
+  text-align: left;
+}
+
+.portal-footer .records-app-footer-total:not(:empty) {
+  display: inline;
+}
+
+.portal-footer__hint {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.portal-footer__hint.hidden {
+  display: none;
+}
+
+/* Dashboard — insights com 2 colunas */
+.dashboard-insights {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.portal-footer .records-app-footer-total:empty {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  .page-panel {
+    --sidebar-width: 0;
+  }
+
+  .app-main {
+    margin-left: 0;
+  }
+
+  .portal-topbar {
+    display: flex;
+  }
+
+  .sidebar {
+    width: min(288px, 88vw);
+    transform: translateX(-105%);
+    transition: transform 0.22s ease;
+    box-shadow: 8px 0 32px rgba(0, 0, 0, 0.28);
+  }
+
+  body.portal-nav-open .sidebar {
+    transform: translateX(0);
+  }
+
+  body.portal-nav-open .portal-backdrop {
+    display: block;
+  }
+
+  .sidebar__identity,
+  .sidebar__label,
+  .sidebar__section {
+    display: block;
+  }
+
+  .sidebar__brand {
+    justify-content: flex-start;
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
+  }
+
+  .sidebar__link,
+  .sidebar__group-toggle {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .dashboard-insights {
+    grid-template-columns: 1fr;
+  }
+}

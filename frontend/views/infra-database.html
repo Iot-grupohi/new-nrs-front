@@ -1,0 +1,49 @@
+<header class="page-header page-header--infra">
+  <div class="page-header__head">
+    <nav class="page-header__nav" aria-label="Navegação da página">
+      <button type="button" class="page-header__back" data-page-back="dashboard">← Painel LAV60</button>
+    </nav>
+    <h1 class="page-header__title">Database</h1>
+    <p class="page-header__subtitle" id="infraDbSubtitle">DigitalOcean</p>
+  </div>
+  <div class="page-header__actions page-header__actions--infra">
+    <label class="infra-period-select" for="infraMetricsPeriod">
+      <span class="infra-period-select__label">Período</span>
+      <select id="infraMetricsPeriod" class="infra-period-select__input" aria-label="Período do gráfico"></select>
+    </label>
+    <button type="button" class="btn btn--sm btn--ghost" id="btnInfraDbRefresh">Atualizar</button>
+  </div>
+</header>
+
+<main class="main-content main-content--infra-metrics">
+  <section class="records-audit-banner hidden" id="infraDbBanner" role="alert"></section>
+
+  <div class="infra-vps-toolbar panel">
+    <div class="infra-vps-toolbar__row">
+      <div class="infra-vps-tabs" id="infraDbTabs" role="tablist" aria-label="Databases cadastrados"></div>
+      <form class="infra-vps-add" id="infraDbAddForm">
+        <label class="infra-vps-add__label" for="infraDbAddId">Adicionar database</label>
+        <div class="infra-vps-add__row">
+          <input type="text" id="infraDbAddId" class="infra-vps-add__input" placeholder="UUID DigitalOcean" autocomplete="off" spellcheck="false">
+          <button type="submit" class="btn btn--sm btn--primary">Adicionar</button>
+        </div>
+      </form>
+    </div>
+    <p class="infra-metrics-toolbar__meta" id="infraDbMeta">—</p>
+    <div class="infra-toolbar-info hidden" id="infraDbToolbarInfo" aria-live="polite"></div>
+  </div>
+
+  <section class="infra-kpi-section hidden" id="infraDbKpiSection" aria-label="Resumo do database">
+    <div class="infra-kpi-grid infra-kpi-grid--3" id="infraDbKpiGrid"></div>
+  </section>
+
+  <div id="infraDbLoading" class="credit-reports-content-loading hidden" aria-live="polite">
+    <div class="spinner" aria-hidden="true"></div>
+    <p>Consultando métricas do database…</p>
+  </div>
+
+  <section class="infra-metrics-panel" id="infraPanelDb" aria-label="Métricas Database">
+    <div class="infra-metrics-grid" id="infraDbGrid"></div>
+    <p class="infra-metrics-empty hidden" id="infraDbEmpty">Nenhum database cadastrado.</p>
+  </section>
+</main>

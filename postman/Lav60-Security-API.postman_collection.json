@@ -1,0 +1,377 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "Lav60 - Security API (report_read)",
+    "description": "Collection para consumir a Security API da Lavanderia 60 Minutos usando OAuth2 Client Credentials com escopo `report_read`.\n\n## Fluxo recomendado\n1. Configure as variáveis da collection (`client_id`, `client_secret`, etc.).\n2. Execute **OAuth2 - Obter Access Token**.\n3. O token é salvo automaticamente em `access_token`.\n4. Chame os endpoints protegidos de relatório.\n\n## Ambientes\n- **Staging:** `https://staging.lavanderia60minutos.com.br`\n- **Produção:** ajuste `base_url` conforme credencial fornecida.\n\nDocumentação: `apiclients.md`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "serverUrl",
+      "value": "http://127.0.0.1:3100"
+    },
+    {
+      "key": "client_id",
+      "value": "SEU_CLIENT_ID",
+      "type": "string"
+    },
+    {
+      "key": "client_secret",
+      "value": "SEU_CLIENT_SECRET",
+      "type": "string"
+    },
+    {
+      "key": "scope",
+      "value": "report_read",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "storeCode",
+      "value": "pb05"
+    }
+  ],
+  "item": [
+    {
+      "name": "Autenticação",
+      "description": "Endpoints para obter e gerenciar o access token OAuth2.",
+      "item": [
+        {
+          "name": "OAuth2 - Obter Access Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const json = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', json.access_token);",
+                  "    pm.test('Token obtido com sucesso', function () {",
+                  "        pm.expect(json.access_token).to.be.a('string').and.not.empty;",
+                  "        pm.expect(json.token_type).to.eql('Bearer');",
+                  "    });",
+                  "    pm.test('Escopo retornado contém report_read', function () {",
+                  "        pm.expect(json.scope).to.include('report_read');",
+                  "    });",
+                  "    console.log('access_token salvo na variável da collection. Expira em', json.expires_in, 'segundos.');",
+                  "} else {",
+                  "    pm.test('Falha ao obter token - verifique client_id, client_secret e escopo', function () {",
+                  "        pm.expect.fail('Status: ' + pm.response.code + ' - ' + pm.response.text());",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials",
+                  "type": "text"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{client_secret}}",
+                  "type": "text"
+                },
+                {
+                  "key": "scope",
+                  "value": "{{scope}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{serverUrl}}/totem/oauth/token",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "oauth",
+                "token"
+              ]
+            },
+            "description": "Solicita um access token via fluxo OAuth2 **client_credentials**.\n\n**Pré-requisitos:**\n- Security API cadastrada e ativa no painel\n- Escopo `report_read` habilitado para a credencial\n\n**Resposta de sucesso (200):**\n```json\n{\n  \"access_token\": \"eyJ...\",\n  \"token_type\": \"Bearer\",\n  \"expires_in\": 7200,\n  \"scope\": \"report_read\",\n  \"created_at\": 1720610000\n}\n```\n\nO token é salvo automaticamente na variável `access_token` da collection."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Relatórios (report_read)",
+      "description": "Endpoints protegidos que exigem `Authorization: Bearer {{access_token}}` e escopo `report_read`.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{access_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Customers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code é 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 401) {",
+                  "    console.warn('401: Token ausente, inválido ou expirado. Execute OAuth2 - Obter Access Token.');",
+                  "}",
+                  "if (pm.response.code === 403) {",
+                  "    console.warn('403: Token sem escopo report_read. Revise escopos da Security API.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/reports/customers",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "customers"
+              ]
+            },
+            "description": "Relatório de **clientes**.\n\nRequer Bearer token com escopo `report_read`."
+          },
+          "response": []
+        },
+        {
+          "name": "Credit Purchases",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code é 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 401) {",
+                  "    console.warn('401: Token ausente, inválido ou expirado. Execute OAuth2 - Obter Access Token.');",
+                  "}",
+                  "if (pm.response.code === 403) {",
+                  "    console.warn('403: Token sem escopo report_read. Revise escopos da Security API.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/reports/credit_purchases",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "credit_purchases"
+              ]
+            },
+            "description": "Relatório de **compras de crédito**.\n\nRequer Bearer token com escopo `report_read`."
+          },
+          "response": []
+        },
+        {
+          "name": "Sales",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code é 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 401) {",
+                  "    console.warn('401: Token ausente, inválido ou expirado. Execute OAuth2 - Obter Access Token.');",
+                  "}",
+                  "if (pm.response.code === 403) {",
+                  "    console.warn('403: Token sem escopo report_read. Revise escopos da Security API.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/reports/sales",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "sales"
+              ]
+            },
+            "description": "Relatório de **vendas**.\n\nRequer Bearer token com escopo `report_read`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Integrações",
+      "description": "Endpoints auxiliares para validar conectividade e credenciais.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{access_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code é 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 401) {",
+                  "    console.warn('401: Token ausente, inválido ou expirado. Execute OAuth2 - Obter Access Token.');",
+                  "}",
+                  "if (pm.response.code === 403) {",
+                  "    console.warn('403: Token sem escopo necessário. Revise escopos da Security API.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{access_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{serverUrl}}/totem/api/v1/integrations/health",
+              "host": [
+                "{{serverUrl}}/totem"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "health"
+              ]
+            },
+            "description": "Verifica saúde da integração. Útil para homologação em staging após obter o token.\n\nExemplo do guia Next.js para teste rápido de conectividade."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

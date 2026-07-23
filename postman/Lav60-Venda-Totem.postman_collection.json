@@ -1,0 +1,260 @@
+{
+  "info": {
+    "_postman_id": "b8c9d0e1-f2a3-4567-1234-678901234567",
+    "name": "Lav60 - Venda Totem",
+    "description": "Collection para **criar venda no totem** com créditos do cliente.\n\n## Fluxo\n\n1. Configure variáveis (`x_token`, credenciais, `store_code`, `product_id`, `machine_code`, `sale_value`).\n2. **Login com CPF** → salva JWT.\n3. **Criar Venda Totem**.\n\n## Cálculo do total\n\n`total = value × quantity × número_de_máquinas`\n\nDocumentação: `docs/guides/venda-totem.md`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "serverUrl",
+      "value": "http://127.0.0.1:3100"
+    },
+    {
+      "key": "x_token",
+      "value": "SEU_X_TOKEN",
+      "type": "string"
+    },
+    {
+      "key": "tax_id_number",
+      "value": "05791897405",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "sua_senha",
+      "type": "string"
+    },
+    {
+      "key": "product_id",
+      "value": "a5c18a23-a50a-4afd-91ed-41d7a7864e39",
+      "type": "string"
+    },
+    {
+      "key": "machine_code",
+      "value": "M01",
+      "type": "string"
+    },
+    {
+      "key": "sale_value",
+      "value": "15.00",
+      "type": "string"
+    },
+    {
+      "key": "sale_quantity",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "soap_type",
+      "value": "floral",
+      "type": "string"
+    },
+    {
+      "key": "payment_method",
+      "value": "credits",
+      "type": "string"
+    },
+    {
+      "key": "payment_total",
+      "value": "15.00",
+      "type": "string"
+    },
+    {
+      "key": "customer_jwt",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "sale_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "storeCode",
+      "value": "pb05"
+    }
+  ],
+  "item": [
+    {
+      "name": "Passo 1 — Login",
+      "item": [
+        {
+          "name": "Login com CPF",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set('customer_jwt', pm.response.json().data.token);",
+                  "    pm.test('JWT salvo', () => pm.expect(pm.collectionVariables.get('customer_jwt')).to.not.be.empty);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tax_id_number\": \"{{tax_id_number}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{serverUrl}}/totem/api/v1/customers/auth/login"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Passo 2 — Venda",
+      "item": [
+        {
+          "name": "Criar Venda Totem",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const value = parseFloat(pm.collectionVariables.get('sale_value'));",
+                  "const qty = parseFloat(pm.collectionVariables.get('sale_quantity'));",
+                  "const total = (value * qty).toFixed(2);",
+                  "pm.collectionVariables.set('payment_total', total);"
+                ],
+                "type": "text/javascript"
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const data = pm.response.json().data ?? {};",
+                  "    const attrs = data.attributes ?? {};",
+                  "    pm.collectionVariables.set('sale_id', data.id);",
+                  "    pm.test('Venda criada', () => pm.expect(data.id).to.not.be.empty);",
+                  "    console.log('Venda ID:', data.id);",
+                  "    console.log('Total: R$', attrs['total-value']);",
+                  "    console.log('Loja:', attrs['store-code']);",
+                  "} else if (pm.response.code === 400) {",
+                  "    console.warn('400: saldo insuficiente, máquina inválida ou indisponível');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customer_jwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"store_code\": \"{{storeCode}}\",\n  \"released_machine\": false,\n  \"sale_items\": [\n    {\n      \"value\": \"{{sale_value}}\",\n      \"quantity\": \"{{sale_quantity}}\",\n      \"product_id\": \"{{product_id}}\",\n      \"soap_type\": \"{{soap_type}}\",\n      \"machines\": [{ \"code\": \"{{machine_code}}\" }]\n    }\n  ],\n  \"payments\": [\n    {\n      \"value\": \"{{payment_total}}\",\n      \"payment_method\": \"{{payment_method}}\"\n    }\n  ]\n}"
+            },
+            "url": "{{serverUrl}}/totem/api/v1/sales/totem_sales",
+            "description": "Remove `soap_type` do body se não usar amaciante.\n\nConfirme que `machine_code` existe e está disponível na loja."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fluxo completo",
+      "item": [
+        {
+          "name": "1. Login com CPF",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.collectionVariables.set('customer_jwt', pm.response.json().data.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tax_id_number\": \"{{tax_id_number}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{serverUrl}}/totem/api/v1/customers/auth/login"
+          }
+        },
+        {
+          "name": "2. Criar Venda Totem",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "const total = (parseFloat(pm.collectionVariables.get('sale_value')) * parseFloat(pm.collectionVariables.get('sale_quantity'))).toFixed(2);",
+                  "pm.collectionVariables.set('payment_total', total);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Token",
+                "value": "{{x_token}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{customer_jwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"store_code\": \"{{storeCode}}\",\n  \"sale_items\": [{\"value\":\"{{sale_value}}\",\"quantity\":\"{{sale_quantity}}\",\"product_id\":\"{{product_id}}\",\"machines\":[{\"code\":\"{{machine_code}}\"}]}],\n  \"payments\":[{\"value\":\"{{payment_total}}\",\"payment_method\":\"{{payment_method}}\"}]\n}"
+            },
+            "url": "{{serverUrl}}/totem/api/v1/sales/totem_sales"
+          }
+        }
+      ]
+    }
+  ]
+}

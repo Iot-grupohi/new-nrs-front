@@ -1,0 +1,201 @@
+{
+  "info": {
+    "_postman_id": "d4e5f6a7-b8c9-0123-def0-234567890123",
+    "name": "Lav60 - Listar Produtos",
+    "description": "Collection para consultar o **catálogo de produtos** do totem.\n\n## Fluxo recomendado\n\n1. Configure `base_url` e `x_token`.\n2. (Opcional) Defina `store_code` — obtido em listar lojas.\n3. Execute **Listar Produtos (totem)** ou **Listar Produtos (new_totem + loja)**.\n\n## Escopos\n\n| scope | Uso |\n|-------|-----|\n| _(vazio/totem)_ | Catálogo padrão |\n| `new_totem` | Preços promocionais por loja |\n| `virtual_store` | Loja virtual |\n\nDocumentação: `docs/guides/listar-produtos.md`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "serverUrl",
+      "value": "http://127.0.0.1:3100"
+    },
+    {
+      "key": "x_token",
+      "value": "SEU_X_TOKEN",
+      "type": "string"
+    },
+    {
+      "key": "product_scope",
+      "value": "new_totem",
+      "type": "string"
+    },
+    {
+      "key": "product_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "storeCode",
+      "value": "pb05"
+    }
+  ],
+  "item": [
+    {
+      "name": "Listar Produtos (totem)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "    const products = pm.response.json().data ?? [];",
+              "",
+              "    pm.test('Produtos retornados', function () {",
+              "        pm.expect(products).to.be.an('array');",
+              "    });",
+              "",
+              "    console.log('\\n--- Produtos (totem) ---');",
+              "    products.forEach((p) => {",
+              "        const a = p.attributes ?? {};",
+              "        console.log(`[${p.id}] ${a.name} — R$ ${a.value}`);",
+              "    });",
+              "",
+              "    if (products[0]?.id) {",
+              "        pm.collectionVariables.set('product_id', products[0].id);",
+              "        console.log('\\nproduct_id salvo:', products[0].id);",
+              "    }",
+              "    console.log('------------------------\\n');",
+              "} else if (pm.response.code === 401) {",
+              "    console.warn('401: verifique X-Token');",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Token",
+            "value": "{{x_token}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{serverUrl}}/totem/api/v1/products",
+          "host": [
+            "{{serverUrl}}/totem"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products"
+          ]
+        },
+        "description": "Catálogo **padrão** do totem (scope `totem`).\n\nInclui `billing-method-name` e `coupon_value` quando aplicável.\n\nSalva o primeiro `product_id` na variável da collection."
+      },
+      "response": []
+    },
+    {
+      "name": "Listar Produtos (new_totem + loja)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "    const products = pm.response.json().data ?? [];",
+              "",
+              "    pm.test('Produtos retornados', function () {",
+              "        pm.expect(products).to.be.an('array');",
+              "    });",
+              "",
+              "    console.log('\\n--- Produtos (new_totem | loja: ' + pm.collectionVariables.get('storeCode') + ') ---');",
+              "    products.forEach((p) => {",
+              "        const a = p.attributes ?? {};",
+              "        console.log(`[${p.id}] ${a.name} — R$ ${a.value}`);",
+              "    });",
+              "",
+              "    if (products[0]?.id) {",
+              "        pm.collectionVariables.set('product_id', products[0].id);",
+              "    }",
+              "    console.log('------------------------\\n');",
+              "} else if (pm.response.code === 404) {",
+              "    console.warn('404: store_code não encontrado — confira listar lojas');",
+              "}"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Token",
+            "value": "{{x_token}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{serverUrl}}/totem/api/v1/products?scope={{product_scope}}&store_code={{storeCode}}",
+          "host": [
+            "{{serverUrl}}/totem"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products"
+          ],
+          "query": [
+            {
+              "key": "scope",
+              "value": "{{product_scope}}",
+              "description": "new_totem | totem | virtual_store"
+            },
+            {
+              "key": "store_code",
+              "value": "{{storeCode}}",
+              "description": "Código da loja (ex: PB05)"
+            }
+          ]
+        },
+        "description": "Catálogo **new_totem** com preço promocional por loja.\n\nConfigure `store_code` antes de executar.\n\nO `value` pode variar conforme promoção da loja."
+      },
+      "response": []
+    },
+    {
+      "name": "Listar Produtos (virtual_store)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Token",
+            "value": "{{x_token}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{serverUrl}}/totem/api/v1/products?scope=virtual_store",
+          "host": [
+            "{{serverUrl}}/totem"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "products"
+          ],
+          "query": [
+            {
+              "key": "scope",
+              "value": "virtual_store"
+            }
+          ]
+        },
+        "description": "Catálogo da loja virtual."
+      },
+      "response": []
+    }
+  ]
+}

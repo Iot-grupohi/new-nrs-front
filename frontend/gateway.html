@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LAV60 — Gateway (redundância)</title>
+  <link rel="stylesheet" href="app.css?v=47">
+</head>
+<body class="page-dashboard page-store page-gateway auth-pending">
+  <div class="app-shell">
+    <header class="topbar topbar--store topbar--gateway">
+      <div class="topbar__row">
+        <div class="topbar__brand">
+          <a href="index.html" class="topbar__back" aria-label="Voltar ao painel">‹</a>
+          <div class="topbar__logo" aria-hidden="true">L60</div>
+          <div class="topbar__identity">
+            <nav class="topbar__crumb" aria-label="Navegação">
+              <a href="index.html" class="topbar__crumb-link">Painel</a>
+              <span class="topbar__crumb-sep" aria-hidden="true">/</span>
+              <span class="topbar__code">Gateway</span>
+            </nav>
+            <h1 class="topbar__title">Console de redundância</h1>
+          </div>
+        </div>
+        <div class="topbar__toolbar">
+          <div id="headerUserMenu" class="topbar__user-slot"></div>
+        </div>
+      </div>
+      <div class="topbar__meta">
+        <p class="topbar__subtitle">Operação pela redundância quando o agente local estiver indisponível</p>
+      </div>
+    </header>
+
+    <main class="main-content">
+      <section class="gateway-alert hidden" id="tokenAlert" role="alert">
+        Redundância não configurada no servidor. Contacte o suporte técnico.
+      </section>
+
+      <section class="gateway-alert hidden" id="storeGatewayAlert" role="alert">
+        <strong>Gateway indisponível</strong>
+        <p id="storeGatewayAlertText">—</p>
+      </section>
+
+      <section class="gateway-alert gateway-alert--checking hidden" id="storeGatewayChecking" role="status">
+        Verificando conexão com a loja…
+      </section>
+
+      <section class="gateway-status card hidden" id="storeStatusBar">
+        <div class="gateway-status__row">
+          <div class="gateway-status__info">
+            <span class="gateway-meta" id="storeGatewayMeta">Gateway: —</span>
+            <span class="gateway-status__hint" id="storeGatewayHint">Teste real: POST /led/on no módulo de redundância</span>
+          </div>
+          <div class="gateway-status__actions">
+            <button type="button" class="btn btn--sm btn--ghost" id="btnVerifyGatewayModule">Verificar módulo</button>
+            <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshGatewayDevices" disabled>Atualizar equipamentos</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="gateway-overview card" id="gatewayOverview">
+        <header class="gateway-overview__head">
+          <div>
+            <h2 class="gateway-overview__title">Gateways por loja</h2>
+            <p class="gateway-overview__meta" id="gatewayOverviewMeta">Clique no card para ver o relatório</p>
+          </div>
+          <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshGateways">Atualizar painel</button>
+        </header>
+        <div class="stats-grid stats-grid--gateway" id="gatewayKpis">
+          <article class="stat-card stat-card--success stat-card--clickable" data-kpi="gateway-online" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+            <span class="stat-card__label">Gateway online</span>
+            <strong class="stat-card__value" id="kpiGatewayOnline">—</strong>
+          </article>
+          <article class="stat-card stat-card--danger stat-card--clickable" data-kpi="gateway-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+            <span class="stat-card__label">Gateway offline</span>
+            <strong class="stat-card__value" id="kpiGatewayOffline">—</strong>
+          </article>
+          <article class="stat-card stat-card--warn stat-card--clickable" data-kpi="gateway-pending" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+            <span class="stat-card__label">Sem verificação</span>
+            <strong class="stat-card__value" id="kpiGatewayPending">—</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="devices-panel devices-panel--blocked hidden" id="devicesPanel">
+        <div class="devices-panel__section">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Lavadoras</h2>
+            <span class="devices-panel__count" id="washersCount">—</span>
+          </header>
+          <div class="device-list" id="washersGrid"></div>
+        </div>
+
+        <div class="devices-panel__section">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Secadoras</h2>
+            <span class="devices-panel__count" id="dryersCount">—</span>
+          </header>
+          <div class="device-list" id="dryersGrid"></div>
+        </div>
+
+        <div class="devices-panel__section devices-panel__section--wide">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Dosadoras</h2>
+            <span class="devices-panel__count" id="dosersCount">—</span>
+          </header>
+          <div class="device-list" id="dosersGrid"></div>
+        </div>
+
+        <div class="devices-panel__section">
+          <header class="devices-panel__head">
+            <h2 class="devices-panel__title">Ar condicionado</h2>
+          </header>
+          <div class="device-list" id="acGrid"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <div id="actionPromptModal" class="confirm-modal confirm-modal--prompt hidden" role="alertdialog" aria-modal="true" aria-labelledby="actionPromptTitle">
+    <div class="confirm-modal__backdrop" data-action-prompt-dismiss></div>
+    <div class="confirm-modal__box">
+      <div class="confirm-modal__icon confirm-modal__icon--prompt" aria-hidden="true">?</div>
+      <h2 id="actionPromptTitle" class="confirm-modal__title">Confirmar operação</h2>
+      <p id="actionPromptMessage" class="confirm-modal__message">Deseja executar esta ação na loja?</p>
+      <div id="actionPromptBody" class="confirm-modal__body"></div>
+      <div class="confirm-modal__actions">
+        <button type="button" id="actionPromptCancel" class="btn btn--ghost">Cancelar</button>
+        <button type="button" id="actionPromptOk" class="btn btn--primary">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="agentKpiModal" class="credit-day-modal agent-kpi-modal hidden" role="dialog" aria-modal="true" aria-labelledby="agentKpiModalTitle">
+    <div class="credit-day-modal__backdrop" data-agent-kpi-dismiss tabindex="-1"></div>
+    <div class="credit-day-modal__panel">
+      <header class="credit-day-modal__head">
+        <div class="credit-day-modal__intro">
+          <span class="credit-day-modal__eyebrow">Relatório operacional</span>
+          <h2 id="agentKpiModalTitle" class="credit-day-modal__title">—</h2>
+          <p id="agentKpiModalSubtitle" class="credit-day-modal__subtitle">—</p>
+        </div>
+        <button type="button" class="credit-day-modal__close" data-agent-kpi-dismiss aria-label="Fechar">×</button>
+      </header>
+      <div class="agent-kpi-modal__toolbar hidden" id="agentKpiModalToolbar">
+        <label class="agent-kpi-modal__search search-field">
+          <span class="search-field__icon" aria-hidden="true">⌕</span>
+          <span class="visually-hidden">Buscar no relatório</span>
+          <input type="search" id="agentKpiModalSearch" placeholder="Buscar loja, equipamento…" autocomplete="off" enterkeyhint="search">
+        </label>
+      </div>
+      <div class="credit-day-modal__body agent-kpi-modal__body" id="agentKpiModalBody"></div>
+    </div>
+  </div>
+
+  <div id="confirmModal" class="confirm-modal hidden" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="confirm-modal__backdrop"></div>
+    <div class="confirm-modal__box">
+      <div class="confirm-modal__icon confirm-modal__icon--ok" aria-hidden="true"></div>
+      <h2 id="confirmTitle" class="confirm-modal__title">Comando confirmado</h2>
+      <p id="confirmMessage" class="confirm-modal__message"></p>
+      <div id="confirmBody" class="confirm-modal__body hidden"></div>
+      <span id="confirmStatus" class="confirm-modal__badge">Confirmado</span>
+      <button type="button" id="confirmOk" class="btn btn--primary confirm-modal__btn">OK</button>
+    </div>
+  </div>
+
+  <script src="cache.js"></script>
+  <script src="api.js?v=11"></script>
+  <script src="auth.js"></script>
+  <script src="device-ui.js?v=1"></script>
+  <script src="audit.js?v=2"></script>
+  <script src="gateway-overview.js?v=9"></script>
+  <script src="gateway.js?v=40"></script>
+</body>
+</html>

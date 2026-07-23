@@ -1,0 +1,43 @@
+<header class="page-header page-header--split">
+  <nav class="page-header__nav" aria-label="Navegação da página">
+    <button type="button" class="page-header__back" data-page-back="dashboard">← Painel LAV60</button>
+  </nav>
+  <div class="page-header__head">
+    <h1 class="page-header__title">Lojas</h1>
+    <p class="page-header__subtitle" id="lojasSubtitle">Monitoramento das unidades em tempo real</p>
+  </div>
+</header>
+
+<main class="main-content">
+  <section class="stores-panel">
+    <div class="stores-panel__toolbar">
+      <div class="stores-panel__head">
+        <h2 class="stores-panel__title">Unidades</h2>
+        <span class="stores-panel__meta" id="storesMeta">—</span>
+      </div>
+      <div class="stores-panel__controls">
+        <label class="search-field">
+          <span class="visually-hidden">Buscar loja</span>
+          <span class="search-field__icon" aria-hidden="true">⌕</span>
+          <input type="search" id="inputSearch" placeholder="Buscar por nome ou código…" autocomplete="off">
+        </label>
+        <div class="filter-chips" id="filterChips" role="tablist">
+          <button type="button" class="chip chip--active" data-filter="all">Todas</button>
+          <button type="button" class="chip" data-filter="ok">Operacional</button>
+          <button type="button" class="chip" data-filter="partial">Parcial</button>
+          <button type="button" class="chip" data-filter="suspended">Suspensa</button>
+          <button type="button" class="chip" data-filter="unreachable">Offline</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stores-list" id="storesGrid">
+      <div class="stores-empty-state">
+        <div class="spinner" aria-hidden="true"></div>
+        <p>Carregando lojas…</p>
+      </div>
+    </div>
+
+    <p class="stores-count hidden" id="storesCount"></p>
+  </section>
+</main>

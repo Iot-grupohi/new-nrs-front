@@ -1,0 +1,215 @@
+<header class="page-header support-header" id="supportHeader">
+  <div class="support-header__glow" aria-hidden="true"></div>
+  <div class="support-header__inner">
+    <nav class="support-header__nav" aria-label="Navegação do suporte">
+      <button type="button" class="support-header__back" id="supportHeaderBack">
+        <span class="support-header__back-icon" aria-hidden="true">←</span>
+        <span id="supportHeaderBackLabel">Painel LAV60</span>
+      </button>
+    </nav>
+    <div class="support-header__main">
+      <div class="support-header__brand">
+        <div class="support-header__icon-wrap" id="supportHeaderIconWrap">
+          <img src="/fac/img/Icons/Helpdesk.svg" alt="" class="support-header__icon" id="supportHeaderIcon" width="36" height="36">
+        </div>
+        <div class="support-header__copy">
+          <span class="support-header__eyebrow" id="supportHeaderEyebrow">Central operacional</span>
+          <h1 class="support-header__title" id="supportHeaderTitle">Suporte / Runbooks</h1>
+          <p class="support-header__subtitle" id="supportHeaderSubtitle">Procedimentos operacionais e atendimento ao cliente</p>
+        </div>
+      </div>
+      <div class="support-header__stats" id="supportHeaderStats">—</div>
+    </div>
+  </div>
+</header>
+
+<main class="main-content">
+  <section class="stores-panel support-panel">
+    <div class="stores-panel__toolbar">
+      <div class="stores-panel__head">
+        <h2 class="stores-panel__title" id="supportPanelTitle">Base de conhecimento</h2>
+        <span class="stores-panel__meta" id="supportMeta">—</span>
+      </div>
+      <div class="stores-panel__controls support-panel__controls">
+        <label class="search-field">
+          <span class="visually-hidden">Buscar procedimento</span>
+          <span class="search-field__icon" aria-hidden="true">⌕</span>
+          <input type="search" id="supportSearch" placeholder="Buscar maquineta, lavadora, pagamento…" autocomplete="off">
+        </label>
+        <div class="filter-chips" id="supportFilters" role="tablist">
+          <button type="button" class="chip chip--active" data-support-filter="all">Todos</button>
+          <button type="button" class="chip" data-support-filter="equipamentos">Equipamentos</button>
+          <button type="button" class="chip" data-support-filter="helpdesk">HelpDesk SAC</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="support-quick-actions" id="supportQuickActions">
+      <button type="button" class="btn btn--primary btn--sm support-add-btn hidden" id="supportAddBtn">
+        + Adicionar procedimento
+      </button>
+      <button type="button" class="btn btn--ghost btn--sm support-map-btn" id="supportMapBtn">
+        <img src="/fac/img/Icons/location.svg" alt="" class="support-map-btn__icon" width="18" height="18">
+        Mapa de lojas
+      </button>
+    </div>
+
+    <div id="supportContent" class="support-content">
+      <div class="stores-empty-state">
+        <div class="spinner" aria-hidden="true"></div>
+        <p>Carregando runbooks…</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div id="supportModal" class="credit-day-modal support-modal hidden" role="dialog" aria-modal="true" aria-labelledby="supportModalTitle">
+  <div class="credit-day-modal__backdrop" data-support-dismiss tabindex="-1"></div>
+  <div class="credit-day-modal__panel support-modal__panel">
+    <header class="support-modal__head">
+      <div class="support-modal__head-glow" aria-hidden="true"></div>
+      <div class="support-modal__head-main">
+        <div class="support-modal__meta">
+          <span class="support-modal__group" id="supportModalGroup">—</span>
+          <span class="support-modal__eyebrow" id="supportModalEyebrow">—</span>
+        </div>
+        <div class="support-modal__title-row">
+          <div class="support-modal__icon-wrap hidden" id="supportModalIconWrap">
+            <img class="support-modal__icon" id="supportModalIcon" alt="" width="40" height="40">
+          </div>
+          <div class="support-modal__title-block">
+            <h2 id="supportModalTitle" class="support-modal__title">—</h2>
+            <p id="supportModalSubtitle" class="support-modal__subtitle">Runbook operacional · passo a passo</p>
+          </div>
+        </div>
+      </div>
+      <button type="button" class="support-modal__close credit-day-modal__close" data-support-dismiss aria-label="Fechar">×</button>
+    </header>
+    <div class="support-modal__body" id="supportModalBody"></div>
+    <footer class="support-modal__foot">
+      <button type="button" class="support-modal__back btn btn--ghost btn--sm" id="supportModalBack">
+        ← Voltar
+      </button>
+      <div class="support-modal__foot-actions" id="supportModalCustomActions">
+        <button type="button" class="btn btn--ghost btn--sm hidden" id="supportModalEdit">Editar</button>
+        <button type="button" class="btn btn--ghost btn--sm support-modal__delete hidden" id="supportModalDelete">Excluir</button>
+      </div>
+      <span class="support-modal__foot-hint">Use Esc para fechar</span>
+      <button type="button" class="btn btn--ghost btn--sm" data-support-dismiss>Fechar</button>
+    </footer>
+  </div>
+</div>
+
+<div id="supportEditorModal" class="credit-day-modal support-modal support-editor-modal hidden" role="dialog" aria-modal="true" aria-labelledby="supportEditorTitle">
+  <div class="credit-day-modal__backdrop" data-support-editor-dismiss tabindex="-1"></div>
+  <div class="credit-day-modal__panel support-modal__panel support-editor-modal__panel">
+    <header class="support-modal__head">
+      <div class="support-modal__head-main">
+        <div class="support-modal__meta">
+          <span class="support-modal__group">Base de conhecimento</span>
+          <span class="support-modal__eyebrow" id="supportEditorEyebrow">Novo procedimento</span>
+        </div>
+        <h2 id="supportEditorTitle" class="support-modal__title">Adicionar procedimento</h2>
+        <p class="support-modal__subtitle">Conteúdo salvo no Firebase e disponível para toda a equipe.</p>
+      </div>
+      <button type="button" class="support-modal__close credit-day-modal__close" data-support-editor-dismiss aria-label="Fechar">×</button>
+    </header>
+    <form class="support-editor-form" id="supportEditorForm">
+      <div class="support-editor-form__grid">
+        <label class="support-editor-field">
+          <span class="support-editor-field__label">Categoria</span>
+          <select id="supportEditorCategory" required></select>
+        </label>
+        <label class="support-editor-field support-editor-field--new-cat hidden" id="supportEditorNewCategoryWrap">
+          <span class="support-editor-field__label">Nome da nova categoria</span>
+          <input type="text" id="supportEditorNewCategoryTitle" maxlength="120" placeholder="Ex.: Impressora térmica">
+        </label>
+        <label class="support-editor-field support-editor-field--new-cat hidden" id="supportEditorNewCategoryGroupWrap">
+          <span class="support-editor-field__label">Grupo</span>
+          <select id="supportEditorNewCategoryGroup">
+            <option value="equipamentos">Equipamentos</option>
+            <option value="helpdesk">HelpDesk SAC</option>
+          </select>
+        </label>
+        <label class="support-editor-field support-editor-field--full">
+          <span class="support-editor-field__label">Título do procedimento</span>
+          <input type="text" id="supportEditorTitleInput" required maxlength="160" placeholder="Ex.: Totem sem internet">
+        </label>
+        <label class="support-editor-field support-editor-field--full">
+          <span class="support-editor-field__label">Palavras-chave (opcional)</span>
+          <input type="text" id="supportEditorKeywords" maxlength="240" placeholder="totem, offline, rede, wifi">
+        </label>
+        <label class="support-editor-field support-editor-field--full">
+          <span class="support-editor-field__label">Conteúdo</span>
+          <textarea id="supportEditorBody" required rows="12" placeholder="Descreva o passo a passo. Você pode usar HTML simples: &lt;h4&gt;, &lt;ol&gt;, &lt;li&gt;, &lt;p&gt;, &lt;strong&gt;"></textarea>
+          <span class="support-editor-field__hint">Dica: use &lt;ol&gt;&lt;li&gt;Passo 1&lt;/li&gt;&lt;/ol&gt; para listas numeradas.</span>
+        </label>
+      </div>
+      <footer class="support-editor-form__foot">
+        <button type="button" class="btn btn--ghost btn--sm" data-support-editor-dismiss>Cancelar</button>
+        <button type="submit" class="btn btn--primary btn--sm" id="supportEditorSubmit">Salvar procedimento</button>
+      </footer>
+    </form>
+  </div>
+</div>
+
+<div id="supportCategoryModal" class="credit-day-modal support-modal support-editor-modal hidden" role="dialog" aria-modal="true" aria-labelledby="supportCategoryTitle">
+  <div class="credit-day-modal__backdrop" data-support-category-dismiss tabindex="-1"></div>
+  <div class="credit-day-modal__panel support-modal__panel support-editor-modal__panel">
+    <header class="support-modal__head">
+      <div class="support-modal__head-main">
+        <div class="support-modal__meta">
+          <span class="support-modal__group">Base de conhecimento</span>
+          <span class="support-modal__eyebrow">Categoria customizada</span>
+        </div>
+        <h2 id="supportCategoryTitle" class="support-modal__title">Editar categoria</h2>
+        <p class="support-modal__subtitle">Alterações são salvas no Firebase.</p>
+      </div>
+      <button type="button" class="support-modal__close credit-day-modal__close" data-support-category-dismiss aria-label="Fechar">×</button>
+    </header>
+    <form class="support-editor-form" id="supportCategoryForm">
+      <div class="support-editor-form__grid">
+        <label class="support-editor-field">
+          <span class="support-editor-field__label">Grupo</span>
+          <select id="supportCategoryGroup" required>
+            <option value="equipamentos">Equipamentos</option>
+            <option value="helpdesk">HelpDesk SAC</option>
+          </select>
+        </label>
+        <label class="support-editor-field support-editor-field--full">
+          <span class="support-editor-field__label">Título</span>
+          <input type="text" id="supportCategoryTitleInput" required maxlength="120">
+        </label>
+        <label class="support-editor-field support-editor-field--full">
+          <span class="support-editor-field__label">Resumo</span>
+          <input type="text" id="supportCategorySummary" maxlength="240">
+        </label>
+        <label class="support-editor-field support-editor-field--full">
+          <span class="support-editor-field__label">Ícone (URL, opcional)</span>
+          <input type="text" id="supportCategoryIcon" maxlength="240" placeholder="/fac/img/Icons/Helpdesk.svg">
+        </label>
+      </div>
+      <footer class="support-editor-form__foot">
+        <button type="button" class="btn btn--ghost btn--sm support-modal__delete" id="supportCategoryDeleteBtn">Excluir categoria</button>
+        <span class="support-editor-form__spacer"></span>
+        <button type="button" class="btn btn--ghost btn--sm" data-support-category-dismiss>Cancelar</button>
+        <button type="submit" class="btn btn--primary btn--sm" id="supportCategorySubmit">Salvar categoria</button>
+      </footer>
+    </form>
+  </div>
+</div>
+
+<div id="supportMapModal" class="credit-day-modal support-modal hidden" role="dialog" aria-modal="true" aria-labelledby="supportMapModalTitle">
+  <div class="credit-day-modal__backdrop" data-support-map-dismiss tabindex="-1"></div>
+  <div class="credit-day-modal__panel">
+    <header class="credit-day-modal__head">
+      <div class="credit-day-modal__intro">
+        <span class="credit-day-modal__eyebrow">Localização</span>
+        <h2 id="supportMapModalTitle" class="credit-day-modal__title">Mapa de lojas</h2>
+        <p class="credit-day-modal__subtitle">Escolha a região</p>
+      </div>
+      <button type="button" class="credit-day-modal__close" data-support-map-dismiss aria-label="Fechar">×</button>
+    </header>
+    <div class="credit-day-modal__body support-modal__body" id="supportMapModalBody"></div>
+  </div>
+</div>
