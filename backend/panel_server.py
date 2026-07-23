@@ -23,6 +23,21 @@ if str(BACKEND) not in sys.path:
 from server.app import app  # noqa: E402
 
 
+def _drop_api_root_route() -> None:
+    """Em produção o `/` serve o painel HTML, não o JSON de discovery da API."""
+    kept = []
+    for route in app.router.routes:
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None) or set()
+        if path == "/" and "GET" in methods:
+            continue
+        kept.append(route)
+    app.router.routes = kept
+
+
+_drop_api_root_route()
+
+
 def _frontend_file(rel: str) -> Path | None:
     rel = rel.replace("\\", "/").lstrip("/")
     if not rel or rel.endswith("/"):
