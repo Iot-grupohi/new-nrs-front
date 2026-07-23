@@ -7266,3 +7266,428 @@ button.credit-reports-daily-card:focus-visible {
   color: #bbf7d0;
 }
 
+/* --- Lojas: layout compacto --- */
+.page-lojas .main-content--compact {
+  padding: 0.65rem 0.85rem 1rem;
+}
+
+.page-lojas .page-header--compact .page-header__subtitle {
+  font-size: 0.78rem;
+}
+
+.page-lojas .stores-panel--compact {
+  border-radius: 12px;
+}
+
+.page-lojas .stores-panel__toolbar--compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.65rem;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.page-lojas .search-field--compact {
+  flex: 1 1 12rem;
+  min-width: 9rem;
+}
+
+.page-lojas .search-field--compact input {
+  padding: 0.42rem 0.65rem 0.42rem 2rem;
+  font-size: 0.82rem;
+}
+
+.page-lojas .filter-chips--compact {
+  gap: 0.3rem;
+}
+
+.page-lojas .filter-chips--compact .chip {
+  padding: 0.28rem 0.55rem;
+  font-size: 0.72rem;
+}
+
+.page-lojas .stores-panel__meta--inline {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.page-lojas .stores-list--compact {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.4rem;
+  padding: 0.5rem 0.65rem 0.65rem;
+}
+
+.page-lojas .store-card--compact {
+  min-height: 0;
+  border-radius: 10px;
+}
+
+.page-lojas .store-card--compact .store-card__accent {
+  height: 2px;
+}
+
+.page-lojas .store-card__top--compact {
+  align-items: center;
+  padding: 0.45rem 0.65rem 0.15rem;
+  gap: 0.45rem;
+}
+
+.page-lojas .store-card__title--compact {
+  font-size: 0.88rem;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.page-lojas .store-card__code--compact {
+  display: inline-block;
+  margin-left: 0.35rem;
+  font-size: 0.62rem;
+  vertical-align: middle;
+}
+
+.page-lojas .pill--xs {
+  padding: 0.12rem 0.38rem;
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+}
+
+.page-lojas .store-card__compact-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.15rem 0.65rem 0.5rem;
+  min-width: 0;
+}
+
+.page-lojas .store-card__compact-ratio {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #cbd5e1;
+  min-width: 2.1rem;
+}
+
+.page-lojas .store-card__devices--compact {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.45rem;
+  min-width: 0;
+  padding: 0;
+}
+
+.page-lojas .store-card__device-group--compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.page-lojas .store-card__device-group--compact .store-card__device-label {
+  font-size: 0.58rem;
+  opacity: 0.75;
+}
+
+.page-lojas .store-card__device-group--compact .store-card__dots {
+  gap: 0.12rem;
+}
+
+.page-lojas .store-card__device-group--compact .dot {
+  width: 7px;
+  height: 7px;
+}
+
+.page-lojas .store-card__compact-chevron {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.page-lojas .store-card--clickable:hover .store-card__compact-chevron {
+  opacity: 1;
+  transform: translateX(2px);
+}
+
+.page-lojas .store-card__compact-note {
+  margin: 0;
+  padding: 0 0.65rem 0.45rem;
+  font-size: 0.68rem;
+  line-height: 1.3;
+  color: #f87171;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.page-lojas .store-card__message--compact {
+  padding: 0.35rem 0.65rem 0.55rem;
+  font-size: 0.72rem;
+}
+
+.page-lojas .stores-count--compact {
+  padding: 0 0.65rem 0.55rem;
+  font-size: 0.72rem;
+}
+
+/* Resumo online / offline */
+.page-lojas .stores-panel__stats--compact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.85rem;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.page-lojas .stores-stat {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.page-lojas .stores-stat strong {
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #e2e8f0;
+}
+
+.page-lojas .stores-stat--online strong {
+  color: #4ade80;
+}
+
+.page-lojas .stores-stat--offline strong {
+  color: #f87171;
+}
+
+.page-lojas .stores-stat--suspended strong {
+  color: #fbbf24;
+}
+
+.page-lojas .stores-stat--total {
+  margin-left: auto;
+}
+
+.page-lojas .stores-view-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.page-lojas .stores-view-toggle .chip {
+  padding: 0.28rem 0.5rem;
+  font-size: 0.68rem;
+}
+
+/* Lista em linhas */
+.page-lojas .stores-list--list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem 0.65rem 0.65rem;
+}
+
+.page-lojas .store-card--list {
+  min-height: 0;
+  border-radius: 8px;
+}
+
+.page-lojas .store-card--list .store-card__accent {
+  height: 2px;
+}
+
+.page-lojas .store-card__list-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.4rem 0.65rem 0.45rem;
+  min-width: 0;
+}
+
+.page-lojas .store-card__list-row-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.page-lojas .store-card__list-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.page-lojas .store-card__list-code {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #f1f5f9;
+  flex-shrink: 0;
+}
+
+.page-lojas .store-card__list-ratio {
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #cbd5e1;
+  flex-shrink: 0;
+}
+
+.page-lojas .store-card__list-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.4rem;
+  min-width: 0;
+}
+
+.page-lojas .store-card__list-note {
+  font-size: 0.68rem;
+  color: #f87171;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 14rem;
+}
+
+.page-lojas .store-card__list-chevron {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.page-lojas .store-card--list.store-card--clickable:hover .store-card__list-chevron {
+  opacity: 1;
+  transform: translateX(2px);
+}
+
+/* Métricas de tempo (todos os layouts) */
+.page-lojas .store-card__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+  font-size: 0.68rem;
+  line-height: 1.25;
+  color: #94a3b8;
+}
+
+.page-lojas .store-card__metrics--compact {
+  padding: 0 0.65rem 0.45rem;
+}
+
+.page-lojas .store-card__metrics--list {
+  padding-left: 0.1rem;
+}
+
+.page-lojas .store-card__metrics--detailed {
+  padding: 0.15rem 0 0;
+}
+
+.page-lojas .store-card__metrics-item--equip {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #cbd5e1;
+}
+
+.page-lojas .store-card__metrics-item--pct {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.page-lojas .store-card__metrics--ok .store-card__metrics-item--pct {
+  color: #4ade80;
+}
+
+.page-lojas .store-card__metrics--warn .store-card__metrics-item--pct {
+  color: #fbbf24;
+}
+
+.page-lojas .store-card__metrics--danger .store-card__metrics-item--pct {
+  color: #f87171;
+}
+
+.page-lojas .store-card__metrics-item--updated,
+.page-lojas .store-card__metrics-item--online {
+  white-space: nowrap;
+}
+
+.page-lojas .store-card__metrics-item--online {
+  color: #86efac;
+}
+
+.page-lojas .store-card__metrics-item--offline,
+.page-lojas .store-card__metrics--offline .store-card__metrics-note {
+  color: #f87171;
+}
+
+.page-lojas .store-card__metrics--suspended .store-card__metrics-item--online {
+  color: #fde68a;
+}
+
+.page-lojas .store-card__metrics-note {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.page-lojas .store-card__online-since,
+.page-lojas .store-card__offline-since {
+  font-weight: 700;
+}
+
+/* Cards detalhados (estilo dashboard) */
+.page-lojas .stores-list--detailed {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+  padding: 0.65rem;
+}
+
+.page-lojas .store-card--detailed {
+  min-height: 0;
+}
+
+.page-lojas .store-card--detailed .store-card__top {
+  padding: 0.65rem 0.75rem 0.35rem;
+}
+
+.page-lojas .store-card--detailed .store-card__body {
+  padding: 0 0.75rem 0.65rem;
+}
+
+@media (min-width: 1100px) {
+  .page-lojas .stores-list--compact {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .page-lojas .stores-panel__meta--inline {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .page-lojas .stores-stat--total {
+    margin-left: 0;
+  }
+
+  .page-lojas .stores-list--compact,
+  .page-lojas .stores-list--detailed {
+    grid-template-columns: 1fr;
+  }
+}
+

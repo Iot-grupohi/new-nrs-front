@@ -6,6 +6,7 @@
     ensureDefaultAgentToken,
     friendlyUserMessage,
     formatOfflineDuration,
+    formatOnlineDuration,
     noAgentMessage,
     isAgentUnavailableError,
     loadCatalog,
@@ -30,6 +31,43 @@
   let currentPageMode = null;
   let channelPickerGeneration = 0;
   let channelModalReady = false;
+
+  const LOJAS_LAYOUT_KEY = 'lav60:lojas-layout';
+  const LOJAS_LAYOUTS = ['compact', 'detailed', 'list'];
+  let lojasCardLayout = 'compact';
+
+  function loadLojasCardLayout() {
+    try {
+      const saved = localStorage.getItem(LOJAS_LAYOUT_KEY);
+      if (saved && LOJAS_LAYOUTS.includes(saved)) lojasCardLayout = saved;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function saveLojasCardLayout(layout) {
+    try {
+      localStorage.setItem(LOJAS_LAYOUT_KEY, layout);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function getLojasCardLayout() {
+    return currentPageMode === 'lojas' ? lojasCardLayout : 'detailed';
+  }
+
+  function isLojasCompactMode() {
+    return getLojasCardLayout() === 'compact';
+  }
+
+  function isLojasListMode() {
+    return getLojasCardLayout() === 'list';
+  }
+
+  function isLojasDetailedMode() {
+    return getLojasCardLayout() === 'detailed';
+  }
 
   const KPI_PANEL_CONFIG = {
     'stores-online': {
@@ -141,6 +179,99 @@
     unknown: 'Aguardando',
   };
 
+  const STATE_LABELS_SHORT = {
+    ok: 'OK',
+    partial: 'Parc.',
+    offline: 'Sem eq.',
+    unreachable: 'Off',
+    suspended: 'Susp.',
+    unknown: '…',
+  };
+
+  function isStoreOffline(store) {
+    if (store?.loading) return false;
+    if (isStoreSuspended(store)) return false;
+    return !isStoreOnline(store);
+  }
+
+  function computeLojasStats(stores = allStores) {
+    const ready = (stores || []).filter((s) => !s.loading);
+    let online = 0;
+    let offline = 0;
+    let suspended = 0;
+    ready.forEach((store) => {
+      if (isStoreSuspended(store)) suspended += 1;
+      else if (isStoreOnline(store)) online += 1;
+      else offline += 1;
+    });
+    return {
+      online,
+      offline,
+      suspended,
+      total: ready.length,
+      pending: (stores || []).length - ready.length,
+    };
+  }
+
+  function updateLojasStatsPanel(stores = allStores) {
+    if (currentPageMode !== 'lojas') return;
+    const stats = computeLojasStats(stores);
+    const onlineEl = $('storesStatOnline');
+    const offlineEl = $('storesStatOffline');
+    const suspendedEl = $('storesStatSuspended');
+    const suspendedWrap = $('storesStatSuspendedWrap');
+    const totalEl = $('storesStatTotal');
+    if (onlineEl) onlineEl.textContent = stats.total ? String(stats.online) : '—';
+    if (offlineEl) offlineEl.textContent = stats.total ? String(stats.offline) : '—';
+    if (suspendedEl) suspendedEl.textContent = stats.suspended ? String(stats.suspended) : '0';
+    if (suspendedWrap) {
+      suspendedWrap.classList.toggle('hidden', stats.suspended <= 0);
+    }
+    if (totalEl) totalEl.textContent = stats.total ? String(stats.total) : '—';
+
+    const subtitle = $('lojasSubtitle');
+    if (subtitle && stats.total) {
+      const parts = [`${stats.online} online`, `${stats.offline} offline`];
+      if (stats.suspended > 0) parts.push(`${stats.suspended} suspensa(s)`);
+      subtitle.textContent = `${parts.join(' · ')} · ${stats.total} loja(s)`;
+    }
+  }
+
+  function syncLojasViewToggleUi() {
+    const toggle = $('storesViewToggle');
+    if (!toggle) return;
+    toggle.querySelectorAll('[data-layout]').forEach((btn) => {
+      btn.classList.toggle('chip--active', btn.dataset.layout === lojasCardLayout);
+    });
+  }
+
+  function applyLojasGridLayoutClass(grid) {
+    if (!grid) return;
+    grid.classList.remove(
+      'stores-list--compact',
+      'stores-list--detailed',
+      'stores-list--list'
+    );
+    const layout = getLojasCardLayout();
+    grid.classList.add(`stores-list--${layout}`);
+  }
+
+  function storeSortRank(store) {
+    if (store.loading) return 4;
+    if (isStoreOnline(store)) return 0;
+    if (store.state === 'partial') return 1;
+    if (isStoreSuspended(store)) return 2;
+    return 3;
+  }
+
+  function sortStoresForDisplay(stores) {
+    return [...stores].sort((a, b) => {
+      const rank = storeSortRank(a) - storeSortRank(b);
+      if (rank !== 0) return rank;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  }
+
   const GROUP_LABELS = {
     washers: 'Lav',
     dryers: 'Sec',
@@ -188,8 +319,16 @@
     );
   }
 
+  function isStoreOnline(store) {
+    if (isStoreSuspended(store) || store.loading) return false;
+    if (store.accessible !== true) return false;
+    const online = store.summary?.online ?? 0;
+    return online > 0 || store.state === 'ok' || store.state === 'partial';
+  }
+
   function matchesFilter(store) {
     if (activeFilter === 'all') return true;
+    if (activeFilter === 'online') return isStoreOnline(store);
     if (activeFilter === 'suspended') return isStoreSuspended(store);
     if (activeFilter === 'unreachable') {
       return (
@@ -247,11 +386,11 @@
       .join('');
   }
 
-  function renderDeviceGroups(devices) {
+  function renderDeviceGroups(devices, { compact = false } = {}) {
     return Object.keys(GROUP_LABELS)
       .map(
         (group) => `
-        <div class="store-card__device-group">
+        <div class="store-card__device-group${compact ? ' store-card__device-group--compact' : ''}">
           <span class="store-card__device-label">${GROUP_LABELS[group]}</span>
           <div class="store-card__dots">${renderDots(devices, group)}</div>
         </div>`
@@ -274,6 +413,129 @@
     return `<span class="store-card__health-label--offline">${reason}${durHtml}</span>`;
   }
 
+  function buildStoreMetrics(store, { accessible, online, total, pct, suspended, operable }) {
+    if (store.loading) {
+      return { tone: 'neutral', segments: [], offlineReason: '' };
+    }
+
+    const segments = [];
+    let tone = 'neutral';
+    let offlineReason = '';
+
+    if (operable && !suspended) {
+      if (total > 0) {
+        segments.push({ kind: 'equip', text: `${online}/${total}` });
+        segments.push({ kind: 'pct', text: `${pct}%` });
+      }
+      const updated = formatTime(store.timestamp);
+      if (updated !== '—') {
+        segments.push({ kind: 'updated', text: `Atualizado ${updated}` });
+      }
+      const onlineDur = formatOnlineDuration(store.onlineSince);
+      if (onlineDur) {
+        segments.push({
+          kind: 'online',
+          text: `Online há ${onlineDur}`,
+          live: true,
+          since: store.onlineSince,
+        });
+      }
+      tone = pct >= 90 ? 'ok' : pct >= 70 ? 'warn' : 'danger';
+    } else if (operable && suspended) {
+      if (total > 0) segments.push({ kind: 'equip', text: `${online}/${total}` });
+      const updated = formatTime(store.timestamp);
+      if (updated !== '—') segments.push({ kind: 'updated', text: `Atualizado ${updated}` });
+      const onlineDur = formatOnlineDuration(store.onlineSince);
+      if (onlineDur) {
+        segments.push({
+          kind: 'online',
+          text: `Online há ${onlineDur}`,
+          live: true,
+          since: store.onlineSince,
+        });
+      }
+      tone = 'suspended';
+    } else if (suspended) {
+      offlineReason = store.storeNotice || 'Loja suspensa';
+      tone = 'suspended';
+    } else {
+      offlineReason = offlineStoreReason(store);
+      const offlineDur = formatOfflineDuration(store.offlineSince);
+      if (offlineDur) {
+        segments.push({
+          kind: 'offline',
+          text: `Offline há ${offlineDur}`,
+          live: true,
+          since: store.offlineSince,
+        });
+      }
+      tone = 'offline';
+    }
+
+    return { tone, segments, offlineReason };
+  }
+
+  function renderMetricsSegmentHtml(segment) {
+    if (segment.live && segment.since) {
+      const cls =
+        segment.kind === 'online' ? 'store-card__online-since' : 'store-card__offline-since';
+      const prefix = segment.kind === 'online' ? 'Online há ' : 'Offline há ';
+      return `${prefix}<strong class="${cls}">${escapeHtml(formatOfflineDuration(segment.since))}</strong>`;
+    }
+    return escapeHtml(segment.text);
+  }
+
+  function renderStoreMetricsRow(metrics, { layout = 'compact' } = {}) {
+    if (!metrics.segments.length && !metrics.offlineReason) return '';
+
+    const rowClass =
+      layout === 'list'
+        ? 'store-card__metrics store-card__metrics--list'
+        : layout === 'detailed'
+          ? 'store-card__metrics store-card__metrics--detailed'
+          : 'store-card__metrics store-card__metrics--compact';
+
+    if (metrics.offlineReason && !metrics.segments.some((s) => s.kind === 'equip' || s.kind === 'updated')) {
+      const offlineSeg = metrics.segments.find((s) => s.kind === 'offline');
+      const reason = escapeHtml(metrics.offlineReason);
+      const durHtml = offlineSeg ? ` · ${renderMetricsSegmentHtml(offlineSeg)}` : '';
+      return `<div class="${rowClass} store-card__metrics--${metrics.tone}"><span class="store-card__metrics-note">${reason}${durHtml}</span></div>`;
+    }
+
+    const html = metrics.segments
+      .map((segment) => {
+        const cls = `store-card__metrics-item store-card__metrics-item--${segment.kind}`;
+        return `<span class="${cls}">${renderMetricsSegmentHtml(segment)}</span>`;
+      })
+      .join('');
+
+    return `<div class="${rowClass} store-card__metrics--${metrics.tone}">${html}</div>`;
+  }
+
+  function metricsHealthLabelFromParts(metrics, store, { online, total }) {
+    if (metrics.offlineReason && metrics.tone === 'offline') {
+      const reason = escapeHtml(metrics.offlineReason);
+      const offlineSeg = metrics.segments.find((s) => s.kind === 'offline');
+      const durHtml = offlineSeg ? ` · ${renderMetricsSegmentHtml(offlineSeg)}` : '';
+      return `<span class="store-card__health-label--offline">${reason}${durHtml}</span>`;
+    }
+    if (metrics.tone === 'suspended' && !metrics.segments.length) {
+      return renderSuspendedHealthLabel(store);
+    }
+
+    const equip = metrics.segments.find((s) => s.kind === 'equip');
+    const updated = metrics.segments.find((s) => s.kind === 'updated');
+    const onlineSeg = metrics.segments.find((s) => s.kind === 'online');
+    const parts = [];
+    if (equip && total) {
+      parts.push(`<strong>${online}</strong> de ${total} online`);
+    }
+    if (updated) parts.push(updated.text);
+    if (onlineSeg) parts.push(renderMetricsSegmentHtml(onlineSeg));
+    if (!parts.length) return renderSuspendedHealthLabel(store);
+    return `<span>${parts.join(' · ')}</span>`;
+  }
+
   function renderSuspendedHealthLabel(store) {
     const note = store.storeNotice || 'Loja suspensa no sistema Lav60 — operação local permitida';
     const stats =
@@ -286,16 +548,24 @@
   function renderStoreCardBody(store, { accessible, online, total, pct }) {
     const suspended = isStoreSuspended(store);
     const operable = accessible && !store.loading;
+    const metrics = buildStoreMetrics(store, {
+      accessible,
+      online,
+      total,
+      pct,
+      suspended,
+      operable,
+    });
 
     let healthLabel;
     if (suspended && operable) {
-      healthLabel = renderSuspendedHealthLabel(store);
+      healthLabel = metricsHealthLabelFromParts(metrics, store, { online, total });
     } else if (operable) {
-      healthLabel = `<span><strong>${online}</strong> de ${total} online · ${formatTime(store.timestamp)}</span>`;
+      healthLabel = metricsHealthLabelFromParts(metrics, store, { online, total });
     } else if (suspended) {
       healthLabel = renderSuspendedHealthLabel(store);
     } else {
-      healthLabel = renderOfflineHealthLabel(store);
+      healthLabel = metricsHealthLabelFromParts(metrics, store, { online, total });
     }
 
     const healthPct = operable && !suspended ? `${pct}%` : suspended && total ? `${pct}%` : '—';
@@ -339,7 +609,7 @@
             <span class="store-card__health-pct">${healthPct}</span>
           </div>
         </div>
-        <div class="${devicesClass}">${renderDeviceGroups(store.devices)}</div>
+        <div class="${devicesClass}">${renderDeviceGroups(store.devices, { compact: false })}</div>
         ${ctaHtml}
       </div>`;
   }
@@ -350,8 +620,14 @@
       if (!since) return;
       const el = card.querySelector('.store-card__offline-since');
       if (!el) return;
-      const dur = formatOfflineDuration(since);
-      el.textContent = dur || '';
+      el.textContent = formatOfflineDuration(since) || '';
+    });
+    document.querySelectorAll('.store-card[data-online-since]').forEach((card) => {
+      const since = Number(card.dataset.onlineSince);
+      if (!since) return;
+      const el = card.querySelector('.store-card__online-since');
+      if (!el) return;
+      el.textContent = formatOnlineDuration(since) || '';
     });
   }
 
@@ -360,17 +636,81 @@
     offlineDurationTimer = setInterval(tickOfflineDurations, 30000);
   }
 
-  function buildStoreHeading(store) {
+  function buildStoreHeading(store, { compact = false } = {}) {
     const code = store.id.toUpperCase();
     const name = (store.name || '').trim();
     const sameAsCode =
       !name || name.toUpperCase() === code || name.toUpperCase() === store.id.toUpperCase();
+
+    if (compact) {
+      const title = sameAsCode ? code : name;
+      const subtitle = sameAsCode ? '' : code;
+      return `<h3 class="store-card__title store-card__title--compact" title="${escapeHtml(sameAsCode ? code : `${code} · ${name}`)}">${escapeHtml(title)}</h3>${subtitle ? `<span class="store-card__code store-card__code--compact">${escapeHtml(subtitle)}</span>` : ''}`;
+    }
 
     if (sameAsCode) {
       return `<h3 class="store-card__title">${escapeHtml(code)}</h3>`;
     }
 
     return `<span class="store-card__code">${escapeHtml(code)}</span><h3 class="store-card__title">${escapeHtml(name)}</h3>`;
+  }
+
+  function renderStoreCardCompactBody(store, { accessible, online, total, suspended, operable, pct }) {
+    const metrics = buildStoreMetrics(store, {
+      accessible,
+      online,
+      total,
+      pct,
+      suspended,
+      operable,
+    });
+    const devicesHtml =
+      operable || (suspended && total)
+        ? `<div class="store-card__devices store-card__devices--compact">${renderDeviceGroups(store.devices, { compact: true })}</div>`
+        : '';
+
+    const ratio = total ? `${online}/${total}` : '—';
+    const metricsHtml = renderStoreMetricsRow(metrics, { layout: 'compact' });
+
+    return `
+      <div class="store-card__compact-row">
+        <span class="store-card__compact-ratio" title="${online} de ${total} online">${ratio}</span>
+        ${devicesHtml}
+        <span class="store-card__compact-chevron" aria-hidden="true">→</span>
+      </div>
+      ${metricsHtml}`;
+  }
+
+  function renderStoreCardListBody(store, { accessible, online, total, suspended, operable, pillState, stateLabel, pct }) {
+    const code = store.id.toUpperCase();
+    const ratio = total ? `${online}/${total}` : '—';
+    const metrics = buildStoreMetrics(store, {
+      accessible,
+      online,
+      total,
+      pct,
+      suspended,
+      operable,
+    });
+    const dotsHtml =
+      operable || (suspended && total)
+        ? `<div class="store-card__list-dots">${renderDeviceGroups(store.devices, { compact: true })}</div>`
+        : '';
+    const metricsHtml = renderStoreMetricsRow(metrics, { layout: 'list' });
+
+    return `
+      <div class="store-card__list-inner">
+        <div class="store-card__list-row-top">
+          <div class="store-card__list-main">
+            <span class="store-card__list-code">${escapeHtml(code)}</span>
+            <span class="store-card__status pill pill--${pillState} pill--xs">${stateLabel}</span>
+            <span class="store-card__list-ratio" title="${online} de ${total} online">${ratio}</span>
+            ${dotsHtml}
+          </div>
+          <span class="store-card__list-chevron" aria-hidden="true">→</span>
+        </div>
+        ${metricsHtml}
+      </div>`;
   }
 
   function renderStoreCard(store) {
@@ -380,18 +720,24 @@
     const pct = healthPercent(summary);
     const suspended = isStoreSuspended(store);
     const accessible = store.accessible === true && !store.loading;
+    const operable = accessible && !store.loading;
     const canPickChannel = !store.loading;
     const isOfflineAlert = !store.loading && !accessible && !suspended;
     const state = store.loading ? 'unknown' : store.state || 'unreachable';
     const pillState = suspended ? 'suspended' : state;
     const stateLabel = store.loading
-      ? 'Carregando'
-      : STATE_LABELS[pillState] || STATE_LABELS[state] || 'Offline';
+      ? '…'
+      : isLojasListMode() || isLojasCompactMode()
+        ? STATE_LABELS_SHORT[pillState] || STATE_LABELS_SHORT[state] || 'Off'
+        : STATE_LABELS[pillState] || STATE_LABELS[state] || 'Offline';
 
     const card = document.createElement('article');
     card.className = [
       'store-card',
       'store-card--v2',
+      isLojasCompactMode() ? 'store-card--compact' : '',
+      isLojasListMode() ? 'store-card--list' : '',
+      isLojasDetailedMode() && currentPageMode === 'lojas' ? 'store-card--detailed' : '',
       `store-card--${suspended ? 'suspended' : state}`,
       canPickChannel ? 'store-card--clickable' : 'store-card--blocked',
       isOfflineAlert ? 'store-card--offline-alert' : '',
@@ -405,26 +751,58 @@
     if (isOfflineAlert && store.offlineSince) {
       card.dataset.offlineSince = String(store.offlineSince);
     }
+    if (store.onlineSince && operable) {
+      card.dataset.onlineSince = String(store.onlineSince);
+    }
 
     const storeLabel = store.name || store.id.toUpperCase();
 
     let bodyHtml = '';
     if (store.loading) {
-      bodyHtml = `<p class="store-card__message">Sincronizando equipamentos…</p>`;
+      bodyHtml = `<p class="store-card__message store-card__message--compact">Sincronizando…</p>`;
+    } else if (isLojasListMode()) {
+      bodyHtml = renderStoreCardListBody(store, {
+        accessible,
+        online,
+        total,
+        suspended,
+        operable,
+        pillState,
+        stateLabel,
+        pct,
+      });
+    } else if (isLojasCompactMode()) {
+      bodyHtml = renderStoreCardCompactBody(store, {
+        accessible,
+        online,
+        total,
+        suspended,
+        operable,
+        pct,
+      });
     } else {
       bodyHtml = renderStoreCardBody(store, { accessible, online, total, pct });
     }
 
-    card.innerHTML = `
-      <div class="store-card__accent" aria-hidden="true"></div>
-      <div class="store-card__top">
-        <div class="store-card__identity">
-          ${buildStoreHeading(store)}
+    if (isLojasListMode()) {
+      card.innerHTML = `
+        <div class="store-card__accent" aria-hidden="true"></div>
+        ${bodyHtml}`;
+    } else {
+      const topClass = isLojasCompactMode()
+        ? 'store-card__top store-card__top--compact'
+        : 'store-card__top';
+
+      card.innerHTML = `
+        <div class="store-card__accent" aria-hidden="true"></div>
+        <div class="${topClass}">
+          <div class="store-card__identity">
+            ${buildStoreHeading(store, { compact: isLojasCompactMode() })}
+          </div>
+          <span class="store-card__status pill pill--${pillState}${isLojasCompactMode() ? ' pill--xs' : ''}">${stateLabel}</span>
         </div>
-        <span class="store-card__status pill pill--${pillState}">${stateLabel}</span>
-      </div>
-      ${bodyHtml}
-    `;
+        ${bodyHtml}`;
+    }
 
     if (canPickChannel) {
       card.setAttribute('role', 'button');
@@ -452,6 +830,8 @@
     const grid = $('storesGrid');
     if (!grid) return;
     grid.innerHTML = '';
+    applyLojasGridLayoutClass(grid);
+    updateLojasStatsPanel(allStores);
 
     if (!allStores.length) {
       grid.innerHTML = `
@@ -469,13 +849,14 @@
         </div>`;
     } else {
       const frag = document.createDocumentFragment();
-      stores.forEach((store) => frag.appendChild(renderStoreCard(store)));
+      sortStoresForDisplay(stores).forEach((store) => frag.appendChild(renderStoreCard(store)));
       grid.appendChild(frag);
     }
 
     const countEl = $('storesCount');
     if (countEl) {
-      countEl.textContent = `Exibindo ${stores.length} de ${allStores.length} lojas`;
+      const stats = computeLojasStats(allStores);
+      countEl.textContent = `Exibindo ${stores.length} de ${stats.total} lojas`;
       countEl.classList.remove('hidden');
     }
     setupOfflineDurationTick();
@@ -615,7 +996,26 @@
     const dashboard = payload.dashboard || {};
     const stores = dashboard.stores || {};
     const devices = dashboard.devices || {};
-    const subtitle = $('dashboardSubtitle') || $('lojasSubtitle');
+    const lojasSubtitle = $('lojasSubtitle');
+    const dashboardSubtitle = $('dashboardSubtitle');
+
+    if (currentPageMode === 'lojas' && lojasSubtitle) {
+      if (payload.fromCache && payload.live === false) {
+        const count = payload.stores?.length || dashboard.stores?.total || 0;
+        lojasSubtitle.textContent = `${count} loja(s) · sincronizando…`;
+        return;
+      }
+      if (payload.refreshing && payload.progress?.total) {
+        lojasSubtitle.textContent = `Carregando catálogo (${payload.progress.done}/${payload.progress.total})…`;
+        return;
+      }
+      if (!payload.timestamp) {
+        lojasSubtitle.textContent = 'Carregando monitoramento…';
+      }
+      return;
+    }
+
+    const subtitle = dashboardSubtitle || lojasSubtitle;
     if (!subtitle) return;
 
     if (payload.fromCache && payload.live === false) {
@@ -705,6 +1105,8 @@
       }
       storesMeta.textContent = meta;
     }
+
+    updateLojasStatsPanel(payload.stores || allStores);
 
     if (activeKpiPanel) {
       renderAgentKpiModalContent(activeKpiPanel);
@@ -1878,6 +2280,27 @@
     }
   }
 
+  function initLojasViewToggle(signal) {
+    const toggle = $('storesViewToggle');
+    if (!toggle) return;
+    loadLojasCardLayout();
+    syncLojasViewToggleUi();
+    toggle.addEventListener(
+      'click',
+      (e) => {
+        const btn = e.target.closest('[data-layout]');
+        if (!btn) return;
+        const layout = btn.dataset.layout;
+        if (!LOJAS_LAYOUTS.includes(layout) || layout === lojasCardLayout) return;
+        lojasCardLayout = layout;
+        saveLojasCardLayout(layout);
+        syncLojasViewToggleUi();
+        filterAndRender();
+      },
+      { signal }
+    );
+  }
+
   function initFilters(signal) {
     const search = $('inputSearch');
     const chips = $('filterChips');
@@ -1929,6 +2352,7 @@
     }
 
     initFilters(signal);
+    initLojasViewToggle(signal);
     initKpiEvents(signal);
     initStoreChannelModal();
 

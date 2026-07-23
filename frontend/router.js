@@ -11,8 +11,8 @@
     lojas: {
       nav: 'lojas',
       title: 'LAV60 — Lojas',
-      view: 'views/lojas.html',
-      pageClass: 'page-dashboard',
+      view: 'views/lojas.html?v=4',
+      pageClass: 'page-dashboard page-lojas',
     },
     registros: {
       nav: 'registros',

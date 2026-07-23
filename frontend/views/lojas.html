@@ -1,43 +1,59 @@
-<header class="page-header page-header--split">
+<header class="page-header page-header--split page-header--compact">
   <nav class="page-header__nav" aria-label="Navegação da página">
-    <button type="button" class="page-header__back" data-page-back="dashboard">← Painel LAV60</button>
+    <button type="button" class="page-header__back" data-page-back="dashboard">← Painel</button>
   </nav>
   <div class="page-header__head">
     <h1 class="page-header__title">Lojas</h1>
-    <p class="page-header__subtitle" id="lojasSubtitle">Monitoramento das unidades em tempo real</p>
+    <p class="page-header__subtitle" id="lojasSubtitle">Carregando…</p>
   </div>
 </header>
 
-<main class="main-content">
-  <section class="stores-panel">
-    <div class="stores-panel__toolbar">
-      <div class="stores-panel__head">
-        <h2 class="stores-panel__title">Unidades</h2>
-        <span class="stores-panel__meta" id="storesMeta">—</span>
-      </div>
-      <div class="stores-panel__controls">
-        <label class="search-field">
-          <span class="visually-hidden">Buscar loja</span>
-          <span class="search-field__icon" aria-hidden="true">⌕</span>
-          <input type="search" id="inputSearch" placeholder="Buscar por nome ou código…" autocomplete="off">
-        </label>
-        <div class="filter-chips" id="filterChips" role="tablist">
-          <button type="button" class="chip chip--active" data-filter="all">Todas</button>
-          <button type="button" class="chip" data-filter="ok">Operacional</button>
-          <button type="button" class="chip" data-filter="partial">Parcial</button>
-          <button type="button" class="chip" data-filter="suspended">Suspensa</button>
-          <button type="button" class="chip" data-filter="unreachable">Offline</button>
-        </div>
-      </div>
+<main class="main-content main-content--compact">
+  <section class="stores-panel stores-panel--compact">
+    <div class="stores-panel__stats stores-panel__stats--compact" id="storesStats" aria-live="polite">
+      <span class="stores-stat stores-stat--online">
+        <strong id="storesStatOnline">—</strong> online
+      </span>
+      <span class="stores-stat stores-stat--offline">
+        <strong id="storesStatOffline">—</strong> offline
+      </span>
+      <span class="stores-stat stores-stat--suspended hidden" id="storesStatSuspendedWrap">
+        <strong id="storesStatSuspended">—</strong> susp.
+      </span>
+      <span class="stores-stat stores-stat--total">
+        <strong id="storesStatTotal">—</strong> total
+      </span>
     </div>
 
-    <div class="stores-list" id="storesGrid">
+    <div class="stores-panel__toolbar stores-panel__toolbar--compact">
+      <label class="search-field search-field--compact">
+        <span class="visually-hidden">Buscar loja</span>
+        <span class="search-field__icon" aria-hidden="true">⌕</span>
+        <input type="search" id="inputSearch" placeholder="Buscar código ou nome…" autocomplete="off">
+      </label>
+      <div class="filter-chips filter-chips--compact" id="filterChips" role="tablist">
+        <button type="button" class="chip chip--active" data-filter="all">Todas</button>
+        <button type="button" class="chip" data-filter="online">Online</button>
+        <button type="button" class="chip" data-filter="ok">OK</button>
+        <button type="button" class="chip" data-filter="partial">Parcial</button>
+        <button type="button" class="chip" data-filter="suspended">Susp.</button>
+        <button type="button" class="chip" data-filter="unreachable">Off</button>
+      </div>
+      <div class="stores-view-toggle" id="storesViewToggle" role="group" aria-label="Visualização dos cards">
+        <button type="button" class="chip chip--active" data-layout="compact" title="Cards compactos">Compacto</button>
+        <button type="button" class="chip" data-layout="detailed" title="Cards completos com barra de saúde">Detalhado</button>
+        <button type="button" class="chip" data-layout="list" title="Lista em linhas">Lista</button>
+      </div>
+      <span class="stores-panel__meta stores-panel__meta--inline" id="storesMeta">—</span>
+    </div>
+
+    <div class="stores-list stores-list--compact" id="storesGrid">
       <div class="stores-empty-state">
         <div class="spinner" aria-hidden="true"></div>
         <p>Carregando lojas…</p>
       </div>
     </div>
 
-    <p class="stores-count hidden" id="storesCount"></p>
+    <p class="stores-count stores-count--compact hidden" id="storesCount"></p>
   </section>
 </main>

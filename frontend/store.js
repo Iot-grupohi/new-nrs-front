@@ -7,6 +7,10 @@
     loadStoreCached,
     getCachedStoreEntry,
     configFromStatus,
+    configFromStatusCacheDoc,
+    statusFromStatusCacheDoc,
+    fetchStoreStatusCache,
+    resolveAgentEndpointFromStatusCache,
     fetchAgentConfig,
     agentRequest,
     resolveAgentEndpoint,
@@ -17,6 +21,7 @@
     watchStoreHeartbeat,
     fetchStoreStatusFromHeartbeat,
     ensureDefaultAgentToken,
+    getPollIntervalMs,
     normalizeStoreId,
     noAgentMessage,
     isAgentUnavailableError,
@@ -48,6 +53,7 @@
   let dryerLocks = {};
   let washerLocks = {};
   let uiReady = false;
+  let agentStatusPollTimer = null;
 
   const $ = (id) => document.getElementById(id);
 
@@ -927,6 +933,80 @@
     window.location.href = `index.html?blocked=${encodeURIComponent(pageStore)}#/lojas`;
   }
 
+  function startAgentStatusPolling() {
+    if (agentStatusPollTimer) return;
+    const intervalMs = Math.max(15000, getPollIntervalMs(catalog) || 30000);
+    agentStatusPollTimer = setInterval(() => {
+      void refreshStatus({ force: false });
+    }, intervalMs);
+  }
+
+  function stopAgentStatusPolling() {
+    if (!agentStatusPollTimer) return;
+    clearInterval(agentStatusPollTimer);
+    agentStatusPollTimer = null;
+  }
+
+  function applyStatusCacheBootstrap(doc, options = {}) {
+    if (!doc?.hit) return false;
+    let applied = false;
+    const status = statusFromStatusCacheDoc(storeMeta, doc, pageStore);
+    if (status?.summary?.total) {
+      applyStatus(status, options);
+      applied = true;
+    }
+    if (doc.config_fresh && doc.config_snapshot) {
+      const snapConfig = configFromStatusCacheDoc(doc.config_snapshot);
+      if (snapConfig) {
+        config = {
+          ...snapConfig,
+          machines: mergeMachinesCatalog(
+            snapConfig.machines,
+            config?.machines,
+            statusData?.machines
+          ),
+        };
+        syncConfigDevices(config, statusData);
+        applied = true;
+      }
+    }
+    return applied;
+  }
+
+  function finishStoreReady(heartbeatAlive, agentReachable) {
+    const configStore = normalizeStoreId(config?.store);
+    if (agentEndpoint?.unmatched || (configStore && configStore !== pageStore)) {
+      redirectToDashboard('config_store_mismatch', {
+        configStore,
+        pageStore,
+        agentEndpoint,
+      });
+      return false;
+    }
+
+    uiReady = true;
+    if (statusData) {
+      applyStatus(statusData);
+    } else {
+      renderDevices();
+    }
+
+    lav60Debug('store', 'ready — staying on store page');
+
+    if (config?.token_required && !agentToken?.trim()) {
+      showToast('Autenticação do agente indisponível. Contacte o suporte.', false);
+    }
+
+    if (heartbeatAlive) {
+      startLiveStatusWatch();
+    } else if (agentReachable) {
+      showToast('Pulse central desatualizado — operando via agente local', true);
+      void refreshStatus({ force: true });
+      startAgentStatusPolling();
+    }
+    return true;
+  }
+
   async function init() {
     lav60Debug('store', 'init', { pageStore, href: window.location.href });
     if (!pageStore) {
@@ -945,74 +1025,109 @@
 
       agentToken = await ensureDefaultAgentToken();
 
+      const [hbSnap, statusCache, cached] = await Promise.all([
+        fetchHeartbeatsSnapshot().catch((e) => {
+          lav60Debug('store', 'heartbeat unavailable', e?.message || e);
+          return null;
+        }),
+        fetchStoreStatusCache(pageStore, catalog),
+        getCachedStoreEntry(storeMeta, catalog),
+      ]);
+
       let heartbeatEntry = null;
       let heartbeatAlive = false;
-      try {
-        const hbSnap = await fetchHeartbeatsSnapshot();
-        heartbeatEntry = hbSnap.heartbeats?.[pageStore];
+      if (hbSnap?.heartbeats) {
+        heartbeatEntry = hbSnap.heartbeats[pageStore];
         heartbeatAlive = isHeartbeatEntryAlive(heartbeatEntry, catalog);
         lav60Debug('store', 'heartbeat', {
           entry: heartbeatEntry,
           alive: heartbeatAlive,
           timeout: catalog.heartbeat_timeout_seconds || 90,
         });
-        if (!heartbeatAlive) {
-          redirectToDashboard('heartbeat_offline', { heartbeatEntry });
-          return;
+        if (heartbeatEntry) {
+          const status = statusFromHeartbeatPayload(
+            storeMeta,
+            heartbeatEntry.payload || heartbeatEntry,
+            pageStore
+          );
+          if (status?.summary?.total) {
+            if (!config) config = configFromStatus(status);
+            applyStatus(status, { render: false });
+            updateStoreSuspendedBanner(storeMeta, heartbeatEntry);
+            lav60Debug('store', 'status from heartbeat', status.summary);
+          }
         }
-        const status = statusFromHeartbeatPayload(
-          storeMeta,
-          heartbeatEntry.payload || heartbeatEntry,
-          pageStore
-        );
-        if (status?.summary?.total) {
-          config = configFromStatus(status);
-          applyStatus(status, { render: false });
-          updateStoreSuspendedBanner(storeMeta, heartbeatEntry);
-          lav60Debug('store', 'status from heartbeat', status.summary);
-        }
-      } catch (e) {
-        lav60Debug('store', 'heartbeat unavailable — agente direto', e?.message || e);
       }
 
-      agentEndpoint = await resolveAgentEndpointForStore(
-        storeMeta,
-        catalog,
-        agentToken,
-        heartbeatEntry
-      );
+      if (applyStatusCacheBootstrap(statusCache, { render: false })) {
+        $('summaryTime').title = statusCache?.config_fresh
+          ? 'Cache Firebase · atualizando agente em segundo plano'
+          : 'Cache Firebase';
+        lav60Debug('store', 'bootstrap from firebase cache', {
+          configFresh: statusCache?.config_fresh,
+          alive: statusCache?.alive,
+        });
+      }
+
+      lav60Debug('store', 'cache', {
+        hasCard: Boolean(cached?.card),
+        accessible: cached?.card?.accessible,
+        fresh: cached?.fresh,
+        heartbeatAlive,
+        firebaseHit: Boolean(statusCache?.hit),
+      });
+
+      if (!statusData && applyCachedBootstrap(cached, { render: false })) {
+        $('summaryTime').title = '';
+        lav60Debug('store', 'bootstrap from indexeddb cache');
+      }
+
+      agentEndpoint =
+        resolveAgentEndpointFromStatusCache(statusCache, storeMeta, catalog, config) ||
+        (await resolveAgentEndpointForStore(storeMeta, catalog, agentToken, heartbeatEntry));
+
       lav60Debug('store', 'agent endpoint', agentEndpoint);
       if (agentEndpoint?.unmatched) {
         redirectToDashboard('agent_unmatched', { agentEndpoint });
         return;
       }
 
-      const cached = await getCachedStoreEntry(storeMeta, catalog);
-      lav60Debug('store', 'cache', {
-        hasCard: Boolean(cached?.card),
-        accessible: cached?.card?.accessible,
-        fresh: cached?.fresh,
-        heartbeatAlive,
-      });
-      // Cache antigo (IndexedDB) não bloqueia se heartbeat confirmou agente online
-      if (!heartbeatAlive && cached?.card) {
-        if (cached.card.agentUnavailable || isAgentUnavailableError(cached.card.error)) {
-          redirectToDashboard('cache_agent_unavailable', { error: cached.card.error });
-          return;
-        }
-        if (!cached.card.accessible) {
-          redirectToDashboard('cache_not_accessible', { error: cached.card.error });
-          return;
-        }
-      }
+      let agentReachable = false;
+      const cacheConfigFresh = Boolean(statusCache?.config_fresh && statusCache?.config_snapshot);
+      const canBootstrapUi = Boolean(
+        statusData?.summary?.total ||
+          (config?.devices &&
+            ['washers', 'dryers', 'dosers'].some(
+              (key) => Array.isArray(config.devices[key]) && config.devices[key].length
+            ))
+      );
+      const deferConfigLoad = cacheConfigFresh || canBootstrapUi;
 
-      if (!statusData && applyCachedBootstrap(cached, { render: false })) {
-        $('summaryTime').title = '';
-        lav60Debug('store', 'bootstrap from cache');
+      if (deferConfigLoad) {
+        agentReachable = cacheConfigFresh || canBootstrapUi;
+        if (!finishStoreReady(heartbeatAlive, agentReachable)) return;
+        void loadConfig()
+          .then(() => {
+            agentReachable = true;
+            lav60Debug('store', 'background loadConfig ok');
+            if (uiReady) {
+              if (statusData) applyStatus(statusData);
+              else renderDevices();
+            }
+          })
+          .catch((e) => {
+            lav60Debug('store', 'background loadConfig failed', e?.message || e);
+            if (!cacheConfigFresh && !canBootstrapUi) {
+              if (!heartbeatAlive && redirectIfNoAgent(e?.message || e)) return;
+              showOperatorError('Configuração', e);
+            }
+          });
+        return;
       }
 
       try {
         await loadConfig();
+        agentReachable = true;
         lav60Debug('store', 'loadConfig ok', {
           store: config?.store,
           token_required: config?.token_required,
@@ -1020,37 +1135,17 @@
         });
       } catch (e) {
         lav60Debug('store', 'loadConfig failed', e?.message || e);
+        if (!heartbeatAlive && !statusCache?.alive) {
+          if (redirectIfNoAgent(e?.message || e)) return;
+          redirectToDashboard('heartbeat_offline', { heartbeatEntry, error: e?.message || e });
+          return;
+        }
         if (redirectIfNoAgent(e?.message || e)) return;
         showOperatorError('Configuração', e);
         return;
       }
 
-      const configStore = normalizeStoreId(config?.store);
-      if (agentEndpoint?.unmatched || (configStore && configStore !== pageStore)) {
-        redirectToDashboard('config_store_mismatch', {
-          configStore,
-          pageStore,
-          agentEndpoint,
-        });
-        return;
-      }
-
-      uiReady = true;
-      if (statusData) {
-        applyStatus(statusData);
-      } else {
-        renderDevices();
-      }
-
-      lav60Debug('store', 'ready — staying on store page');
-
-      if (config?.token_required && !agentToken?.trim()) {
-        showToast('Autenticação do agente indisponível. Contacte o suporte.', false);
-      }
-
-      if (heartbeatAlive) {
-        startLiveStatusWatch();
-      }
+      finishStoreReady(heartbeatAlive, agentReachable);
     } catch (e) {
       showOperatorError('Inicialização', e);
     }
@@ -1058,6 +1153,7 @@
 
   window.addEventListener('beforeunload', () => {
     if (stopHeartbeatWatch) stopHeartbeatWatch();
+    stopAgentStatusPolling();
   });
 
   (async () => {

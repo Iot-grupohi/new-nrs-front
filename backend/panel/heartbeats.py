@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 
 from panel.catalog import _catalog_settings
 from panel.lav60_env import env_value
+from panel import status_store
 
 router = APIRouter(prefix="/api/heartbeats", tags=["panel-heartbeats"])
 ingest_router = APIRouter(tags=["panel-heartbeats"])
@@ -71,6 +72,13 @@ def _central_snapshot_url() -> str:
     central = env_value("PANEL_CENTRAL_URL")
     if central:
         return f"{central.rstrip('/')}/api/heartbeats"
+    heartbeat_url = env_value("PANEL_HEARTBEAT_URL")
+    if heartbeat_url:
+        url = heartbeat_url.rstrip("/")
+        if url.endswith("/api/heartbeat"):
+            return f"{url[:-len('/api/heartbeat')]}/api/heartbeats"
+        if url.endswith("/heartbeat"):
+            return f"{url[:-len('heartbeat')]}heartbeats"
     return ""
 
 
@@ -94,6 +102,10 @@ def ingest_heartbeat(store_id: str, payload: dict[str, Any]) -> None:
         "payload": payload,
     }
     _heartbeats[sid] = entry
+    try:
+        status_store.ingest_heartbeat_entry(sid, entry, _heartbeat_timeout_seconds())
+    except Exception:
+        pass
     _broadcast(
         {
             "type": "heartbeat",
@@ -137,7 +149,12 @@ def _merge_snapshot(data: dict[str, Any]) -> None:
             return
     for store_id, entry in rows.items():
         if isinstance(entry, dict):
-            _heartbeats[_normalize_store_id(store_id)] = entry
+            sid = _normalize_store_id(store_id)
+            _heartbeats[sid] = entry
+            try:
+                status_store.ingest_heartbeat_entry(sid, entry, _heartbeat_timeout_seconds())
+            except Exception:
+                pass
     _last_sync = time.time()
 
 

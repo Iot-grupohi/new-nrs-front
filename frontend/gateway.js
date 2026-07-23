@@ -12,6 +12,7 @@
     fetchStoreStatusFromHeartbeat,
     canOperateMachineStatus,
     isDeviceVisibleInFrontend,
+    isDeviceRegisteredInCatalog,
     verifyStoreGatewayLed,
     formatStoreGatewayError,
     syncConfigDevices,
@@ -598,7 +599,7 @@
       const merged = new Set((cfg.devices[key] || []).map((id) => normalizeStoreId(id)));
       (agent[key] || []).forEach((id) => {
         const norm = normalizeStoreId(id);
-        if (isDeviceVisibleInFrontend(dtype, norm, ctx)) merged.add(norm);
+        if (isDeviceRegisteredInCatalog(cfg.machines || [], dtype, norm)) merged.add(norm);
       });
       cfg.devices[key] = [...merged].sort();
     });

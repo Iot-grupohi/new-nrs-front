@@ -2,6 +2,7 @@
   'use strict';
 
   const OFFLINE_SINCE_KEY = 'lav60_offline_since';
+  const ONLINE_SINCE_KEY = 'lav60_online_since';
   const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
   const Cache = window.Lav60Cache;
 
@@ -60,6 +61,15 @@
       m.includes('signal is aborted')
     ) {
       return 'Sem conexão com a loja';
+    }
+
+    if (
+      m.includes('cloudflare') ||
+      m.includes('origin web server') ||
+      m.includes('bad gateway') ||
+      m.includes('túnel da loja indisponível')
+    ) {
+      return 'Túnel da loja instável (Cloudflare). Tentando via gateway… Se persistir, aguarde 1 minuto e tente de novo.';
     }
 
     if (
@@ -201,6 +211,129 @@
 
   function panelAgentConfigUrl(storeId) {
     return `${window.location.origin}/api/stores/${normalizeStoreId(storeId)}/agent/config`;
+  }
+
+  function panelStoreStatusCacheUrl(storeId) {
+    return `${window.location.origin}/api/stores/${normalizeStoreId(storeId)}/status-cache`;
+  }
+
+  function panelStoresStatusCacheBulkUrl() {
+    return `${window.location.origin}/api/stores/status-cache`;
+  }
+
+  async function fetchStoreStatusCache(storeId, catalog) {
+    const timeoutMs = Math.min(8000, getHeartbeatTimeoutMs(catalog) || 8000);
+    try {
+      const res = await fetchWithTimeout(
+        panelStoreStatusCacheUrl(storeId),
+        { credentials: 'same-origin' },
+        timeoutMs
+      );
+      if (!res.ok) return null;
+      return res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  async function fetchStoresStatusCacheBulk(catalog) {
+    const timeoutMs = Math.min(12000, (getHeartbeatTimeoutMs(catalog) || 8000) + 4000);
+    try {
+      const res = await fetchWithTimeout(
+        panelStoresStatusCacheBulkUrl(),
+        { credentials: 'same-origin' },
+        timeoutMs
+      );
+      if (!res.ok) return null;
+      return res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  function statusFromStatusCacheDoc(meta, doc, catalogId) {
+    if (!doc || doc.available === false) return null;
+    const id = normalizeStoreId(catalogId || doc.store || meta?.id);
+    const network = doc.network;
+    const hasNetwork = networkPayloadHasDevices(network);
+    const machines = mergeMachinesCatalog(doc.machines);
+    if (!hasNetwork && !machines.length) return null;
+
+    const status = {
+      store: id,
+      washers: network?.washers || {},
+      dryers: network?.dryers || {},
+      dosers: network?.dosers || {},
+      ac: Boolean(network?.ac),
+      timestamp:
+        network?.timestamp || doc.received_at_iso || new Date(doc.received_at * 1000).toISOString(),
+      summary: network?.summary || null,
+      machines,
+    };
+    if (!status.summary?.total) attachSummary(status);
+    return applyFrontendDeviceVisibility(status);
+  }
+
+  function configFromStatusCacheDoc(snap) {
+    if (!snap || typeof snap !== 'object') return null;
+    const machines = mergeMachinesCatalog(snap.machines);
+    return {
+      store: normalizeStoreId(snap.store),
+      token_required: Boolean(snap.token_required),
+      devices: snap.devices?.washers
+        ? snap.devices
+        : devicesFromMachines(machines, snap),
+      machines,
+      washer_dosage_options: snap.washer_dosage_options?.length
+        ? snap.washer_dosage_options
+        : WASHER_DOSAGE_OPTIONS,
+      washer_am_options:
+        snap.washer_am_options ||
+        WASHER_DOSAGE_OPTIONS.filter((o) => o.value).map((o) => o.value),
+      dryer_minutes: snap.dryer_minutes?.length ? snap.dryer_minutes : [15, 30, 45],
+      ac_temperatures: snap.ac_temperatures?.length ? snap.ac_temperatures : ['18', '22', 'off'],
+      agent_url: snap.agent_url,
+      network_check_interval: snap.network_check_interval,
+    };
+  }
+
+  function resolveAgentEndpointFromStatusCache(doc, meta, catalog, agentConfig = null) {
+    if (!doc || doc.available === false) {
+      return resolveAgentEndpoint(meta, catalog, agentConfig);
+    }
+    const catalogId = normalizeStoreId(meta?.id || doc.store);
+    if (shouldUsePanelAgentProxy(catalogId)) {
+      return { base: window.location.origin, storeId: catalogId, panelProxy: true };
+    }
+    const url = doc.agent_url || doc.config_snapshot?.agent_url || agentConfig?.agent_url;
+    if (url) {
+      const base = normalizeAgentUrl(url);
+      if (base) {
+        return { base: base.replace(/\/$/, ''), storeId: catalogId };
+      }
+    }
+    return resolveAgentEndpoint(meta, catalog, agentConfig);
+  }
+
+  function enrichCardsFromStatusCache(cards, catalog, bulk) {
+    const storesMap = bulk?.stores;
+    if (!bulk?.available || !storesMap || typeof storesMap !== 'object') return;
+
+    for (const card of cards) {
+      if (card.accessible && !card.agentPulseStale) continue;
+      const doc = storesMap[normalizeStoreId(card.id)];
+      if (!doc) continue;
+      const meta = { id: card.id, name: card.name };
+      const status = statusFromStatusCacheDoc(meta, doc, card.id);
+      if (!status?.summary?.total) continue;
+      const hb = heartbeatState.get(normalizeStoreId(card.id));
+      applyLiveCardSnapshot(card, meta, hb, catalog, status);
+      if (doc.alive) {
+        card.accessible = true;
+        card.agentPulseStale = !isHeartbeatEntryAlive(hb, catalog);
+        card.state = card.agentPulseStale ? 'online_stale_pulse' : 'online';
+      }
+    }
   }
 
   function panelAgentGatewayUrl(storeId, path) {
@@ -653,6 +786,30 @@
     { type: 'doser', id: '321' },
   ];
 
+  /** Dosadora espelha a lavadora com o mesmo ID (ex.: lav 321 → dos 321). */
+  const WASHER_DOSER_PAIRS = [{ washer: '321', doser: '321' }];
+
+  function isPairedDoserId(doserId) {
+    const id = normalizeStoreId(doserId);
+    return WASHER_DOSER_PAIRS.some((pair) => normalizeStoreId(pair.doser) === id);
+  }
+
+  function pairedWasherForDoser(doserId) {
+    const id = normalizeStoreId(doserId);
+    const pair = WASHER_DOSER_PAIRS.find((row) => normalizeStoreId(row.doser) === id);
+    return pair ? normalizeStoreId(pair.washer) : null;
+  }
+
+  function applyWasherDoserPairs(ids, machines) {
+    WASHER_DOSER_PAIRS.forEach(({ washer, doser }) => {
+      const washerId = normalizeStoreId(washer);
+      const doserId = normalizeStoreId(doser);
+      if (!ids.washers.has(washerId)) return;
+      if (!isDeviceRegisteredInCatalog(machines, 'doser', doserId)) return;
+      ids.dosers.add(doserId);
+    });
+  }
+
   function isFixedMapExtra(deviceType, machineId) {
     const mid = normalizeStoreId(machineId);
     const dtype = String(deviceType || '').toLowerCase();
@@ -663,17 +820,22 @@
 
   /** Lav/sec exigem API Lav60; dosadoras usam rede; extras 321/210/321 só se cadastrados na API. */
   function isDeviceRegisteredInCatalog(machines, deviceType, machineId) {
+    const mid = normalizeStoreId(machineId);
+    const dtype = String(deviceType || '').toLowerCase();
+
+    if (dtype === 'doser' && isPairedDoserId(mid)) {
+      const washerId = pairedWasherForDoser(mid);
+      return washerId ? isDeviceRegisteredInCatalog(machines, 'washer', washerId) : false;
+    }
+
     if (isFixedMapExtra(deviceType, machineId)) {
       if (!Array.isArray(machines) || !machines.length) {
         return false;
       }
-      const mid = normalizeStoreId(machineId);
-      const dtype = String(deviceType || '').toLowerCase();
       return machines.some(
         (m) => machineRecordType(m) === dtype && normalizeStoreId(m.id) === mid
       );
     }
-    const dtype = String(deviceType || '').toLowerCase();
     if (dtype === 'doser') {
       return true;
     }
@@ -683,7 +845,6 @@
     if (!machines.length) {
       return !isFixedMapExtra(deviceType, machineId);
     }
-    const mid = normalizeStoreId(machineId);
     return machines.some(
       (m) => machineRecordType(m) === dtype && normalizeStoreId(m.id) === mid
     );
@@ -695,6 +856,14 @@
     if (!isDeviceRegisteredInCatalog(machines, deviceType, machineId)) return false;
     const mid = normalizeStoreId(machineId);
     const dtype = String(deviceType || '').toLowerCase();
+
+    if (dtype === 'doser' && isPairedDoserId(mid)) {
+      const washerId = pairedWasherForDoser(mid);
+      const washerOnline = washerId ? (network?.washers || {})[washerId] === true : false;
+      const doserOnline = (network?.dosers || {})[mid] === true;
+      return washerOnline || doserOnline;
+    }
+
     const mustBeOnline = isFixedMapExtra(dtype, mid);
     if (!mustBeOnline) return true;
     const key =
@@ -732,10 +901,11 @@
     catalog.forEach((m) => {
       const t = machineRecordType(m);
       if (t === 'doser') return;
-      if (!isDeviceVisibleInFrontend(t, m.id, net)) return;
+      if (!isDeviceRegisteredInCatalog(catalog, t, m.id)) return;
       const key = t === 'washer' ? 'washers' : t === 'dryer' ? 'dryers' : null;
       if (key) ids[key].add(normalizeStoreId(m.id));
     });
+    applyWasherDoserPairs(ids, catalog);
     const networkKeys = catalog.length ? ['dosers'] : ['washers', 'dryers', 'dosers'];
     networkKeys.forEach((key) => {
       const dtype = { washers: 'washer', dryers: 'dryer', dosers: 'doser' }[key];
@@ -1205,6 +1375,18 @@
     localStorage.setItem(OFFLINE_SINCE_KEY, JSON.stringify(map));
   }
 
+  function loadOnlineSinceMap() {
+    try {
+      return JSON.parse(localStorage.getItem(ONLINE_SINCE_KEY) || '{}');
+    } catch {
+      return {};
+    }
+  }
+
+  function saveOnlineSinceMap(map) {
+    localStorage.setItem(ONLINE_SINCE_KEY, JSON.stringify(map));
+  }
+
   const GATEWAY_CACHE_KEY = 'lav60:gateway:v1';
   const GATEWAY_CACHE_VERSION = 4;
   const GATEWAY_TTL_MS = 5 * 60 * 1000;
@@ -1334,9 +1516,11 @@
   }
 
   function syncStoreOfflineSince(cards) {
-    const map = loadOfflineSinceMap();
+    const offlineMap = loadOfflineSinceMap();
+    const onlineMap = loadOnlineSinceMap();
     const now = Date.now();
-    let changed = false;
+    let offlineChanged = false;
+    let onlineChanged = false;
 
     cards.forEach((card) => {
       if (card.loading) return;
@@ -1345,23 +1529,34 @@
         const serverSince = card.agent_offline_since_ms;
         if (serverSince) {
           card.offlineSince = serverSince;
-        } else if (!map[card.id]) {
-          map[card.id] = now;
-          changed = true;
-          card.offlineSince = map[card.id];
+        } else if (!offlineMap[card.id]) {
+          offlineMap[card.id] = now;
+          offlineChanged = true;
+          card.offlineSince = offlineMap[card.id];
         } else {
-          card.offlineSince = map[card.id];
+          card.offlineSince = offlineMap[card.id];
         }
-      } else if (map[card.id]) {
-        delete map[card.id];
-        changed = true;
-        card.offlineSince = null;
+        if (onlineMap[card.id]) {
+          delete onlineMap[card.id];
+          onlineChanged = true;
+        }
+        card.onlineSince = null;
       } else {
+        if (offlineMap[card.id]) {
+          delete offlineMap[card.id];
+          offlineChanged = true;
+        }
         card.offlineSince = null;
+        if (!onlineMap[card.id]) {
+          onlineMap[card.id] = now;
+          onlineChanged = true;
+        }
+        card.onlineSince = onlineMap[card.id];
       }
     });
 
-    if (changed) saveOfflineSinceMap(map);
+    if (offlineChanged) saveOfflineSinceMap(offlineMap);
+    if (onlineChanged) saveOnlineSinceMap(onlineMap);
     return cards;
   }
 
@@ -1379,6 +1574,10 @@
     if (hr >= 1) return `${hr}h ${min % 60}min`;
     if (min >= 1) return `${min} min`;
     return 'menos de 1 min';
+  }
+
+  function formatOnlineDuration(sinceMs) {
+    return formatOfflineDuration(sinceMs);
   }
 
   function assemblePayload(cards, extra = {}) {
@@ -1658,6 +1857,10 @@
   async function enrichOfflineCardsFromAgentProbe(cards, catalog, token) {
     const targets = cards.filter((card) => {
       if (card.accessible || card.loading) return false;
+      const hasDots = Object.values(card.devices || {}).some(
+        (list) => Array.isArray(list) && list.length
+      );
+      if (hasDots && card.summary?.total) return false;
       const hb = heartbeatState.get(normalizeStoreId(card.id));
       return heartbeatHasAgentPayload(hb) || card.agentPulseStale;
     });
@@ -2405,6 +2608,9 @@
     let cards = (catalog.stores || []).map((meta) =>
       buildCardFromHeartbeat(meta, catalog, dashboardCacheMap)
     );
+
+    const statusBulk = await fetchStoresStatusCacheBulk(catalog);
+    enrichCardsFromStatusCache(cards, catalog, statusBulk);
     await enrichOfflineCardsFromAgentProbe(cards, catalog, token);
     await enrichOfflineCardsFromCache(cards, catalog);
 
@@ -2555,6 +2761,12 @@
     isHeartbeatEntryAlive,
     lav60Debug,
     fetchHeartbeatsSnapshot,
+    fetchStoreStatusCache,
+    fetchStoresStatusCacheBulk,
+    statusFromStatusCacheDoc,
+    configFromStatusCacheDoc,
+    resolveAgentEndpointFromStatusCache,
+    enrichCardsFromStatusCache,
     watchStoreHeartbeat,
     fetchStoreStatusFromHeartbeat,
     startHeartbeatMonitor,
@@ -2582,6 +2794,7 @@
     devicesFromMachines,
     syncConfigDevices,
     isDeviceVisibleInFrontend,
+    isDeviceRegisteredInCatalog,
     applyFrontendDeviceVisibility,
     resolveStoreLav60Status,
     isStoreLav60Suspended,
@@ -2595,6 +2808,7 @@
     agentRequest,
     attachSummary,
     formatOfflineDuration,
+    formatOnlineDuration,
     getStoreGatewayCacheEntry,
     setStoreGatewayCacheEntry,
     isGatewayCacheFresh,
