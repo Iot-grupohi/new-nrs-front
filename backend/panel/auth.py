@@ -70,6 +70,32 @@ def _session_user(session_id: str | None) -> dict[str, Any] | None:
     return row.get("user")
 
 
+def get_session_user(request: Request) -> dict[str, Any] | None:
+    session_id = _read_session_id(request)
+    user = _session_user(session_id)
+    if session_id and session_id in _sessions and user:
+        _sessions[session_id]["touched_at"] = time.time()
+    return user
+
+
+def _log_auth_audit(user: dict[str, Any] | None, body: dict[str, Any], request: Request) -> None:
+    try:
+        from panel import audit_store
+
+        if not audit_store.audit_status().get("available"):
+            return
+        client_ip = (request.headers.get("X-Forwarded-For") or request.client.host or "").split(",")[0].strip()
+        user_agent = (request.headers.get("User-Agent") or "")[:400]
+        audit_store.write_log(
+            body,
+            user=user,
+            client_ip=client_ip or None,
+            user_agent=user_agent or None,
+        )
+    except Exception:
+        pass
+
+
 @router.get("/config")
 async def auth_config() -> dict[str, Any]:
     firebase = _firebase_config()
@@ -100,7 +126,22 @@ async def auth_session(request: Request, response: Response) -> dict[str, Any]:
     if not id_token:
         raise HTTPException(400, "idToken obrigatório")
 
-    user = await _verify_firebase_token(id_token)
+    try:
+        user = await _verify_firebase_token(id_token)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            _log_auth_audit(
+                None,
+                {
+                    "action": "auth_login_failed",
+                    "label": "Tentativa de login recusada",
+                    "success": False,
+                    "page": "login",
+                    "error": str(exc.detail),
+                },
+                request,
+            )
+        raise
     session_id = secrets.token_urlsafe(32)
     now = time.time()
     _sessions[session_id] = {"user": user, "created_at": now, "touched_at": now}
@@ -111,6 +152,16 @@ async def auth_session(request: Request, response: Response) -> dict[str, Any]:
         samesite="lax",
         max_age=_SESSION_MAX_AGE,
         path="/",
+    )
+    _log_auth_audit(
+        user,
+        {
+            "action": "auth_login",
+            "label": f"Login · {user.get('email', '')}",
+            "success": True,
+            "page": "login",
+        },
+        request,
     )
     return {"user": user}
 
@@ -154,7 +205,25 @@ async def auth_touch(request: Request) -> dict[str, str]:
 @router.post("/logout")
 async def auth_logout(request: Request, response: Response) -> dict[str, str]:
     session_id = _read_session_id(request)
+    user = _session_user(session_id)
+    body: dict[str, Any] = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     if session_id:
         _sessions.pop(session_id, None)
     response.delete_cookie(_SESSION_COOKIE, path="/")
+    email = (user or {}).get("email") or str(body.get("email") or "").strip()
+    if email or user:
+        _log_auth_audit(
+            user or {"email": email},
+            {
+                "action": "auth_logout",
+                "label": f"Logout · {email}" if email else "Logout do painel",
+                "success": True,
+                "page": "panel",
+            },
+            request,
+        )
     return {"status": "ok"}

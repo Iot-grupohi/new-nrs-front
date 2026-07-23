@@ -7,20 +7,15 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from panel import audit_store
+from panel.auth import auth_enabled, get_session_user
 
 router = APIRouter(prefix="/api/audit", tags=["panel-audit"])
 
 
-def _operator_email(request: Request) -> str | None:
-    try:
-        from panel.auth import _read_session_id, _session_user
-
-        user = _session_user(_read_session_id(request))
-        if user:
-            return str(user.get("email") or "").strip() or None
-    except Exception:
-        pass
-    return None
+def _client_meta(request: Request) -> tuple[str | None, str | None]:
+    ip = (request.headers.get("X-Forwarded-For") or request.client.host or "").split(",")[0].strip()
+    ua = (request.headers.get("User-Agent") or "")[:400]
+    return ip or None, ua or None
 
 
 @router.get("/status")
@@ -29,27 +24,39 @@ async def audit_status() -> dict[str, Any]:
 
 
 @router.post("/log")
-async def audit_log(request: Request) -> Response:
+async def audit_log(request: Request) -> dict[str, Any]:
     status = audit_store.audit_status()
     if not status.get("available"):
-        return Response(status_code=503)
+        raise HTTPException(503, "audit_unavailable")
+
+    user = get_session_user(request)
+    if auth_enabled() and not user:
+        raise HTTPException(401, "Login required")
+
     try:
         body = await request.json()
-        audit_store.write_log(body, operator_email=_operator_email(request))
-        return Response(status_code=200)
+    except Exception as exc:
+        raise HTTPException(400, "JSON inválido") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(400, "JSON inválido")
+
+    client_ip, user_agent = _client_meta(request)
+    try:
+        audit_store.write_log(body, user=user, client_ip=client_ip, user_agent=user_agent)
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
+    return {"ok": True, "collection": status.get("collection")}
 
 
 @router.get("/logs")
 async def audit_logs(
-    request: Request,
     limit: int = Query(50, ge=1, le=200),
     store: str | None = Query(None),
     operator: str | None = Query(None),
     action: str | None = Query(None),
     success: str | None = Query(None),
     before_ms: int | None = Query(None),
+    skip_total: bool = Query(False),
 ) -> dict[str, Any]:
     status = audit_store.audit_status()
     if not status.get("available"):
@@ -60,6 +67,8 @@ async def audit_logs(
             "detail": "audit_unavailable",
             "hint": status.get("hint"),
             "reason": status.get("reason"),
+            "action_labels": audit_store.ACTION_LABELS_PT,
+            "device_labels": audit_store.DEVICE_LABELS_PT,
         }
     try:
         return audit_store.query_logs(
@@ -69,6 +78,7 @@ async def audit_logs(
             action=action,
             success=success,
             before_ms=before_ms,
+            include_total=not skip_total and before_ms is None,
         )
     except Exception as exc:
         raise HTTPException(500, str(exc)) from exc
