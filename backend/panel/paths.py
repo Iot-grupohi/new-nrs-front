@@ -10,6 +10,7 @@ PANEL_PREFIXES = (
     "/api/stores",
     "/api/reports",
     "/api/heartbeats",
+    "/api/heartbeat",
     "/api/audit",
     "/api/infra",
     "/api/support",

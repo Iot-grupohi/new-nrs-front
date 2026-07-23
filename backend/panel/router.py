@@ -31,6 +31,7 @@ def mount_panel(
 
     app.include_router(auth.router)
     app.include_router(catalog.router)
+    app.include_router(heartbeats.ingest_router)
     app.include_router(heartbeats.router)
     app.include_router(audit.router)
     app.include_router(infra.router)
