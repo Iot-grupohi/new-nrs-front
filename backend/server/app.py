@@ -37,7 +37,7 @@ from server.totem import (
     totem_info,
     totem_relative_path,
 )
-from panel.paths import is_panel_path
+from panel.paths import is_panel_path, is_frontend_static_path
 from panel.router import mount_panel
 
 load_dotenv()
@@ -116,6 +116,7 @@ def _require_portal_token(request: Request) -> None:
     if (
         request.url.path in PUBLIC_PATHS
         or is_panel_path(request.url.path)
+        or is_frontend_static_path(request.url.path)
         or is_gateway_path(request.url.path)
         or is_powpay_path(request.url.path)
         or is_totem_path(request.url.path)
