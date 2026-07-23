@@ -249,7 +249,10 @@ def _do_error_message(status: int, body: Any) -> str:
     if isinstance(body, dict):
         msg = body.get("message") or body.get("id") or body.get("error")
         if msg:
-            return str(msg)
+            text = str(msg)
+            if "unable to authenticate" in text.lower():
+                return "Token DigitalOcean inválido ou expirado — atualize DIGITALOCEAN_TOKEN no .env da VPS"
+            return text
     if status == 401:
         return "Token DigitalOcean inválido ou expirado"
     if status == 404:

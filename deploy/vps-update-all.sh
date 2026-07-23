@@ -48,6 +48,19 @@ patch_env "FIREBASE_APP_ID" "1:233168175568:web:64044f316c1ec7188a39d5"
 patch_env "FIREBASE_SERVICE_ACCOUNT_FILE" "$SA_FILE"
 patch_env "FIREBASE_AUDIT_COLLECTION" "audit_logs"
 
+if [[ -n "${DIGITALOCEAN_TOKEN:-}" ]]; then
+  patch_env "DIGITALOCEAN_TOKEN" "$DIGITALOCEAN_TOKEN"
+fi
+if [[ -n "${DIGITALOCEAN_DB_TOKEN:-}" ]]; then
+  patch_env "DIGITALOCEAN_DB_TOKEN" "$DIGITALOCEAN_DB_TOKEN"
+fi
+if [[ -n "${MONITOR_SITES_API_URL:-}" ]]; then
+  patch_env "MONITOR_SITES_API_URL" "$MONITOR_SITES_API_URL"
+fi
+if [[ -n "${MONITOR_SITES_BEARER_TOKEN:-}" ]]; then
+  patch_env "MONITOR_SITES_BEARER_TOKEN" "$MONITOR_SITES_BEARER_TOKEN"
+fi
+
 echo "==> Removendo artefatos do Firebase antigo (hipag-02)"
 rm -f "$APP_DIR/hipag-02-firebase-adminsdk-fbsvc-888378701a.json" 2>/dev/null || true
 rm -f "$APP_DIR/service-account.json" 2>/dev/null || true
