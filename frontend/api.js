@@ -228,7 +228,7 @@
     return isCentralPanelHost();
   }
 
-  const MAX_AGENT_PROBES_PER_CYCLE = 16;
+  const MAX_AGENT_PROBES_PER_CYCLE = 12;
 
   function shouldUsePanelAgentProxy(storeId) {
     if (typeof window === 'undefined') return false;
@@ -249,6 +249,74 @@
 
   function panelStoresStatusCacheBulkUrl() {
     return `${window.location.origin}/api/stores/status-cache`;
+  }
+
+  function panelAgentProbeBatchUrl() {
+    return `${window.location.origin}/api/stores/agent-probe-batch`;
+  }
+
+  async function fetchAgentProbeBatch(storeIds, token, catalog) {
+    const ids = [...new Set(storeIds.map((id) => normalizeStoreId(id)).filter(Boolean))].slice(
+      0,
+      MAX_AGENT_PROBES_PER_CYCLE
+    );
+    if (!ids.length) return {};
+
+    try {
+      const res = await fetchWithTimeout(
+        panelAgentProbeBatchUrl(),
+        {
+          method: 'POST',
+          headers: {
+            ...authHeaders(token),
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({ stores: ids }),
+        },
+        Math.min(45000, 8000 + ids.length * 2500)
+      );
+      if (!res.ok) return {};
+      const data = await res.json();
+      return data.results && typeof data.results === 'object' ? data.results : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function applyAgentProbeBatchResult(card, row, catalog) {
+    const meta = { id: card.id, name: card.name };
+    const hb = heartbeatState.get(normalizeStoreId(card.id));
+    const id = normalizeStoreId(card.id);
+
+    if (row?.reachable && row?.config) {
+      recordAgentProbe(card.id, { ok: true });
+      const status = statusFromAgentConfig(row.config, id);
+      if (status?.summary?.total) {
+        applyLiveCardSnapshot(card, meta, hb, catalog, status);
+      }
+      return;
+    }
+
+    if (row?.definite_offline) {
+      applyAgentProbeFailure(
+        card,
+        meta,
+        hb,
+        catalog,
+        friendlyUserMessage(`HTTP ${row.status || 404}`)
+      );
+      return;
+    }
+
+    if (row?.transient_error) {
+      recordAgentProbe(card.id, {
+        ok: null,
+        error: friendlyUserMessage(`HTTP ${row.status || 502}`),
+        transient: true,
+      });
+    }
   }
 
   async function fetchStoreStatusCache(storeId, catalog) {
@@ -2005,35 +2073,15 @@
     const targets = selectAgentProbeTargets(cards, catalog);
     if (!targets.length) return;
 
-    await runPool(
-      targets,
-      agentProbeConcurrency(catalog),
-      async (card) => {
-        const meta = { id: card.id, name: card.name };
-        const hb = heartbeatState.get(normalizeStoreId(card.id));
-        const { status, error } = await probeAgentConfigViaPanel(meta, catalog, token);
-        if (status?.summary?.total) {
-          recordAgentProbe(card.id, { ok: true });
-          applyLiveCardSnapshot(card, meta, hb, catalog, status);
-          return;
-        }
-        if (error && isAgentDefiniteOfflineError(error)) {
-          applyAgentProbeFailure(card, meta, hb, catalog, error);
-          return;
-        }
-        if (error && isAgentTransientProbeError(error)) {
-          recordAgentProbe(card.id, { ok: null, error, transient: true });
-          return;
-        }
-        if (error) {
-          applyAgentProbeFailure(card, meta, hb, catalog, error);
-          return;
-        }
-        if (card.agentPulseStale || card.staleSnapshot) {
-          card.storeNotice = 'Pulse central desatualizado · agente não respondeu';
-        }
-      }
+    const results = await fetchAgentProbeBatch(
+      targets.map((card) => card.id),
+      token,
+      catalog
     );
+    targets.forEach((card) => {
+      const row = results[normalizeStoreId(card.id)];
+      if (row) applyAgentProbeBatchResult(card, row, catalog);
+    });
   }
 
   function buildOfflineCardFromHeartbeat(meta, catalog, hb, cacheMap) {
@@ -2209,36 +2257,36 @@
   async function pollAgentReachability() {
     if (!shouldRunLiveAgentProbe()) return;
     if (!heartbeatCatalog || !heartbeatMonitorStarted) return;
-    const stores = (heartbeatCatalog.stores || []).filter((meta) => {
-      const id = normalizeStoreId(meta.id);
-      const hb = heartbeatState.get(id);
-      if (!hb || !isStoreHeartbeatAlive(hb, heartbeatCatalog)) return false;
-      return heartbeatHasAgentPayload(hb);
-    });
-    if (!stores.length) return;
 
-    await runPool(
-      stores,
-      agentProbeConcurrency(heartbeatCatalog),
-      async (meta) => {
-        const { status, error } = await probeAgentConfigViaPanel(
-          meta,
-          heartbeatCatalog,
-          heartbeatAuthToken
-        );
-        if (status?.summary?.total) {
-          recordAgentProbe(meta.id, { ok: true });
-          return;
-        }
-        if (error && isAgentDefiniteOfflineError(error)) {
-          recordAgentProbe(meta.id, { ok: false, error });
-          return;
-        }
-        if (error) {
-          recordAgentProbe(meta.id, { ok: null, error, transient: true });
-        }
-      }
+    const cards = (heartbeatCatalog.stores || [])
+      .map((meta) => buildCardFromHeartbeat(meta, heartbeatCatalog, dashboardCacheMap))
+      .filter((card) => cardNeedsAgentValidation(card, heartbeatCatalog));
+    const targets = selectAgentProbeTargets(cards, heartbeatCatalog);
+    if (!targets.length) return;
+
+    const results = await fetchAgentProbeBatch(
+      targets.map((card) => card.id),
+      heartbeatAuthToken,
+      heartbeatCatalog
     );
+    targets.forEach((card) => {
+      const row = results[normalizeStoreId(card.id)];
+      if (!row) return;
+      if (row.reachable) {
+        recordAgentProbe(card.id, { ok: true });
+      } else if (row.definite_offline) {
+        recordAgentProbe(card.id, {
+          ok: false,
+          error: friendlyUserMessage(`HTTP ${row.status || 404}`),
+        });
+      } else if (row.transient_error) {
+        recordAgentProbe(card.id, {
+          ok: null,
+          error: friendlyUserMessage(`HTTP ${row.status || 502}`),
+          transient: true,
+        });
+      }
+    });
     emitHeartbeatUpdate({ agentProbe: true });
   }
 

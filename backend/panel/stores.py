@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -94,6 +95,64 @@ def register_stores(
         except (TypeError, ValueError):
             pass
         return status_store.get_store_cache(store_id, timeout_seconds=timeout)
+
+    @router.post("/agent-probe-batch")
+    async def agent_probe_batch(request: Request) -> dict[str, Any]:
+        """Valida reachability de várias lojas no servidor (evita N requests no browser)."""
+        try:
+            body = await request.json()
+        except Exception as exc:
+            raise HTTPException(400, "JSON inválido") from exc
+
+        raw_ids = body.get("stores") if isinstance(body, dict) else None
+        if not isinstance(raw_ids, list):
+            raise HTTPException(400, "Campo stores (lista) é obrigatório")
+
+        store_ids: list[str] = []
+        for item in raw_ids[:12]:
+            sid = str(item or "").strip().lower()
+            if sid and sid.replace("_", "").isalnum():
+                store_ids.append(sid)
+        if not store_ids:
+            return {"results": {}}
+
+        headers = agent_headers(request)
+        results: dict[str, Any] = {}
+        limits = httpx.Limits(max_connections=2, max_keepalive_connections=2)
+        timeout = httpx.Timeout(12.0, connect=8.0)
+
+        async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
+            for sid in store_ids:
+                url = f"{agent_url(sid)}/api/agent/config"
+                try:
+                    res = await client.get(url, headers=headers)
+                    entry: dict[str, Any] = {
+                        "status": res.status_code,
+                        "reachable": res.status_code < 400,
+                        "definite_offline": res.status_code in (404, 401, 403),
+                        "transient_error": res.status_code in (502, 503, 504, 530)
+                        or res.status_code >= 500,
+                    }
+                    if res.status_code < 400:
+                        try:
+                            data = res.json()
+                            if isinstance(data, dict):
+                                entry["config"] = data
+                                status_store.ingest_agent_config(sid, data)
+                        except Exception:
+                            pass
+                    results[sid] = entry
+                except httpx.RequestError as exc:
+                    results[sid] = {
+                        "status": 502,
+                        "reachable": False,
+                        "definite_offline": False,
+                        "transient_error": True,
+                        "error": str(exc),
+                    }
+                await asyncio.sleep(0.12)
+
+        return {"results": results}
 
     @router.get("/{store_id}/agent/config")
     async def agent_config(store_id: str, request: Request) -> Any:
