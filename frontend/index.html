@@ -4,11 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LAV60 — Painel</title>
-  <link rel="stylesheet" href="app.css?v=63">
-  <link rel="stylesheet" href="portal-layout.css?v=2">
-  <link rel="stylesheet" href="dashboard-bento.css?v=10">
-  <link rel="stylesheet" href="support.css?v=5">
-  <link rel="stylesheet" href="sites-monitor.css?v=6">
+  <link rel="stylesheet" href="app.css?v=67">
+  <link rel="stylesheet" href="portal-layout.css?v=3">
+  <link rel="stylesheet" href="dashboard-bento.css?v=11">
+  <link rel="stylesheet" href="support.css?v=6">
+  <link rel="stylesheet" href="sites-monitor.css?v=8">
+  <script src="theme.js?v=1"></script>
 </head>
 <body class="page-panel page-dashboard auth-pending">
   <div class="app-layout">
@@ -52,7 +53,10 @@
           <span class="sidebar__label">Database</span>
         </a>
       </nav>
-      <div class="sidebar__footer" id="sidebarUser"></div>
+      <div class="sidebar__footer">
+        <div id="sidebarTheme" data-theme-mount='{"variant":"sidebar"}'></div>
+        <div id="sidebarUser"></div>
+      </div>
     </aside>
 
     <div class="portal-backdrop" id="portalBackdrop" aria-hidden="true"></div>

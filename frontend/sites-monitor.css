@@ -27,7 +27,7 @@
   padding: 0.9rem 1rem;
   border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.14);
-  background: linear-gradient(165deg, rgba(30, 41, 59, 0.9), rgba(15, 20, 25, 0.84));
+  background: var(--gradient-card);
 }
 
 .sites-monitor-kpi::before {
@@ -68,15 +68,15 @@
 }
 
 .sites-monitor-kpi--ok .sites-monitor-kpi__value {
-  color: #86efac;
+  color: var(--status-ok);
 }
 
 .sites-monitor-kpi--danger .sites-monitor-kpi__value {
-  color: #fca5a5;
+  color: var(--status-danger);
 }
 
 .sites-monitor-kpi--muted .sites-monitor-kpi__value {
-  color: #93c5fd;
+  color: var(--link-accent);
 }
 
 .sites-monitor-panel {
@@ -100,7 +100,7 @@
   padding: 1rem 1.05rem 0.95rem;
   border-radius: 16px;
   border: 1px solid rgba(148, 163, 184, 0.14);
-  background: linear-gradient(155deg, rgba(30, 41, 59, 0.94) 0%, rgba(15, 20, 25, 0.9) 100%);
+  background: var(--gradient-card-strong);
   min-height: 100%;
   overflow: hidden;
   transition: border-color 0.18s, transform 0.18s, box-shadow 0.18s;
@@ -181,8 +181,8 @@
   height: 2rem;
   border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.16);
-  background: rgba(15, 20, 25, 0.55);
-  color: #93c5fd;
+  background: var(--surface-card);
+  color: var(--link-accent);
   text-decoration: none;
   font-size: 0.95rem;
   transition: border-color 0.15s, background 0.15s, color 0.15s, transform 0.15s;
@@ -227,7 +227,7 @@
   padding: 0.45rem 0.55rem;
   border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.12);
-  background: rgba(15, 20, 25, 0.45);
+  background: var(--surface-card-muted);
 }
 
 .sites-monitor-card__metric-label {
@@ -264,19 +264,19 @@
 }
 
 .sites-monitor-card__metric--ok .sites-monitor-card__metric-value {
-  color: #86efac;
+  color: var(--status-ok);
 }
 
 .sites-monitor-card__metric--warn .sites-monitor-card__metric-value {
-  color: #fcd34d;
+  color: var(--status-warn);
 }
 
 .sites-monitor-card__metric--danger .sites-monitor-card__metric-value {
-  color: #fca5a5;
+  color: var(--status-danger);
 }
 
 .sites-monitor-card__metric--muted .sites-monitor-card__metric-value {
-  color: rgba(148, 163, 184, 0.9);
+  color: var(--muted);
 }
 
 .sites-monitor-card__metric--ok {
@@ -313,7 +313,7 @@
 }
 
 .sites-monitor-card__checked time {
-  color: rgba(226, 232, 240, 0.88);
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
@@ -331,4 +331,20 @@
   .sites-monitor-grid {
     grid-template-columns: 1fr;
   }
+}
+
+[data-theme="light"] .sites-monitor-card__open:hover {
+  color: var(--link-accent-hover);
+}
+
+[data-theme="light"] .sites-monitor-card__metric--ok {
+  background: rgba(22, 163, 74, 0.08);
+}
+
+[data-theme="light"] .sites-monitor-card__metric--warn {
+  background: rgba(217, 119, 6, 0.08);
+}
+
+[data-theme="light"] .sites-monitor-card__metric--danger {
+  background: rgba(220, 38, 38, 0.08);
 }

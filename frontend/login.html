@@ -3,61 +3,127 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LAV60 — Entrar</title>
+  <meta name="description" content="Portal de acesso ao painel operacional LAV60 — monitoramento e controle das lojas.">
+  <title>LAV60 — Portal de acesso</title>
   <link rel="dns-prefetch" href="https://www.gstatic.com">
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://identitytoolkit.googleapis.com">
-  <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="app.css?v=67">
+  <script src="theme.js?v=1"></script>
 </head>
-<body class="page-dashboard page-login">
-  <div class="app-shell">
-    <header class="topbar topbar--dashboard">
-      <div class="topbar__row">
-        <div class="topbar__brand">
-          <div class="topbar__logo" aria-hidden="true">L60</div>
-          <div class="topbar__identity">
-            <span class="topbar__eyebrow">Painel central</span>
-            <h1 class="topbar__title">LAV60 Gateway</h1>
+<body class="page-login">
+  <div data-theme-mount='{"variant":"floating"}'></div>
+  <div class="login-portal">
+    <aside class="login-portal__hero" aria-hidden="false">
+      <div class="login-portal__hero-inner">
+        <div class="login-portal__brand">
+          <span class="login-portal__logo" aria-hidden="true">L60</span>
+          <div class="login-portal__brand-text">
+            <span class="login-portal__eyebrow">Portal franqueado</span>
+            <h1 class="login-portal__title">LAV60</h1>
           </div>
         </div>
-      </div>
-      <div class="topbar__meta">
-        <p class="topbar__subtitle">Acesso ao monitoramento das lojas</p>
-      </div>
-    </header>
 
-    <main class="main-content login-page">
-      <section class="panel panel--login">
-        <div class="settings-panel__head">
-          <h2>Entrar</h2>
-          <p class="settings-panel__lead">Use o e-mail e a senha cadastrados para acessar o painel operacional.</p>
-        </div>
+        <p class="login-portal__tagline">
+          Monitoramento, operação remota e auditoria das lojas em um único painel central.
+        </p>
+
+        <ul class="login-portal__features">
+          <li class="login-portal__feature">
+            <span class="login-portal__feature-icon" aria-hidden="true">◫</span>
+            <div>
+              <strong>Status das lojas</strong>
+              <span>Heartbeats, equipamentos e alertas em tempo real</span>
+            </div>
+          </li>
+          <li class="login-portal__feature">
+            <span class="login-portal__feature-icon" aria-hidden="true">⚡</span>
+            <div>
+              <strong>Agente e gateway</strong>
+              <span>Controle via Powpay ou redundância MQTT</span>
+            </div>
+          </li>
+          <li class="login-portal__feature">
+            <span class="login-portal__feature-icon" aria-hidden="true">☰</span>
+            <div>
+              <strong>Auditoria e infra</strong>
+              <span>Registros de operações, VPS e monitoramento</span>
+            </div>
+          </li>
+        </ul>
+
+        <p class="login-portal__hero-foot">
+          Acesso restrito a operadores e franqueados autorizados.
+        </p>
+      </div>
+      <div class="login-portal__hero-glow" aria-hidden="true"></div>
+    </aside>
+
+    <main class="login-portal__main">
+      <div class="login-portal__card">
+        <header class="login-portal__card-head">
+          <h2>Entrar no painel</h2>
+          <p>Use seu e-mail corporativo e senha cadastrados no portal.</p>
+        </header>
 
         <form id="loginForm" class="login-form" novalidate>
-          <div class="settings-section login-form__section">
-            <div class="panel__grid">
-              <label class="field field--wide">
-                <span>E-mail</span>
-                <input type="email" id="loginEmail" autocomplete="username" required placeholder="seu@email.com">
-              </label>
-              <label class="field field--wide">
-                <span>Senha</span>
-                <input type="password" id="loginPassword" autocomplete="current-password" required placeholder="••••••••">
-              </label>
-            </div>
-            <p id="loginError" class="login-form__error hidden" role="alert"></p>
-            <div class="login-form__actions">
-              <button type="submit" id="loginSubmit" class="btn btn--primary">Entrar</button>
-            </div>
-          </div>
+          <label class="login-field">
+            <span class="login-field__label">E-mail</span>
+            <input
+              type="email"
+              id="loginEmail"
+              class="login-field__input"
+              autocomplete="username"
+              inputmode="email"
+              required
+              placeholder="nome@empresa.com"
+            >
+          </label>
+
+          <label class="login-field">
+            <span class="login-field__label">Senha</span>
+            <span class="login-field__password-wrap">
+              <input
+                type="password"
+                id="loginPassword"
+                class="login-field__input"
+                autocomplete="current-password"
+                required
+                placeholder="Digite sua senha"
+              >
+              <button
+                type="button"
+                id="loginPasswordToggle"
+                class="login-field__toggle"
+                aria-label="Mostrar senha"
+                aria-pressed="false"
+                title="Mostrar senha"
+              >
+                <span class="login-field__toggle-show" aria-hidden="true">Mostrar</span>
+                <span class="login-field__toggle-hide hidden" aria-hidden="true">Ocultar</span>
+              </button>
+            </span>
+          </label>
+
+          <p id="loginError" class="login-form__error hidden" role="alert"></p>
+
+          <button type="submit" id="loginSubmit" class="btn btn--primary login-form__submit">
+            Entrar no painel
+          </button>
         </form>
 
         <p id="loginHint" class="login-card__hint hidden"></p>
-      </section>
+      </div>
+
+      <footer class="login-portal__footer">
+        <span>Lavanderia 60 Minutos · Painel NRS</span>
+        <span class="login-portal__footer-dot" aria-hidden="true">·</span>
+        <span id="loginYear"></span>
+      </footer>
     </main>
   </div>
 
-  <script src="auth.js?v=7"></script>
-  <script src="login.js?v=2"></script>
+  <script src="auth.js?v=8"></script>
+  <script src="login.js?v=3"></script>
 </body>
 </html>

@@ -1,12 +1,16 @@
 (() => {
   'use strict';
 
+  const REMEMBER_EMAIL_KEY = 'lav60:login-email';
+
   const form = document.getElementById('loginForm');
   const emailInput = document.getElementById('loginEmail');
   const passwordInput = document.getElementById('loginPassword');
+  const passwordToggle = document.getElementById('loginPasswordToggle');
   const errorEl = document.getElementById('loginError');
   const submitBtn = document.getElementById('loginSubmit');
   const hintEl = document.getElementById('loginHint');
+  const yearEl = document.getElementById('loginYear');
 
   function returnPath() {
     const params = new URLSearchParams(window.location.search);
@@ -42,12 +46,56 @@
 
   function setLoading(loading) {
     submitBtn.disabled = loading;
-    submitBtn.textContent = loading ? 'Entrando…' : 'Entrar';
+    submitBtn.textContent = loading ? 'Entrando…' : 'Entrar no painel';
     emailInput.disabled = loading;
     passwordInput.disabled = loading;
+    if (passwordToggle) passwordToggle.disabled = loading;
+  }
+
+  function restoreRememberedEmail() {
+    try {
+      const saved = localStorage.getItem(REMEMBER_EMAIL_KEY);
+      if (saved && !emailInput.value) {
+        emailInput.value = saved;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function rememberEmail(email) {
+    try {
+      if (email) localStorage.setItem(REMEMBER_EMAIL_KEY, email);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function initPasswordToggle() {
+    if (!passwordToggle) return;
+    const showLabel = passwordToggle.querySelector('.login-field__toggle-show');
+    const hideLabel = passwordToggle.querySelector('.login-field__toggle-hide');
+
+    passwordToggle.addEventListener('click', () => {
+      const visible = passwordInput.type === 'text';
+      passwordInput.type = visible ? 'password' : 'text';
+      passwordToggle.setAttribute('aria-pressed', visible ? 'false' : 'true');
+      passwordToggle.setAttribute('aria-label', visible ? 'Mostrar senha' : 'Ocultar senha');
+      passwordToggle.title = visible ? 'Mostrar senha' : 'Ocultar senha';
+      showLabel?.classList.toggle('hidden', !visible);
+      hideLabel?.classList.toggle('hidden', visible);
+    });
+  }
+
+  function initFooterYear() {
+    if (yearEl) yearEl.textContent = String(new Date().getFullYear());
   }
 
   async function boot() {
+    initFooterYear();
+    initPasswordToggle();
+    restoreRememberedEmail();
+
     const params = new URLSearchParams(window.location.search);
     if (params.get('reason') === 'idle') {
       showError('Sessão encerrada por inatividade. Faça login novamente.');
@@ -73,7 +121,10 @@
       const session = await Lav60Auth.getSessionUser();
       if (session.authenticated) {
         window.location.replace(returnPath());
+        return;
       }
+
+      emailInput.focus();
     } catch (e) {
       showError(friendlyLoginError(e));
     }
@@ -91,6 +142,7 @@
     setLoading(true);
     try {
       await Lav60Auth.signInWithEmail(email, password);
+      rememberEmail(email);
       window.location.replace(returnPath());
     } catch (e) {
       showError(friendlyLoginError(e));
