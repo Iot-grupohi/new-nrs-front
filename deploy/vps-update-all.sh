@@ -93,11 +93,23 @@ sleep 2
 
 echo ""
 echo "==> Validação (conta portal-franqueado-lav60)"
-curl -s "http://127.0.0.1:3000/api/auth/config" | python3 -c "import sys,json; d=json.load(sys.stdin); print('auth project:', (d.get('firebase') or {}).get('projectId'))" || true
-curl -s "http://127.0.0.1:3000/api/audit/status" | python3 -m json.tool || true
-echo ""
-curl -s "http://127.0.0.1:3000/api/audit/logs?limit=3" | python3 -c "import sys,json; d=json.load(sys.stdin); print('logs:', len(d.get('items') or []), 'available:', d.get('available'))" || true
-curl -s "http://127.0.0.1:3000/api/infra/metrics?window=3600&include_databases=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print('infra vps:', len(d.get('vps') or []), 'databases:', len(d.get('databases') or []))" || true
+ready=0
+for _ in $(seq 1 15); do
+  if curl -sf "http://127.0.0.1:3000/api/auth/config" >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+if [[ "$ready" -ne 1 ]]; then
+  echo "  AVISO: API ainda não respondeu após 15s — veja: journalctl -u lav60-panel -n 40 --no-pager"
+else
+  curl -sf "http://127.0.0.1:3000/api/auth/config" | python3 -c "import sys,json; d=json.load(sys.stdin); print('auth project:', (d.get('firebase') or {}).get('projectId'))"
+  curl -sf "http://127.0.0.1:3000/api/audit/status" | python3 -m json.tool
+  echo ""
+  curl -sf "http://127.0.0.1:3000/api/audit/logs?limit=3" | python3 -c "import sys,json; d=json.load(sys.stdin); print('logs:', len(d.get('items') or []), 'available:', d.get('available'))"
+  curl -sf "http://127.0.0.1:3000/api/infra/metrics?window=3600&include_databases=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print('infra vps:', len(d.get('vps') or []), 'databases:', len(d.get('databases') or []))"
+fi
 echo ""
 git log -1 --oneline
 systemctl is-active lav60-panel

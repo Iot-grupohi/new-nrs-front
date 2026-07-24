@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 BACKEND = Path(__file__).resolve().parent
 ROOT = BACKEND.parent
@@ -81,8 +81,8 @@ async def serve_index() -> FileResponse:
     return _file_response(FRONTEND / "index.html")
 
 
-@app.get("/login.html")
-async def serve_login_html(request: Request) -> FileResponse | RedirectResponse:
+@app.get("/login.html", response_model=None)
+async def serve_login_html(request: Request) -> Response:
     if request.query_params.get("v") != LOGIN_HTML_VERSION:
         params = dict(request.query_params)
         params["v"] = LOGIN_HTML_VERSION
