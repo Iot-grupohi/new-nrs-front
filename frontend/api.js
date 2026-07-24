@@ -7,6 +7,7 @@
   const Cache = window.Lav60Cache;
 
   let cachedAgentToken = null;
+  let cachedAgentTokenConfigured = false;
   let panelBootstrapCache = null;
 
   async function fetchPanelBootstrap() {
@@ -28,12 +29,26 @@
     }
   }
 
-  /** Token do agente a partir do .env do servidor (API_TOKEN). */
+  /** Token do agente a partir do .env do servidor (CLOUDFLARE_API_TOKEN). */
   async function ensureDefaultAgentToken() {
     if (cachedAgentToken !== null) return cachedAgentToken;
     const boot = await fetchPanelBootstrap();
     cachedAgentToken = String(boot?.default_agent_token || '').trim();
+    cachedAgentTokenConfigured = Boolean(boot?.agent_token_configured);
     return cachedAgentToken;
+  }
+
+  function isAgentTokenConfiguredOnServer() {
+    return cachedAgentTokenConfigured;
+  }
+
+  function isAgentTokenMissingError(message) {
+    const m = String(message || '').toLowerCase();
+    return (
+      m.includes('invalid or missing x-token') ||
+      m.includes('x-token inválido ou ausente') ||
+      m.includes('token do agente não configurado')
+    );
   }
 
   function friendlyUserMessage(message, context = '') {
@@ -70,6 +85,14 @@
       m.includes('túnel da loja indisponível')
     ) {
       return 'Túnel da loja instável (Cloudflare). Tentando via gateway… Se persistir, aguarde 1 minuto e tente de novo.';
+    }
+
+    if (
+      m.includes('invalid or missing x-token') ||
+      m.includes('x-token inválido ou ausente') ||
+      m.includes('token do agente não configurado')
+    ) {
+      return 'Token do agente ausente ou inválido no servidor. Atualize CLOUDFLARE_API_TOKEN na VPS e faça deploy.';
     }
 
     if (
@@ -397,15 +420,15 @@
   async function probeAgentBase(base, token, timeoutMs = 5000, storeId = null) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const useProxy = Boolean(storeId && shouldUsePanelAgentProxy(storeId));
     try {
-      const url =
-        storeId && shouldUsePanelAgentProxy(storeId)
+      const url = useProxy
           ? panelAgentConfigUrl(storeId)
           : `${String(base).replace(/\/$/, '')}/api/agent/config`;
       const res = await fetch(url, {
-        headers: authHeaders(token),
+        headers: useProxy ? { Accept: 'application/json' } : authHeaders(token),
         signal: ctrl.signal,
-        credentials: storeId && shouldUsePanelAgentProxy(storeId) ? 'same-origin' : 'omit',
+        credentials: useProxy ? 'same-origin' : 'omit',
       });
       if (!res.ok) return null;
       return res.json();
@@ -786,8 +809,25 @@
     { type: 'doser', id: '321' },
   ];
 
-  /** Dosadora espelha a lavadora com o mesmo ID (ex.: lav 321 → dos 321). */
+  /** Dosadora espelha a lavadora com o mesmo ID (ex.: lav 432 → dos 432). */
   const WASHER_DOSER_PAIRS = [{ washer: '321', doser: '321' }];
+
+  function washerIdsInCatalog(machines) {
+    const ids = new Set();
+    (machines || []).forEach((m) => {
+      if (machineRecordType(m) === 'washer') {
+        ids.add(normalizeStoreId(m.id));
+      }
+    });
+    return ids;
+  }
+
+  /** Dosadora só existe se houver lavadora cadastrada com o mesmo ID. */
+  function isDoserMirroredToWasher(doserId, machines, washerIds = null) {
+    const mid = normalizeStoreId(doserId);
+    const washers = washerIds || washerIdsInCatalog(machines);
+    return washers.has(mid);
+  }
 
   function isPairedDoserId(doserId) {
     const id = normalizeStoreId(doserId);
@@ -823,9 +863,15 @@
     const mid = normalizeStoreId(machineId);
     const dtype = String(deviceType || '').toLowerCase();
 
-    if (dtype === 'doser' && isPairedDoserId(mid)) {
-      const washerId = pairedWasherForDoser(mid);
-      return washerId ? isDeviceRegisteredInCatalog(machines, 'washer', washerId) : false;
+    if (dtype === 'doser') {
+      if (isPairedDoserId(mid)) {
+        const washerId = pairedWasherForDoser(mid);
+        return washerId ? isDeviceRegisteredInCatalog(machines, 'washer', washerId) : false;
+      }
+      if (!Array.isArray(machines) || !machines.length) {
+        return false;
+      }
+      return isDoserMirroredToWasher(mid, machines);
     }
 
     if (isFixedMapExtra(deviceType, machineId)) {
@@ -836,9 +882,7 @@
         (m) => machineRecordType(m) === dtype && normalizeStoreId(m.id) === mid
       );
     }
-    if (dtype === 'doser') {
-      return true;
-    }
+
     if (!Array.isArray(machines)) {
       return !isFixedMapExtra(deviceType, machineId);
     }
@@ -906,12 +950,19 @@
       if (key) ids[key].add(normalizeStoreId(m.id));
     });
     applyWasherDoserPairs(ids, catalog);
+    ids.washers.forEach((washerId) => {
+      if (isDeviceRegisteredInCatalog(catalog, 'doser', washerId)) {
+        ids.dosers.add(normalizeStoreId(washerId));
+      }
+    });
     const networkKeys = catalog.length ? ['dosers'] : ['washers', 'dryers', 'dosers'];
     networkKeys.forEach((key) => {
       const dtype = { washers: 'washer', dryers: 'dryer', dosers: 'doser' }[key];
       Object.keys(net[key] || {}).forEach((id) => {
+        const norm = normalizeStoreId(id);
+        if (dtype === 'doser' && !ids.washers.has(norm)) return;
         if (isDeviceVisibleInFrontend(dtype, id, net)) {
-          ids[key].add(normalizeStoreId(id));
+          ids[key].add(norm);
         }
       });
     });
@@ -1343,10 +1394,6 @@
         stores_offline: storesOfflineEvents.sort((a, b) => a.store.localeCompare(b.store)),
         stores_partial: storesPartialEvents.sort((a, b) => a.store.localeCompare(b.store)),
         stores_suspended: storesSuspendedEvents.sort((a, b) => a.store.localeCompare(b.store)),
-        stores_offline_longest: [...storesOfflineEvents]
-          .filter((entry) => entry.offline_since)
-          .sort((a, b) => (b.offline_since || 0) - (a.offline_since || 0))
-          .slice(0, 3),
         devices_suspended: devicesSuspendedEvents.sort((a, b) =>
           a.store.localeCompare(b.store) || String(a.id).localeCompare(String(b.id))
         ),
@@ -2399,7 +2446,7 @@
       const res = await fetchWithTimeout(
         configUrl,
         {
-          headers: authHeaders(token),
+          headers: useProxy ? { Accept: 'application/json' } : authHeaders(token),
           credentials: useProxy ? 'same-origin' : 'omit',
         },
         getAgentProbeTimeoutMs(catalog)
@@ -2683,7 +2730,7 @@
       ? panelAgentConfigUrl(storeId)
       : `${normalizeAgentUrl(ep.base).replace(/\/$/, '')}/api/agent/config`;
     const res = await fetch(configUrl, {
-      headers: authHeaders(token),
+      headers: useProxy ? { Accept: 'application/json' } : authHeaders(token),
       credentials: useProxy ? 'same-origin' : 'omit',
     });
     if (!res.ok) {
@@ -2722,7 +2769,12 @@
     }
     const opts = {
       method,
-      headers: authHeaders(token, { 'Content-Type': 'application/json' }),
+      headers: useProxy
+        ? {
+            Accept: 'application/json',
+            ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          }
+        : authHeaders(token, body !== undefined ? { 'Content-Type': 'application/json' } : {}),
       credentials: useProxy ? 'same-origin' : 'omit',
     };
     if (body !== undefined) opts.body = JSON.stringify(body);
@@ -2743,6 +2795,8 @@
   window.Lav60 = {
     WASHER_DOSAGE_OPTIONS,
     ensureDefaultAgentToken,
+    isAgentTokenConfiguredOnServer,
+    shouldUsePanelAgentProxy,
     normalizeStoreId,
     noAgentMessage,
     isAgentUnavailableError,
@@ -2795,6 +2849,7 @@
     syncConfigDevices,
     isDeviceVisibleInFrontend,
     isDeviceRegisteredInCatalog,
+    isDoserMirroredToWasher,
     applyFrontendDeviceVisibility,
     resolveStoreLav60Status,
     isStoreLav60Suspended,

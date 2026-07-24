@@ -30,9 +30,15 @@ $doToken = Read-DotEnvValue "DIGITALOCEAN_TOKEN"
 $doDbToken = Read-DotEnvValue "DIGITALOCEAN_DB_TOKEN"
 $monitorUrl = Read-DotEnvValue "MONITOR_SITES_API_URL"
 $monitorToken = Read-DotEnvValue "MONITOR_SITES_BEARER_TOKEN"
+$cloudflareToken = Read-DotEnvValue "CLOUDFLARE_API_TOKEN"
+$gatewayToken = Read-DotEnvValue "GATEWAY_API_TOKEN"
+$xToken = Read-DotEnvValue "X_TOKEN"
 
 if (-not $doToken) {
   Write-Host "AVISO: DIGITALOCEAN_TOKEN nao encontrado no .env local" -ForegroundColor Yellow
+}
+if (-not $cloudflareToken) {
+  Write-Host "AVISO: CLOUDFLARE_API_TOKEN nao encontrado no .env local" -ForegroundColor Yellow
 }
 
 Write-Host "1/2 Enviando service account para VPS..." -ForegroundColor Cyan
@@ -45,6 +51,9 @@ export DIGITALOCEAN_TOKEN='$doToken' && \
 export DIGITALOCEAN_DB_TOKEN='$doDbToken' && \
 export MONITOR_SITES_API_URL='$monitorUrl' && \
 export MONITOR_SITES_BEARER_TOKEN='$monitorToken' && \
+export CLOUDFLARE_API_TOKEN='$cloudflareToken' && \
+export GATEWAY_API_TOKEN='$gatewayToken' && \
+export X_TOKEN='$xToken' && \
 git fetch origin main && git reset --hard origin/main && \
 bash deploy/vps-update-all.sh
 "@

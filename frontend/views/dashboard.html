@@ -121,7 +121,7 @@
       <h2 class="dashboard-section__title">Plataforma e infraestrutura</h2>
       <p class="dashboard-section__meta">Gateway, servidores e capacidade operacional</p>
     </header>
-    <div class="dashboard-stack dashboard-stack--horizontal">
+    <div class="dashboard-platform">
       <section class="gateway-overview dashboard-panel dashboard-panel--gateway" id="gatewayOverview">
         <header class="gateway-overview__head dashboard-panel__head dashboard-panel__head--split">
           <div>
@@ -146,7 +146,7 @@
         </div>
       </section>
 
-      <section class="dashboard-panel dashboard-panel--infra" id="dashboardInfra" aria-label="Infraestrutura">
+      <section class="dashboard-panel dashboard-panel--infra dashboard-panel--infra-full" id="dashboardInfra" aria-label="Infraestrutura">
         <header class="dashboard-panel__head dashboard-panel__head--split">
           <div>
             <h3 class="dashboard-panel__title">Servidores</h3>
@@ -230,17 +230,9 @@
   <section class="dashboard-section" aria-label="Detalhes operacionais">
     <header class="dashboard-section__head">
       <h2 class="dashboard-section__title">Detalhes operacionais</h2>
-      <p class="dashboard-section__meta">Offline prolongado e auditoria recente</p>
+      <p class="dashboard-section__meta">Auditoria recente</p>
     </header>
-    <div class="dashboard-insights dashboard-insights--duo">
-      <article class="dashboard-panel dashboard-panel--insight">
-        <header class="dashboard-panel__head">
-          <h3 class="dashboard-panel__title">Offline prolongado</h3>
-          <p class="dashboard-panel__meta" id="dashboardOfflineMeta">—</p>
-        </header>
-        <ul class="dashboard-list" id="dashboardOfflineList"></ul>
-      </article>
-
+    <div class="dashboard-insights">
       <article class="dashboard-panel dashboard-panel--insight">
         <header class="dashboard-panel__head">
           <h3 class="dashboard-panel__title">Auditoria</h3>

@@ -5,7 +5,7 @@
     dashboard: {
       nav: 'dashboard',
       title: 'LAV60 — Dashboard',
-      view: 'views/dashboard.html?v=21',
+      view: 'views/dashboard.html?v=24',
       pageClass: 'page-dashboard',
     },
     lojas: {

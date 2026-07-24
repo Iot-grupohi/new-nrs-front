@@ -66,9 +66,8 @@ async def get_catalog() -> dict[str, Any]:
 
 @router.get("/api/panel/bootstrap")
 async def panel_bootstrap() -> dict[str, Any]:
-    token = (
-        env_value("CLOUDFLARE_API_TOKEN")
-        or env_value("GATEWAY_API_TOKEN")
-        or env_value("X_TOKEN")
-    )
-    return {"default_agent_token": token}
+    token = env_value("CLOUDFLARE_API_TOKEN") or env_value("GATEWAY_API_TOKEN")
+    return {
+        "default_agent_token": token,
+        "agent_token_configured": bool(token),
+    }

@@ -44,9 +44,13 @@
     errorEl.classList.add('hidden');
   }
 
+  const submitBtnText = submitBtn?.querySelector('.login-form__submit-text');
+
   function setLoading(loading) {
     submitBtn.disabled = loading;
-    submitBtn.textContent = loading ? 'Entrando…' : 'Entrar no painel';
+    const label = loading ? 'Entrando…' : 'Entrar no painel';
+    if (submitBtnText) submitBtnText.textContent = label;
+    else submitBtn.textContent = label;
     emailInput.disabled = loading;
     passwordInput.disabled = loading;
     if (passwordToggle) passwordToggle.disabled = loading;

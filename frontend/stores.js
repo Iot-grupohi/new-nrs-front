@@ -1088,8 +1088,6 @@
 
       const suspendedEl = $('kpiStoresSuspended');
       if (suspendedEl) suspendedEl.textContent = stores.suspended ?? '—';
-
-      renderOfflineLongestList(lastDashboardEvents);
     }
 
     updateDashboardHeader(payload);
@@ -1417,42 +1415,6 @@
     </ul>`;
   }
 
-  function renderOfflineLongestList(events) {
-    const listEl = $('dashboardOfflineList');
-    const metaEl = $('dashboardOfflineMeta');
-    if (!listEl) return;
-
-    const items = events?.stores_offline_longest || [];
-    if (metaEl) {
-      metaEl.textContent = items.length
-        ? `${items.length} loja(s) com agente offline`
-        : 'Nenhuma loja offline no momento';
-    }
-
-    if (!items.length) {
-      listEl.innerHTML = '<li class="dashboard-list__empty">Todas as lojas estão acessíveis.</li>';
-      return;
-    }
-
-    listEl.innerHTML = items
-      .map((entry) => {
-        const sinceMs = entry.offline_since
-          ? (typeof entry.offline_since === 'number'
-            ? entry.offline_since
-            : new Date(entry.offline_since).getTime())
-          : 0;
-        const dur = entry.offline_since ? formatOfflineDuration(entry.offline_since) : '';
-        const durText = dur ? `Offline há ${dur}` : 'Offline';
-        const warnClass = sinceMs && Date.now() - sinceMs >= 3600000 ? ' dashboard-list__item--warn' : '';
-        return `
-          <li class="dashboard-list__item${warnClass}">
-            <span class="dashboard-list__name">${escapeHtml(storeDisplayName(entry))}</span>
-            <span class="dashboard-list__meta">${escapeHtml(durText)}</span>
-          </li>`;
-      })
-      .join('');
-  }
-
   function operatorDisplayName(op) {
     if (!op) return '—';
     const name = String(op.name || '').trim();
@@ -1600,8 +1562,23 @@
     return 'ok';
   }
 
+  function infraStatusLabel(status) {
+    const key = String(status || '').toLowerCase();
+    const labels = {
+      active: 'Ativo',
+      online: 'Online',
+      off: 'Desligado',
+      new: 'Novo',
+      archive: 'Arquivado',
+      erro: 'Erro',
+      error: 'Erro',
+      unknown: 'Desconhecido',
+    };
+    return labels[key] || (status || '—');
+  }
+
   function infraStatusPill(status, okValues = ['active', 'online']) {
-    const label = status || '—';
+    const label = infraStatusLabel(status);
     const kind = okValues.includes(String(status || '').toLowerCase()) ? 'ok' : 'partial';
     return `<span class="pill pill--${kind} pill--sm">${escapeHtml(label)}</span>`;
   }
@@ -1671,6 +1648,7 @@
             <span class="pill pill--offline pill--sm">erro</span>
           </div>
           <p class="dashboard-infra-item__error">${escapeHtml(item.error || item.metrics_error || 'Métricas indisponíveis')}</p>
+          <p class="dashboard-infra-item__specs dashboard-infra-item__specs--placeholder" aria-hidden="true">&nbsp;</p>
         </li>`;
     }
 
@@ -1696,7 +1674,7 @@
           <strong class="dashboard-infra-item__name" title="${escapeHtml(name)}">${escapeHtml(name)}</strong>
           ${infraStatusPill(status)}
         </div>
-        ${specsLine ? `<p class="dashboard-infra-item__specs">${escapeHtml(specsLine)}</p>` : ''}
+        ${specsLine ? `<p class="dashboard-infra-item__specs">${escapeHtml(specsLine)}</p>` : '<p class="dashboard-infra-item__specs dashboard-infra-item__specs--placeholder" aria-hidden="true">&nbsp;</p>'}
         <div class="dashboard-infra-item__metrics">
           ${infraMetricBarRow('CPU', cpu)}
           ${infraMetricBarRow('Memória', memory)}

@@ -29,6 +29,27 @@ def register_stores(
         sid = store_id.strip().lower()
         return f"https://{sid}.{powpay_domain}"
 
+    def resolve_agent_token(request: Request | None = None) -> str:
+        """Token do agente Powpay: prioriza o .env do servidor (evita X_TOKEN do portal no browser)."""
+        server = (agent_token or "").strip()
+        if server:
+            return server
+        if request is not None:
+            return (request.headers.get("X-Token") or "").strip()
+        return ""
+
+    def agent_headers(request: Request | None, *, json_body: bool = False) -> dict[str, str]:
+        token = resolve_agent_token(request)
+        if not token:
+            raise HTTPException(
+                503,
+                "Token do agente não configurado no painel (CLOUDFLARE_API_TOKEN no .env da VPS).",
+            )
+        headers = {"Accept": "application/json", "X-Token": token}
+        if json_body:
+            headers["Content-Type"] = "application/json"
+        return headers
+
     @router.get("/status")
     async def stores_status() -> dict[str, Any]:
         from panel import deps
@@ -75,12 +96,10 @@ def register_stores(
         return status_store.get_store_cache(store_id, timeout_seconds=timeout)
 
     @router.get("/{store_id}/agent/config")
-    async def agent_config(store_id: str) -> Any:
+    async def agent_config(store_id: str, request: Request) -> Any:
         sid = store_id.strip().lower()
         url = f"{agent_url(sid)}/api/agent/config"
-        headers = {"Accept": "application/json"}
-        if agent_token:
-            headers["X-Token"] = agent_token
+        headers = agent_headers(request)
         async with httpx.AsyncClient(timeout=20.0) as client:
             try:
                 res = await client.get(url, headers=headers)
@@ -139,15 +158,18 @@ def register_stores(
         body = await request.body()
         content_type = request.headers.get("content-type", "application/json") if body else None
 
-        powpay_headers: dict[str, str] = {"Accept": "application/json"}
-        if agent_token:
-            powpay_headers["X-Token"] = agent_token
-        if body:
+        try:
+            powpay_headers = agent_headers(request, json_body=bool(body))
+        except HTTPException:
+            raise
+        if body and "Content-Type" not in powpay_headers:
             powpay_headers["Content-Type"] = content_type or "application/json"
 
         gateway_headers: dict[str, str] = {"Accept": "application/json"}
         if gateway_token:
             gateway_headers["X-Token"] = gateway_token
+        elif resolve_agent_token(request):
+            gateway_headers["X-Token"] = resolve_agent_token(request)
         if body:
             gateway_headers["Content-Type"] = content_type or "application/json"
 

@@ -21,6 +21,8 @@
     watchStoreHeartbeat,
     fetchStoreStatusFromHeartbeat,
     ensureDefaultAgentToken,
+    isAgentTokenConfiguredOnServer,
+    shouldUsePanelAgentProxy,
     getPollIntervalMs,
     normalizeStoreId,
     noAgentMessage,
@@ -163,6 +165,7 @@
   function ensureTokenIfRequired() {
     if (!config?.token_required) return true;
     if (agentToken) return true;
+    if (shouldUsePanelAgentProxy(pageStore) && isAgentTokenConfiguredOnServer()) return true;
     showToast('Autenticação do agente indisponível. Contacte o suporte.', false);
     return false;
   }
@@ -1000,7 +1003,6 @@
     if (heartbeatAlive) {
       startLiveStatusWatch();
     } else if (agentReachable) {
-      showToast('Pulse central desatualizado — operando via agente local', true);
       void refreshStatus({ force: true });
       startAgentStatusPolling();
     }

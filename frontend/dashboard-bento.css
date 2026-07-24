@@ -444,6 +444,104 @@
   gap: 0.65rem;
 }
 
+.dashboard-platform {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  width: 100%;
+}
+
+.dashboard-panel--infra-full {
+  width: 100%;
+  max-width: none;
+  flex: 1 1 auto;
+}
+
+.dashboard-panel--infra-full .stats-grid--dashboard-infra {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dashboard-panel--infra-full .dashboard-infra-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.dashboard-panel--infra-full .dashboard-infra-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dashboard-panel--infra-full .dashboard-infra-list--horizontal {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
+  align-items: stretch;
+  justify-content: stretch;
+  flex: 1;
+}
+
+.dashboard-panel--infra-full .dashboard-infra-list--horizontal .dashboard-infra-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 10.75rem;
+  min-height: 10.75rem;
+  max-height: 10.75rem;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.dashboard-panel--infra-full .dashboard-infra-list--horizontal .dashboard-infra-item__head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  min-height: 1.85rem;
+  margin-bottom: 0.35rem;
+}
+
+.dashboard-panel--infra-full .dashboard-infra-list--horizontal .dashboard-infra-item__head .pill {
+  justify-self: end;
+  flex-shrink: 0;
+}
+
+.dashboard-panel--infra-full .dashboard-infra-list--horizontal .dashboard-infra-item__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-panel--infra-full .dashboard-infra-item__specs,
+.dashboard-panel--infra-full .dashboard-infra-item__specs--placeholder {
+  flex-shrink: 0;
+  min-height: 1.15rem;
+  margin: 0 0 0.45rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashboard-panel--infra-full .dashboard-infra-item__specs--placeholder {
+  visibility: hidden;
+}
+
+.dashboard-panel--infra-full .dashboard-infra-item__metrics {
+  margin-top: auto;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.42rem;
+}
+
+.dashboard-panel--infra-full .dashboard-infra-item--error {
+  height: 10.75rem;
+  min-height: 10.75rem;
+  max-height: 10.75rem;
+}
+
 .dashboard-stack--horizontal > .dashboard-panel {
   flex: 1 1 0;
   min-width: 0;
@@ -841,7 +939,7 @@
 
 .dashboard-insights {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.65rem;
 }
 

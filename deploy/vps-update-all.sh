@@ -61,6 +61,22 @@ fi
 if [[ -n "${MONITOR_SITES_BEARER_TOKEN:-}" ]]; then
   patch_env "MONITOR_SITES_BEARER_TOKEN" "$MONITOR_SITES_BEARER_TOKEN"
 fi
+if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+  patch_env "CLOUDFLARE_API_TOKEN" "$CLOUDFLARE_API_TOKEN"
+fi
+if [[ -n "${GATEWAY_API_TOKEN:-}" ]]; then
+  patch_env "GATEWAY_API_TOKEN" "$GATEWAY_API_TOKEN"
+fi
+if [[ -n "${X_TOKEN:-}" ]]; then
+  patch_env "X_TOKEN" "$X_TOKEN"
+fi
+
+echo "==> Tokens operacionais"
+if grep -q '^CLOUDFLARE_API_TOKEN=.' "$ENV_FILE" 2>/dev/null; then
+  echo "  CLOUDFLARE_API_TOKEN: configurado"
+else
+  echo "  AVISO: CLOUDFLARE_API_TOKEN vazio (liberar/consultar equipamento vai falhar)"
+fi
 
 echo "==> Removendo artefatos do Firebase antigo (hipag-02)"
 rm -f "$APP_DIR/hipag-02-firebase-adminsdk-fbsvc-888378701a.json" 2>/dev/null || true
