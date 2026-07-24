@@ -223,6 +223,13 @@
     return host.includes('lav60.com') || host.endsWith('.lav60.com');
   }
 
+  /** Validação HTTP ao agente Powpay — só no painel central (VPS). Dev local usa heartbeat. */
+  function shouldRunLiveAgentProbe() {
+    return isCentralPanelHost();
+  }
+
+  const MAX_AGENT_PROBES_PER_CYCLE = 16;
+
   function shouldUsePanelAgentProxy(storeId) {
     if (typeof window === 'undefined') return false;
     const id = normalizeStoreId(storeId);
@@ -366,11 +373,27 @@
   function isAgentTransientProbeError(error) {
     if (!error) return false;
     const message = String(error).toLowerCase();
-    if (/http\s+(502|503|504)\b/.test(message)) return true;
+    if (/http\s+(502|503|504|530)\b/.test(message)) return true;
     if (/agente indisponível|falha de rede|network|timeout|aborted|fetch/.test(message)) {
       return true;
     }
     return false;
+  }
+
+  function agentProbePriority(card) {
+    let score = 0;
+    if (card.agentPulseStale) score += 4;
+    if (card.staleSnapshot) score += 3;
+    if (card.accessible) score += 2;
+    if ((card.summary?.online ?? 0) > 0) score += 1;
+    return score;
+  }
+
+  function selectAgentProbeTargets(cards, catalog) {
+    return cards
+      .filter((card) => cardNeedsAgentValidation(card, catalog))
+      .sort((a, b) => agentProbePriority(b) - agentProbePriority(a))
+      .slice(0, MAX_AGENT_PROBES_PER_CYCLE);
   }
 
   function cardNeedsAgentValidation(card, catalog) {
@@ -1978,7 +2001,8 @@
   }
 
   async function validateStoresWithAgentProbe(cards, catalog, token) {
-    const targets = cards.filter((card) => cardNeedsAgentValidation(card, catalog));
+    if (!shouldRunLiveAgentProbe()) return;
+    const targets = selectAgentProbeTargets(cards, catalog);
     if (!targets.length) return;
 
     await runPool(
@@ -2183,6 +2207,7 @@
   }
 
   async function pollAgentReachability() {
+    if (!shouldRunLiveAgentProbe()) return;
     if (!heartbeatCatalog || !heartbeatMonitorStarted) return;
     const stores = (heartbeatCatalog.stores || []).filter((meta) => {
       const id = normalizeStoreId(meta.id);
