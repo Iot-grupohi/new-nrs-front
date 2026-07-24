@@ -342,23 +342,52 @@
     const id = normalizeStoreId(storeId);
     if (!id) return;
     agentProbeState.set(id, {
-      ok: Boolean(result?.ok),
+      ok: result?.ok === true ? true : result?.ok === false ? false : null,
       error: result?.error || null,
+      transient: Boolean(result?.transient),
       at: Date.now(),
     });
   }
 
   function recentAgentProbeFailure(storeId, maxAgeMs = AGENT_PROBE_FAIL_TTL_MS) {
     const row = agentProbeState.get(normalizeStoreId(storeId));
-    if (!row || row.ok !== false) return null;
+    if (!row || row.ok !== false || row.transient) return null;
     if (Date.now() - row.at > maxAgeMs) return null;
     return row;
   }
 
-  function cardNeedsAgentValidation(card) {
+  function isAgentDefiniteOfflineError(error) {
+    if (!error) return false;
+    if (isAgentUnavailableError(error)) return true;
+    const message = String(error).toLowerCase();
+    return /http\s+(404|401|403)\b/.test(message);
+  }
+
+  function isAgentTransientProbeError(error) {
+    if (!error) return false;
+    const message = String(error).toLowerCase();
+    if (/http\s+(502|503|504)\b/.test(message)) return true;
+    if (/agente indisponível|falha de rede|network|timeout|aborted|fetch/.test(message)) {
+      return true;
+    }
+    return false;
+  }
+
+  function cardNeedsAgentValidation(card, catalog) {
     if (!card || card.loading || card.storeSuspended) return false;
     if (card.fromLiveProbe && !card.agentPulseStale && !card.staleSnapshot) return false;
-    return true;
+
+    const id = normalizeStoreId(card.id);
+    const hb = heartbeatState.get(id);
+    const hbAlive = Boolean(hb && isStoreHeartbeatAlive(hb, catalog));
+
+    if (card.accessible || card.agentPulseStale || card.staleSnapshot) return true;
+    if (hbAlive && ((card.summary?.total ?? 0) > 0 || heartbeatHasAgentPayload(hb))) return true;
+    return false;
+  }
+
+  function agentProbeConcurrency(catalog) {
+    return Math.min(getConcurrency(catalog), 3);
   }
 
   function applyAgentProbeFailure(card, meta, hb, catalog, error) {
@@ -1949,12 +1978,12 @@
   }
 
   async function validateStoresWithAgentProbe(cards, catalog, token) {
-    const targets = cards.filter((card) => cardNeedsAgentValidation(card));
+    const targets = cards.filter((card) => cardNeedsAgentValidation(card, catalog));
     if (!targets.length) return;
 
     await runPool(
       targets,
-      Math.min(getConcurrency(catalog), 8),
+      agentProbeConcurrency(catalog),
       async (card) => {
         const meta = { id: card.id, name: card.name };
         const hb = heartbeatState.get(normalizeStoreId(card.id));
@@ -1962,6 +1991,14 @@
         if (status?.summary?.total) {
           recordAgentProbe(card.id, { ok: true });
           applyLiveCardSnapshot(card, meta, hb, catalog, status);
+          return;
+        }
+        if (error && isAgentDefiniteOfflineError(error)) {
+          applyAgentProbeFailure(card, meta, hb, catalog, error);
+          return;
+        }
+        if (error && isAgentTransientProbeError(error)) {
+          recordAgentProbe(card.id, { ok: null, error, transient: true });
           return;
         }
         if (error) {
@@ -2147,12 +2184,17 @@
 
   async function pollAgentReachability() {
     if (!heartbeatCatalog || !heartbeatMonitorStarted) return;
-    const stores = heartbeatCatalog.stores || [];
+    const stores = (heartbeatCatalog.stores || []).filter((meta) => {
+      const id = normalizeStoreId(meta.id);
+      const hb = heartbeatState.get(id);
+      if (!hb || !isStoreHeartbeatAlive(hb, heartbeatCatalog)) return false;
+      return heartbeatHasAgentPayload(hb);
+    });
     if (!stores.length) return;
 
     await runPool(
       stores,
-      Math.min(getConcurrency(heartbeatCatalog), 8),
+      agentProbeConcurrency(heartbeatCatalog),
       async (meta) => {
         const { status, error } = await probeAgentConfigViaPanel(
           meta,
@@ -2163,8 +2205,12 @@
           recordAgentProbe(meta.id, { ok: true });
           return;
         }
-        if (error) {
+        if (error && isAgentDefiniteOfflineError(error)) {
           recordAgentProbe(meta.id, { ok: false, error });
+          return;
+        }
+        if (error) {
+          recordAgentProbe(meta.id, { ok: null, error, transient: true });
         }
       }
     );
