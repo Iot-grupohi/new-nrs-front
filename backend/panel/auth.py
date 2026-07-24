@@ -8,7 +8,7 @@ import time
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Response
 
 from panel.lav60_env import env_bool, env_value
 
@@ -78,6 +78,25 @@ def get_session_user(request: Request) -> dict[str, Any] | None:
     return user
 
 
+def _cookie_secure(request: Request) -> bool:
+    forwarded = str(request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+    if forwarded == "https":
+        return True
+    return str(request.url.scheme).lower() == "https"
+
+
+def _set_session_cookie(response: Response, session_id: str, request: Request) -> None:
+    response.set_cookie(
+        _SESSION_COOKIE,
+        session_id,
+        httponly=True,
+        samesite="lax",
+        secure=_cookie_secure(request),
+        max_age=_SESSION_MAX_AGE,
+        path="/",
+    )
+
+
 def _log_auth_audit(user: dict[str, Any] | None, body: dict[str, Any], request: Request) -> None:
     try:
         from panel import audit_store
@@ -94,6 +113,15 @@ def _log_auth_audit(user: dict[str, Any] | None, body: dict[str, Any], request: 
         )
     except Exception:
         pass
+
+
+def _queue_auth_audit(
+    background_tasks: BackgroundTasks,
+    user: dict[str, Any] | None,
+    body: dict[str, Any],
+    request: Request,
+) -> None:
+    background_tasks.add_task(_log_auth_audit, user, body, request)
 
 
 @router.get("/config")
@@ -118,7 +146,11 @@ async def auth_me(request: Request) -> dict[str, Any]:
 
 
 @router.post("/session")
-async def auth_session(request: Request, response: Response) -> dict[str, Any]:
+async def auth_session(
+    request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
     if not auth_enabled():
         return {"user": None, "auth_disabled": True}
     body = await request.json()
@@ -130,7 +162,8 @@ async def auth_session(request: Request, response: Response) -> dict[str, Any]:
         user = await _verify_firebase_token(id_token)
     except HTTPException as exc:
         if exc.status_code == 401:
-            _log_auth_audit(
+            _queue_auth_audit(
+                background_tasks,
                 None,
                 {
                     "action": "auth_login_failed",
@@ -142,18 +175,13 @@ async def auth_session(request: Request, response: Response) -> dict[str, Any]:
                 request,
             )
         raise
+
     session_id = secrets.token_urlsafe(32)
     now = time.time()
     _sessions[session_id] = {"user": user, "created_at": now, "touched_at": now}
-    response.set_cookie(
-        _SESSION_COOKIE,
-        session_id,
-        httponly=True,
-        samesite="lax",
-        max_age=_SESSION_MAX_AGE,
-        path="/",
-    )
-    _log_auth_audit(
+    _set_session_cookie(response, session_id, request)
+    _queue_auth_audit(
+        background_tasks,
         user,
         {
             "action": "auth_login",
@@ -203,7 +231,11 @@ async def auth_touch(request: Request) -> dict[str, str]:
 
 
 @router.post("/logout")
-async def auth_logout(request: Request, response: Response) -> dict[str, str]:
+async def auth_logout(
+    request: Request,
+    response: Response,
+    background_tasks: BackgroundTasks,
+) -> dict[str, str]:
     session_id = _read_session_id(request)
     user = _session_user(session_id)
     body: dict[str, Any] = {}
@@ -216,7 +248,8 @@ async def auth_logout(request: Request, response: Response) -> dict[str, str]:
     response.delete_cookie(_SESSION_COOKIE, path="/")
     email = (user or {}).get("email") or str(body.get("email") or "").strip()
     if email or user:
-        _log_auth_audit(
+        _queue_auth_audit(
+            background_tasks,
             user or {"email": email},
             {
                 "action": "auth_logout",

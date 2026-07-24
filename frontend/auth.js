@@ -6,6 +6,7 @@
   const AUTH_ME_URL = '/api/auth/me';
   const AUTH_SESSION_URL = '/api/auth/session';
   const AUTH_TOUCH_URL = '/api/auth/touch';
+  const LOGIN_PAGE = 'login.html?v=3';
   const AUTH_LOGOUT_URL = '/api/auth/logout';
 
   let authConfig = null;
@@ -68,7 +69,9 @@
   async function ensureFirebase() {
     if (firebaseReady) return;
     const cfg = await fetchAuthConfig();
-    if (!cfg.enabled || !cfg.firebase) return;
+    if (!cfg.enabled || !cfg.firebase) {
+      throw new Error('Login não configurado no servidor');
+    }
     await loadScript(`https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}/firebase-app-compat.js`);
     await loadScript(`https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}/firebase-auth-compat.js`);
     if (!firebase.apps.length) {
@@ -78,8 +81,8 @@
   }
 
   function loginUrl(returnPath, reason) {
-    const url = new URL('login.html', window.location.href);
-    if (returnPath && returnPath !== 'login.html') {
+    const url = new URL(LOGIN_PAGE, window.location.href);
+    if (returnPath && returnPath !== 'login.html' && !returnPath.startsWith('login.html?')) {
       url.searchParams.set('return', returnPath);
     }
     if (reason) {
@@ -272,7 +275,7 @@
       }
     }
     currentUser = null;
-    window.location.href = 'login.html';
+    window.location.href = loginUrl();
   }
 
   function getUser() {
@@ -312,7 +315,7 @@
 
     container.querySelector('#sidebarLogout')?.addEventListener('click', () => {
       signOut().catch(() => {
-        window.location.href = 'login.html';
+        window.location.href = loginUrl();
       });
     });
   }
@@ -358,7 +361,7 @@
     dropdown?.addEventListener('click', (e) => e.stopPropagation());
     container.querySelector('#userMenuLogout')?.addEventListener('click', () => {
       signOut().catch(() => {
-        window.location.href = 'login.html';
+        window.location.href = loginUrl();
       });
     });
   }

@@ -9,13 +9,22 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from urllib.parse import urlencode
 
-from fastapi import HTTPException
-from fastapi.responses import FileResponse
+from fastapi import HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
 
 BACKEND = Path(__file__).resolve().parent
 ROOT = BACKEND.parent
 FRONTEND = ROOT / "frontend"
+
+_HTML_NO_CACHE = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+LOGIN_HTML_VERSION = "3"
 
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
@@ -62,9 +71,27 @@ async def serve_icon_png(name: str) -> FileResponse:
     raise HTTPException(status_code=404)
 
 
+def _file_response(path: Path) -> FileResponse:
+    headers = _HTML_NO_CACHE if path.suffix.lower() == ".html" else None
+    return FileResponse(path, headers=headers)
+
+
 @app.get("/")
 async def serve_index() -> FileResponse:
-    return FileResponse(FRONTEND / "index.html")
+    return _file_response(FRONTEND / "index.html")
+
+
+@app.get("/login.html")
+async def serve_login_html(request: Request) -> FileResponse | RedirectResponse:
+    if request.query_params.get("v") != LOGIN_HTML_VERSION:
+        params = dict(request.query_params)
+        params["v"] = LOGIN_HTML_VERSION
+        return RedirectResponse(
+            url=f"/login.html?{urlencode(params)}",
+            status_code=302,
+            headers=_HTML_NO_CACHE,
+        )
+    return _file_response(FRONTEND / "login.html")
 
 
 @app.get("/{path:path}")
@@ -73,12 +100,12 @@ async def serve_frontend(path: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="Not found")
     file_path = _frontend_file(path)
     if file_path:
-        return FileResponse(file_path)
+        return _file_response(file_path)
     if path.endswith(".html"):
         html = _frontend_file(path)
         if html:
-            return FileResponse(html)
-    return FileResponse(FRONTEND / "index.html")
+            return _file_response(html)
+    return _file_response(FRONTEND / "index.html")
 
 
 __all__ = ["app"]

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import urlencode
 
 import httpx
 from dotenv import load_dotenv
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import FileResponse, Response
+from starlette.responses import FileResponse, RedirectResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -75,11 +76,11 @@ async def proxy_to_backend(request: Request) -> Response:
                 media_type="application/json",
             )
 
-    out_headers = {
-        key: value
-        for key, value in upstream.headers.items()
-        if key.lower() not in HOP_BY_HOP
-    }
+    out_headers: list[tuple[str, str]] = []
+    for key, value in upstream.headers.multi_items():
+        if key.lower() in HOP_BY_HOP:
+            continue
+        out_headers.append((key, value))
 
     return Response(
         content=upstream.content,
@@ -129,9 +130,35 @@ async def serve_icon_png_fallback(request: Request) -> Response:
     return Response(status_code=404)
 
 
+_HTML_NO_CACHE = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+LOGIN_HTML_VERSION = "3"
+
+
+async def serve_login_html(request: Request) -> FileResponse | RedirectResponse:
+    if request.query_params.get("v") != LOGIN_HTML_VERSION:
+        params = dict(request.query_params)
+        params["v"] = LOGIN_HTML_VERSION
+
+        return RedirectResponse(
+            url=f"/login.html?{urlencode(params)}",
+            status_code=302,
+            headers=_HTML_NO_CACHE,
+        )
+    return FileResponse(
+        FRONTEND_DIR / "login.html",
+        headers=_HTML_NO_CACHE,
+    )
+
+
 def create_app() -> Starlette:
     return Starlette(
         routes=[
+            Route("/login.html", serve_login_html, methods=["GET", "HEAD"]),
             Route(
                 "/api",
                 proxy_to_backend,
