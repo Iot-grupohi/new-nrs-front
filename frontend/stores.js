@@ -322,6 +322,7 @@
   function isStoreOnline(store) {
     if (isStoreSuspended(store) || store.loading) return false;
     if (store.accessible !== true) return false;
+    if (store.agentProbeFailed) return false;
     const online = store.summary?.online ?? 0;
     return online > 0 || store.state === 'ok' || store.state === 'partial';
   }

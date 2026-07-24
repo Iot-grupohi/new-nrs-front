@@ -338,24 +338,67 @@
     return resolveAgentEndpoint(meta, catalog, agentConfig);
   }
 
+  function recordAgentProbe(storeId, result) {
+    const id = normalizeStoreId(storeId);
+    if (!id) return;
+    agentProbeState.set(id, {
+      ok: Boolean(result?.ok),
+      error: result?.error || null,
+      at: Date.now(),
+    });
+  }
+
+  function recentAgentProbeFailure(storeId, maxAgeMs = AGENT_PROBE_FAIL_TTL_MS) {
+    const row = agentProbeState.get(normalizeStoreId(storeId));
+    if (!row || row.ok !== false) return null;
+    if (Date.now() - row.at > maxAgeMs) return null;
+    return row;
+  }
+
+  function cardNeedsAgentValidation(card) {
+    if (!card || card.loading || card.storeSuspended) return false;
+    if (card.fromLiveProbe && !card.agentPulseStale && !card.staleSnapshot) return false;
+    return true;
+  }
+
+  function applyAgentProbeFailure(card, meta, hb, catalog, error) {
+    recordAgentProbe(card.id, { ok: false, error });
+    const fresh = withStoreCardPolicy(
+      buildStoreCard(meta, null, error, catalog, {
+        accessible: false,
+        agentUnavailable: isAgentUnavailableError(error),
+        fromLiveProbe: true,
+        staleSnapshot: false,
+        agentPulseStale: false,
+        agentProbeFailed: true,
+      }),
+      meta,
+      hb,
+      catalog
+    );
+    Object.keys(fresh).forEach((key) => {
+      card[key] = fresh[key];
+    });
+  }
+
   function enrichCardsFromStatusCache(cards, catalog, bulk) {
     const storesMap = bulk?.stores;
     if (!bulk?.available || !storesMap || typeof storesMap !== 'object') return;
 
     for (const card of cards) {
-      if (card.accessible && !card.agentPulseStale) continue;
+      if (card.accessible && !card.agentPulseStale && card.fromLiveProbe) continue;
       const doc = storesMap[normalizeStoreId(card.id)];
       if (!doc) continue;
       const meta = { id: card.id, name: card.name };
       const status = statusFromStatusCacheDoc(meta, doc, card.id);
       if (!status?.summary?.total) continue;
       const hb = heartbeatState.get(normalizeStoreId(card.id));
-      applyLiveCardSnapshot(card, meta, hb, catalog, status);
-      if (doc.alive) {
-        card.accessible = true;
-        card.agentPulseStale = !isHeartbeatEntryAlive(hb, catalog);
-        card.state = card.agentPulseStale ? 'online_stale_pulse' : 'online';
-      }
+      const pulseStale = !isHeartbeatEntryAlive(hb, catalog);
+      applyLiveCardSnapshot(card, meta, hb, catalog, status, {
+        agentPulseStale: pulseStale,
+        staleSnapshot: pulseStale || !doc.alive,
+        fromHeartbeat: false,
+      });
     }
   }
 
@@ -1669,10 +1712,13 @@
   }
 
   const heartbeatState = new Map();
+  const agentProbeState = new Map();
+  const AGENT_PROBE_FAIL_TTL_MS = 90000;
   let heartbeatMonitorStarted = false;
   let heartbeatEventSource = null;
   let heartbeatTimeoutTimer = null;
   let heartbeatPollTimer = null;
+  let agentProbeTimer = null;
   let heartbeatStreamReconnectMs = 3000;
   let heartbeatPageStartedAt = Date.now();
   let heartbeatCatalog = null;
@@ -1888,6 +1934,7 @@
           fromLiveProbe: true,
           agentPulseStale: false,
           staleSnapshot: false,
+          agentProbeFailed: false,
           ...extra,
         }),
         hb
@@ -1901,16 +1948,8 @@
     });
   }
 
-  async function enrichOfflineCardsFromAgentProbe(cards, catalog, token) {
-    const targets = cards.filter((card) => {
-      if (card.accessible || card.loading) return false;
-      const hasDots = Object.values(card.devices || {}).some(
-        (list) => Array.isArray(list) && list.length
-      );
-      if (hasDots && card.summary?.total) return false;
-      const hb = heartbeatState.get(normalizeStoreId(card.id));
-      return heartbeatHasAgentPayload(hb) || card.agentPulseStale;
-    });
+  async function validateStoresWithAgentProbe(cards, catalog, token) {
+    const targets = cards.filter((card) => cardNeedsAgentValidation(card));
     if (!targets.length) return;
 
     await runPool(
@@ -1921,12 +1960,15 @@
         const hb = heartbeatState.get(normalizeStoreId(card.id));
         const { status, error } = await probeAgentConfigViaPanel(meta, catalog, token);
         if (status?.summary?.total) {
+          recordAgentProbe(card.id, { ok: true });
           applyLiveCardSnapshot(card, meta, hb, catalog, status);
           return;
         }
-        if (card.agentPulseStale && status) {
-          applyLiveCardSnapshot(card, meta, hb, catalog, status);
-        } else if (card.agentPulseStale && error && !isAgentUnavailableError(error)) {
+        if (error) {
+          applyAgentProbeFailure(card, meta, hb, catalog, error);
+          return;
+        }
+        if (card.agentPulseStale || card.staleSnapshot) {
           card.storeNotice = 'Pulse central desatualizado · agente não respondeu';
         }
       }
@@ -2038,6 +2080,27 @@
       return buildOfflineCardFromHeartbeat(meta, catalog, hb, cacheMap);
     }
 
+    const probeFailure = recentAgentProbeFailure(id);
+    if (probeFailure) {
+      return withStoreCardPolicy(
+        buildStoreCard(
+          meta,
+          null,
+          probeFailure.error || friendlyUserMessage('Agente não respondeu'),
+          catalog,
+          {
+            accessible: false,
+            fromLiveProbe: true,
+            agentProbeFailed: true,
+            agentUnavailable: isAgentUnavailableError(probeFailure.error),
+          }
+        ),
+        meta,
+        hb,
+        catalog
+      );
+    }
+
     const status = statusFromHeartbeatPayload(meta, hb.payload, id) || hb.lastStatus;
     if (status?.summary?.total > 0) {
       return buildOnlineCardFromHeartbeat(meta, catalog, hb, status);
@@ -2076,6 +2139,36 @@
       clearInterval(heartbeatPollTimer);
       heartbeatPollTimer = null;
     }
+    if (agentProbeTimer) {
+      clearInterval(agentProbeTimer);
+      agentProbeTimer = null;
+    }
+  }
+
+  async function pollAgentReachability() {
+    if (!heartbeatCatalog || !heartbeatMonitorStarted) return;
+    const stores = heartbeatCatalog.stores || [];
+    if (!stores.length) return;
+
+    await runPool(
+      stores,
+      Math.min(getConcurrency(heartbeatCatalog), 8),
+      async (meta) => {
+        const { status, error } = await probeAgentConfigViaPanel(
+          meta,
+          heartbeatCatalog,
+          heartbeatAuthToken
+        );
+        if (status?.summary?.total) {
+          recordAgentProbe(meta.id, { ok: true });
+          return;
+        }
+        if (error) {
+          recordAgentProbe(meta.id, { ok: false, error });
+        }
+      }
+    );
+    emitHeartbeatUpdate({ agentProbe: true });
   }
 
   function connectHeartbeatStream() {
@@ -2131,6 +2224,11 @@
     heartbeatTimeoutTimer = setInterval(() => {
       emitHeartbeatUpdate({ tick: true });
     }, 5000);
+
+    if (agentProbeTimer) clearInterval(agentProbeTimer);
+    agentProbeTimer = setInterval(() => {
+      void pollAgentReachability();
+    }, 60000);
   }
 
   async function pollHeartbeatsSnapshot() {
@@ -2658,7 +2756,7 @@
 
     const statusBulk = await fetchStoresStatusCacheBulk(catalog);
     enrichCardsFromStatusCache(cards, catalog, statusBulk);
-    await enrichOfflineCardsFromAgentProbe(cards, catalog, token);
+    await validateStoresWithAgentProbe(cards, catalog, token);
     await enrichOfflineCardsFromCache(cards, catalog);
 
     const payload = assemblePayload(cards, {
