@@ -692,16 +692,16 @@
       const tr = document.createElement('tr');
       tr.className = row.success === false ? 'records-table__row records-table__row--fail' : 'records-table__row';
       tr.innerHTML = `
-        <td class="records-table__time">${escapeHtml(formatDateTime(row.ts, row.ts_ms))}</td>
-        <td class="records-table__operator" title="${escapeHtml(row.operator_name || operatorCellText(row))}">
+        <td class="records-table__time" data-label="Data / hora">${escapeHtml(formatDateTime(row.ts, row.ts_ms))}</td>
+        <td class="records-table__operator" data-label="Operador" title="${escapeHtml(row.operator_name || operatorCellText(row))}">
           ${escapeHtml(operatorCellText(row))}
         </td>
-        <td class="records-table__store">${escapeHtml(storeLabel(row))}</td>
-        <td class="records-table__channel">${escapeHtml(channelLabel(row))}</td>
-        <td class="records-table__equip-type">${escapeHtml(equipmentType(row))}</td>
-        <td class="records-table__equip-code">${escapeHtml(equipmentCode(row))}</td>
-        <td class="records-table__action">${escapeHtml(actionCellText(row))}</td>
-        <td class="records-table__dry-time">${escapeHtml(dryingTime(row))}</td>`;
+        <td class="records-table__store" data-label="Loja">${escapeHtml(storeLabel(row))}</td>
+        <td class="records-table__channel" data-label="Canal">${escapeHtml(channelLabel(row))}</td>
+        <td class="records-table__equip-type" data-label="Equipamento">${escapeHtml(equipmentType(row))}</td>
+        <td class="records-table__equip-code" data-label="Código">${escapeHtml(equipmentCode(row))}</td>
+        <td class="records-table__action" data-label="Ação">${escapeHtml(actionCellText(row))}</td>
+        <td class="records-table__dry-time" data-label="Tempo secagem">${escapeHtml(dryingTime(row))}</td>`;
       tbody.appendChild(tr);
     });
 
