@@ -200,6 +200,7 @@
 
   .sidebar {
     width: min(288px, 88vw);
+    padding: 1rem 0.75rem;
     transform: translateX(-105%);
     transition: transform 0.22s ease;
     box-shadow: 8px 0 32px rgba(0, 0, 0, 0.28);
@@ -223,16 +224,81 @@
     justify-content: flex-start;
     padding-left: 0.65rem;
     padding-right: 0.65rem;
+    flex-shrink: 0;
+  }
+
+  .sidebar__nav {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .sidebar__link,
   .sidebar__group-toggle {
     justify-content: flex-start;
+    padding: 0.65rem 0.75rem;
+  }
+
+  .sidebar__footer {
+    flex-shrink: 0;
+  }
+
+  .sidebar-user__email {
+    display: block;
   }
 }
 
 @media (max-width: 720px) {
   .dashboard-insights {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-audit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-records .records-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .records-panel {
+    overflow: visible;
+  }
+
+  .records-panel__toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .records-panel__head {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .records-panel__controls {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .records-panel__controls .field--compact {
+    width: 100%;
+  }
+
+  .records-panel__controls .field--compact select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .records-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .records-panel__footer {
+    flex-wrap: wrap;
+    gap: 0.65rem;
   }
 }

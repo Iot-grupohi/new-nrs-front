@@ -7104,65 +7104,6 @@ button.credit-reports-daily-card:focus-visible {
 }
 
 @media (max-width: 960px) {
-  .page-panel {
-    --sidebar-width: 76px;
-  }
-
-  .sidebar {
-    padding: 1rem 0.45rem;
-  }
-
-  .sidebar__identity,
-  .sidebar__label {
-    display: none;
-  }
-
-  .sidebar__brand {
-    justify-content: center;
-    padding-left: 0.35rem;
-    padding-right: 0.35rem;
-  }
-
-  .sidebar__link {
-    justify-content: center;
-    padding-left: 0.5rem;
-    padding-right: 0.5rem;
-  }
-
-  .sidebar__group-toggle {
-    justify-content: center;
-    padding-left: 0.5rem;
-    padding-right: 0.5rem;
-  }
-
-  .sidebar__caret {
-    display: none;
-  }
-
-  .sidebar__subnav {
-    margin-left: 0;
-    padding-left: 0;
-    border-left: none;
-    align-items: center;
-  }
-
-  .sidebar__sublink {
-    justify-content: center;
-    width: 100%;
-    padding-left: 0.5rem;
-    padding-right: 0.5rem;
-  }
-
-  .sidebar-user__email {
-    display: none;
-  }
-
-  .sidebar-user__logout {
-    font-size: 0.72rem;
-    padding-left: 0.35rem;
-    padding-right: 0.35rem;
-  }
-
   .records-stats {
     grid-template-columns: 1fr;
   }
