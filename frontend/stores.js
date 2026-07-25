@@ -100,7 +100,7 @@
     },
     'stores-suspended': {
       title: 'Lojas suspensas no Lav60',
-      empty: 'Nenhuma loja suspensa com agente online.',
+      empty: 'Nenhuma loja suspensa.',
     },
   };
 
@@ -1409,7 +1409,7 @@
           (entry) => `
         <li class="kpi-event-item kpi-event-item--suspended">
           <a class="kpi-event-item__store" href="${storePageHref(entry.store)}">${escapeHtml(storeDisplayName(entry))}</a>
-          <span class="kpi-event-item__sub">${escapeHtml(entry.reason || 'Loja suspensa — operação local permitida')} · ${entry.summary_online} de ${entry.summary_total} online</span>
+          <span class="kpi-event-item__sub">${escapeHtml(entry.reason || 'Loja suspensa — operação local permitida')}${entry.agent_online === false ? ' · agente offline' : ''} · ${entry.summary_online} de ${entry.summary_total} online</span>
         </li>`
         )
         .join('')}

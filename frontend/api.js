@@ -1401,13 +1401,16 @@
   function buildDashboard(cards) {
     const ready = cards.filter((c) => !c.loading);
     const connected = ready.filter((c) => c.accessible);
-    const operational = connected.filter(
-      (c) => !c.storeSuspended && (c.summary?.online ?? 0) > 0
+    const storesSuspendedCards = ready.filter((c) => c.storeSuspended);
+    const operational = ready.filter(
+      (c) => !c.storeSuspended && c.accessible && (c.summary?.online ?? 0) > 0
     );
-    const storesSuspendedCards = ready.filter((c) => c.storeSuspended && c.accessible);
-    const allDevicesOffline = connected.filter((c) => (c.summary?.online ?? 0) <= 0);
-    const unreachable = ready.filter((c) => !c.accessible);
+    const unreachable = ready.filter((c) => !c.storeSuspended && !c.accessible);
+    const allDevicesOffline = connected.filter(
+      (c) => !c.storeSuspended && (c.summary?.online ?? 0) <= 0
+    );
     const partialCount = connected.filter((c) => {
+      if (c.storeSuspended) return false;
       const on = c.summary?.online ?? 0;
       const tot = c.summary?.total ?? 0;
       return on > 0 && on < tot;
@@ -1442,13 +1445,13 @@
         summary_online: card.summary?.online ?? 0,
         summary_total: card.summary?.total ?? 0,
       };
-      if (card.storeSuspended && card.accessible) {
+      if (card.storeSuspended) {
         storesSuspendedEvents.push({
           ...storeEntry,
           reason: card.storeNotice || STORE_SUSPENDED_NOTICE,
+          agent_online: card.accessible,
         });
-      }
-      if (card.accessible && !card.storeSuspended && (card.summary?.online ?? 0) > 0) {
+      } else if (card.accessible && (card.summary?.online ?? 0) > 0) {
         const healthPct = card.summary?.total
           ? Math.round(((card.summary?.online ?? 0) / card.summary.total) * 100)
           : 0;
