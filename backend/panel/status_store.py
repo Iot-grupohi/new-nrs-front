@@ -11,10 +11,9 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from panel.lav60_env import ROOT, env_bool, env_value
+from panel.firebase_client import firebase_status, get_firestore, service_account_path
+from panel.lav60_env import env_bool, env_value
 
-_db = None
-_init_error: str | None = None
 _memory: dict[str, dict[str, Any]] = {}
 _memory_lock = threading.Lock()
 _CONFIG_TTL = 300.0
@@ -51,66 +50,28 @@ def _collection_name() -> str:
 
 
 def _service_account_path():
-    raw = env_value("FIREBASE_SERVICE_ACCOUNT_FILE")
-    if not raw:
-        return None
-    from pathlib import Path
-
-    path = Path(raw)
-    if not path.is_absolute():
-        path = ROOT / raw
-    return path if path.is_file() else None
+    return service_account_path()
 
 
 def _get_db():
-    global _db, _init_error
-    if _db is not None:
-        return _db
-    if _init_error:
-        raise RuntimeError(_init_error)
-
-    path = _service_account_path()
-    if not path:
-        raise RuntimeError("Firebase service account não configurado")
-
-    try:
-        import firebase_admin
-        from firebase_admin import credentials, firestore
-    except ImportError as exc:
-        _init_error = "Instale firebase-admin: pip install firebase-admin"
-        raise RuntimeError(_init_error) from exc
-
-    try:
-        if not firebase_admin._apps:
-            cred = credentials.Certificate(str(path))
-            firebase_admin.initialize_app(cred)
-        _db = firestore.client()
-        return _db
-    except Exception as exc:
-        _init_error = str(exc)
-        raise RuntimeError(_init_error) from exc
+    return get_firestore()
 
 
 def status_cache_status() -> dict[str, Any]:
-    if not _service_account_path():
-        return {
-            "available": False,
-            "reason": "status_cache_not_configured",
-            "hint": "Configure FIREBASE_SERVICE_ACCOUNT_FILE no .env",
-        }
-    try:
-        _get_db()
-        with _memory_lock:
-            memory_count = len(_memory)
-        return {
-            "available": True,
-            "collection": _collection_name(),
-            "read_source": "firestore" if _read_from_firestore_enabled() else "memory",
-            "write_interval_seconds": _write_interval_seconds(),
-            "memory_count": memory_count,
-        }
-    except Exception as exc:
-        return {"available": False, "reason": "firestore_error", "hint": str(exc)}
+    status = firebase_status(not_configured_reason="status_cache_not_configured")
+    if not status.get("available"):
+        if status.get("reason") == "status_cache_not_configured":
+            status["hint"] = "Configure FIREBASE_SERVICE_ACCOUNT_FILE no .env"
+        return status
+    with _memory_lock:
+        memory_count = len(_memory)
+    return {
+        "available": True,
+        "collection": _collection_name(),
+        "read_source": "firestore" if _read_from_firestore_enabled() else "memory",
+        "write_interval_seconds": _write_interval_seconds(),
+        "memory_count": memory_count,
+    }
 
 
 def _compact_machines(machines: Any, limit: int = 24) -> list[dict[str, Any]]:

@@ -8,10 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from panel.lav60_env import ROOT, env_value
-
-_db = None
-_init_error: str | None = None
+from panel.firebase_client import firebase_status, get_firestore, service_account_path
+from panel.lav60_env import env_value
 _MAX_FIELD_LEN = 4000
 _MAX_RESPONSE_KEYS = 24
 _DEVICE_PATH_RE = re.compile(r"/(washer|dryer|doser|ac)(?:/([^/?#]+))?", re.IGNORECASE)
@@ -52,13 +50,7 @@ CHANNEL_LABELS_PT: dict[str, str] = {
 
 
 def _service_account_path() -> Path | None:
-    raw = env_value("FIREBASE_SERVICE_ACCOUNT_FILE")
-    if not raw:
-        return None
-    path = Path(raw)
-    if not path.is_absolute():
-        path = ROOT / raw
-    return path if path.is_file() else None
+    return service_account_path()
 
 
 def _collection_name() -> str:
@@ -67,54 +59,14 @@ def _collection_name() -> str:
 
 
 def _get_db():
-    global _db, _init_error
-    if _db is not None:
-        return _db
-    if _init_error:
-        raise RuntimeError(_init_error)
-
-    path = _service_account_path()
-    if not path:
-        raise RuntimeError("Arquivo de service account do Firebase não encontrado")
-
-    try:
-        import firebase_admin
-        from firebase_admin import credentials, firestore
-    except ImportError as exc:
-        _init_error = "Instale firebase-admin: pip install firebase-admin"
-        raise RuntimeError(_init_error) from exc
-
-    try:
-        if not firebase_admin._apps:
-            cred = credentials.Certificate(str(path))
-            firebase_admin.initialize_app(cred)
-        _db = firestore.client()
-        return _db
-    except Exception as exc:
-        _init_error = str(exc)
-        raise RuntimeError(_init_error) from exc
+    return get_firestore()
 
 
 def audit_status() -> dict[str, Any]:
-    path = _service_account_path()
-    if not path:
-        return {
-            "available": False,
-            "reason": "audit_not_configured",
-            "hint": (
-                "Copie o JSON da service account para o VPS e defina "
-                "FIREBASE_SERVICE_ACCOUNT_FILE com caminho absoluto no .env"
-            ),
-        }
-    try:
-        _get_db()
-        return {"available": True, "collection": _collection_name()}
-    except Exception as exc:
-        return {
-            "available": False,
-            "reason": "firestore_error",
-            "hint": str(exc),
-        }
+    status = firebase_status(not_configured_reason="audit_not_configured")
+    if status.get("available"):
+        status["collection"] = _collection_name()
+    return status
 
 
 def _truncate(value: Any, limit: int = _MAX_FIELD_LEN) -> Any:
