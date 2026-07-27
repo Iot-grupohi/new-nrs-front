@@ -1540,7 +1540,7 @@
         total: cards.length,
         online: operational.length,
         connected: connected.length,
-        offline: Math.max(0, ready.length - operational.length),
+        offline: unreachable.length + allDevicesOffline.length,
         partial: partialCount,
         suspended: storesSuspendedCards.length,
         pending: cards.filter((c) => c.loading).length,

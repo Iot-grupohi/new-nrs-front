@@ -22,7 +22,11 @@
     },
     'gateway-offline': {
       title: 'Gateways offline',
-      empty: 'Nenhuma loja com gateway offline ou pendente de verificação.',
+      empty: 'Nenhuma loja com gateway offline.',
+    },
+    'gateway-pending': {
+      title: 'Sem verificação recente',
+      empty: 'Todas as lojas já foram verificadas antes.',
     },
   };
 
@@ -73,6 +77,7 @@
   function buildGatewayEventLists() {
     const online = [];
     const offline = [];
+    const pending = [];
     getStores().forEach((meta) => {
       const sid = normalizeStoreId(meta.id);
       const status = overviewStatusForStore(sid);
@@ -86,21 +91,18 @@
         agentAlive: status?.agentAlive,
         agentOfflineSinceMs: status?.agentOfflineSinceMs,
         gatewayOfflineSinceMs: status?.gatewayOfflineSinceMs,
-        pending: false,
       };
       if (!status || status.online == null) {
         if (status?.agentAlive === false) offline.push(entry);
-        else {
-          entry.pending = true;
-          offline.push(entry);
-        }
+        else pending.push(entry);
       } else if (status.online) online.push(entry);
       else offline.push(entry);
     });
     const sort = (a, b) => a.store.localeCompare(b.store);
     online.sort(sort);
     offline.sort(sort);
-    return { online, offline };
+    pending.sort(sort);
+    return { online, offline, pending };
   }
 
   function gatewayPageHref(storeId) {
@@ -125,9 +127,6 @@
   }
 
   function offlineDetail(entry) {
-    if (entry.pending) {
-      return entry.checking ? 'Verificando…' : 'Ainda não verificada nesta sessão';
-    }
     const parts = [];
     if (entry.agentAlive === false && entry.agentOfflineSinceMs) {
       parts.push(`Agente offline há ${formatOfflineDuration(entry.agentOfflineSinceMs)}`);
@@ -155,6 +154,22 @@
           const sub = age ? `${reason} · verificado ${age}` : reason;
           return `
         <li class="kpi-event-item kpi-event-item--alert">
+          <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
+          <span class="kpi-event-item__sub">${escapeHtml(sub)}</span>
+        </li>`;
+        })
+        .join('')}
+    </ul>`;
+  }
+
+  function renderGatewayPendingEvents(items) {
+    if (!items?.length) return '';
+    return `<ul class="kpi-event-list kpi-event-list--stores">
+      ${items
+        .map((entry) => {
+          const sub = entry.checking ? 'Verificando…' : 'Ainda não verificada nesta sessão';
+          return `
+        <li class="kpi-event-item">
           <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
           <span class="kpi-event-item__sub">${escapeHtml(sub)}</span>
         </li>`;
@@ -269,6 +284,9 @@
     } else if (kpiKey === 'gateway-offline') {
       count = lists.offline.length;
       html = renderGatewayOfflineEvents(lists.offline);
+    } else if (kpiKey === 'gateway-pending') {
+      count = lists.pending.length;
+      html = renderGatewayPendingEvents(lists.pending);
     }
 
     const titleEl = $('agentKpiModalTitle');
@@ -330,17 +348,21 @@
     const stores = getStores();
     let online = 0;
     let offline = 0;
+    let pending = 0;
     stores.forEach((meta) => {
       const status = overviewStatusForStore(meta.id);
       if (!status || status.online == null) {
-        offline += 1;
+        if (status?.agentAlive === false) offline += 1;
+        else pending += 1;
       } else if (status.online) online += 1;
       else offline += 1;
     });
     const onlineEl = $('kpiGatewayOnline');
     const offlineEl = $('kpiGatewayOffline');
+    const pendingEl = $('kpiGatewayPending');
     if (onlineEl) onlineEl.textContent = String(online);
     if (offlineEl) offlineEl.textContent = String(offline);
+    if (pendingEl) pendingEl.textContent = String(pending);
   }
 
   function updateGatewayOverviewMeta(scanning = false) {
