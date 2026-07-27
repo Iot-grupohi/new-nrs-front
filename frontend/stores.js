@@ -78,21 +78,13 @@
       title: 'Lojas offline ou indisponíveis',
       empty: 'Nenhuma loja offline.',
     },
-    'devices-suspended': {
-      title: 'Máquinas suspensas',
-      empty: 'Nenhuma máquina suspensa.',
-    },
-    'devices-occupied': {
-      title: 'Máquinas ocupadas',
-      empty: 'Nenhuma máquina ocupada.',
-    },
-    'devices-available': {
-      title: 'Máquinas disponíveis',
-      empty: 'Nenhuma máquina disponível.',
+    'devices-online': {
+      title: 'Equipamentos online',
+      empty: 'Nenhum equipamento operacional no momento.',
     },
     'devices-offline': {
-      title: 'Dispositivos offline na rede',
-      empty: 'Nenhum dispositivo fora da rede.',
+      title: 'Equipamentos offline',
+      empty: 'Nenhum equipamento offline.',
     },
     'stores-partial': {
       title: 'Lojas parciais',
@@ -950,9 +942,7 @@
     const alerts =
       (stores.offline ?? 0) +
       (stores.partial ?? 0) +
-      (stores.suspended ?? 0) +
-      (devices.offline_network ?? 0) +
-      (devices.suspended ?? 0);
+      (devices.offline ?? 0);
 
     const tileStoresOnline = $('dashboardTileStoresOnline');
     const tileStoresOnlineMeta = $('dashboardTileStoresOnlineMeta');
@@ -1063,10 +1053,10 @@
     if (hasKpis) {
       $('kpiStoresOnline').textContent = stores.online ?? '—';
       $('kpiStoresOffline').textContent = stores.offline ?? '—';
-      $('kpiDevicesSuspended').textContent = devices.suspended ?? '—';
-      $('kpiDevicesOccupied').textContent = devices.occupied ?? '—';
-      $('kpiDevicesAvailable').textContent = devices.available ?? '—';
-      $('kpiDevicesOffline').textContent = devices.offline_network ?? '—';
+      const devicesOnlineKpi = $('kpiDevicesOnline');
+      if (devicesOnlineKpi) devicesOnlineKpi.textContent = devices.online ?? '—';
+      const devicesOfflineKpi = $('kpiDevicesOffline');
+      if (devicesOfflineKpi) devicesOfflineKpi.textContent = devices.offline ?? '—';
 
       updateHealthCard(devices);
       updateDashboardSummaryTiles(stores, devices);
@@ -1084,11 +1074,6 @@
           : 'Aguardando dados das lojas';
       }
 
-      const partialEl = $('kpiStoresPartial');
-      if (partialEl) partialEl.textContent = stores.partial ?? '—';
-
-      const suspendedEl = $('kpiStoresSuspended');
-      if (suspendedEl) suspendedEl.textContent = stores.suspended ?? '—';
     }
 
     updateDashboardHeader(payload);
@@ -2073,9 +2058,10 @@
       count = items.length;
       html = renderStoreOnlineEvents(items);
     } else if (kpiKey === 'stores-offline') {
-      const items = events.stores_offline || [];
-      count = items.length;
-      html = renderStoreOfflineEvents(items);
+      const offlineItems = events.stores_offline || [];
+      const suspendedItems = events.stores_suspended || [];
+      count = offlineItems.length + suspendedItems.length;
+      html = renderStoreOfflineEvents(offlineItems) + renderStoreSuspendedEvents(suspendedItems);
     } else if (kpiKey === 'stores-partial') {
       const items = events.stores_partial || [];
       count = items.length;
@@ -2084,6 +2070,18 @@
       const items = events.stores_suspended || [];
       count = items.length;
       html = renderStoreSuspendedEvents(items);
+    } else if (kpiKey === 'devices-online') {
+      const items = [...(events.devices_available || []), ...(events.devices_occupied || [])].sort((a, b) =>
+        a.store.localeCompare(b.store) || String(a.id).localeCompare(String(b.id))
+      );
+      count = items.length;
+      html = renderDeviceEventsGrouped(items);
+    } else if (kpiKey === 'devices-offline') {
+      const items = [...(events.devices_suspended || []), ...(events.devices_offline_network || [])].sort((a, b) =>
+        a.store.localeCompare(b.store) || String(a.id).localeCompare(String(b.id))
+      );
+      count = items.length;
+      html = renderDeviceEventsGrouped(items);
     } else if (kpiKey === 'devices-suspended') {
       const items = events.devices_suspended || [];
       count = items.length;
@@ -2094,10 +2092,6 @@
       html = renderDeviceEventsGrouped(items);
     } else if (kpiKey === 'devices-available') {
       const items = events.devices_available || [];
-      count = items.length;
-      html = renderDeviceEventsGrouped(items);
-    } else if (kpiKey === 'devices-offline') {
-      const items = events.devices_offline_network || [];
       count = items.length;
       html = renderDeviceEventsGrouped(items);
     }
@@ -2138,7 +2132,7 @@
   }
 
   function setActiveAgentKpiCard(cardEl) {
-    document.querySelectorAll('.dashboard-panel--agent [data-kpi]').forEach((el) => {
+    document.querySelectorAll('.dashboard-agents-platform [data-kpi]').forEach((el) => {
       const active = el === cardEl;
       el.classList.toggle('stat-card--active', active);
       el.setAttribute('aria-expanded', active ? 'true' : 'false');
@@ -2166,7 +2160,7 @@
     $('agentKpiModal')?.classList.add('hidden');
     document.body.classList.remove('agent-kpi-modal-open');
     window.Lav60KpiModalSearch?.hide?.();
-    document.querySelectorAll('.dashboard-panel--agent [data-kpi]').forEach((el) => {
+    document.querySelectorAll('.dashboard-agents-platform [data-kpi]').forEach((el) => {
       el.classList.remove('stat-card--active');
       el.setAttribute('aria-expanded', 'false');
     });
@@ -2201,7 +2195,7 @@
         return;
       }
 
-      const agentCard = e.target.closest('.dashboard-panel--agent [data-kpi]');
+      const agentCard = e.target.closest('.dashboard-agents-platform [data-kpi]');
       if (agentCard) {
         openAgentKpiModal(agentCard.dataset.kpi, agentCard);
       }
@@ -2215,7 +2209,7 @@
         return;
       }
 
-      const card = e.target.closest('.dashboard-panel--agent [data-kpi]');
+      const card = e.target.closest('.dashboard-agents-platform [data-kpi]');
       if (!card || (e.key !== 'Enter' && e.key !== ' ')) return;
       e.preventDefault();
       openAgentKpiModal(card.dataset.kpi, card);

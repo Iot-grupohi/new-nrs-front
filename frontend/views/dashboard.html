@@ -67,52 +67,44 @@
       <h2 class="dashboard-section__title">Agentes e equipamentos</h2>
       <p class="dashboard-section__meta">Clique em um card para abrir o relatório detalhado</p>
     </header>
-    <div class="dashboard-panel dashboard-panel--agent" id="dashboard">
-      <div class="dashboard-bento__agent dashboard-bento__agent--horizontal">
-        <div class="dashboard-kpi-group">
-          <p class="dashboard-kpi-group__title">Lojas</p>
-          <div class="dashboard-kpi-group__grid dashboard-kpi-group__grid--row">
-            <article class="stat-card stat-card--success stat-card--clickable stat-card--compact" data-kpi="stores-online" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
-              <span class="stat-card__label">Online</span>
-              <strong class="stat-card__value" id="kpiStoresOnline">—</strong>
-            </article>
-            <article class="stat-card stat-card--orange stat-card--clickable stat-card--compact" data-kpi="stores-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
-              <span class="stat-card__label">Offline</span>
-              <strong class="stat-card__value" id="kpiStoresOffline">—</strong>
-            </article>
-            <article class="stat-card stat-card--yellow stat-card--clickable stat-card--compact" data-kpi="stores-partial" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
-              <span class="stat-card__label">Parciais</span>
-              <strong class="stat-card__value" id="kpiStoresPartial">—</strong>
-            </article>
-            <article class="stat-card stat-card--danger stat-card--clickable stat-card--compact" data-kpi="stores-suspended" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
-              <span class="stat-card__label">Suspensas</span>
-              <strong class="stat-card__value" id="kpiStoresSuspended">—</strong>
-            </article>
+    <div class="dashboard-agents-platform">
+      <section class="dashboard-panel dashboard-panel--stores-kpi dashboard-panel--kpi-duo" id="dashboardStores">
+        <header class="dashboard-panel__head">
+          <div>
+            <h3 class="dashboard-panel__title">Lojas</h3>
+            <p class="dashboard-panel__meta">Clique no card para ver o relatório</p>
           </div>
+        </header>
+        <div class="dashboard-chip-row stats-grid stats-grid--dashboard-duo" id="storesKpis">
+          <article class="stat-card stat-card--success stat-card--clickable stat-card--chip" data-kpi="stores-online" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+            <span class="stat-card__label">Online</span>
+            <strong class="stat-card__value" id="kpiStoresOnline">—</strong>
+          </article>
+          <article class="stat-card stat-card--danger stat-card--clickable stat-card--chip" data-kpi="stores-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+            <span class="stat-card__label">Offline</span>
+            <strong class="stat-card__value" id="kpiStoresOffline">—</strong>
+          </article>
         </div>
+      </section>
 
-        <div class="dashboard-kpi-group">
-          <p class="dashboard-kpi-group__title">Equipamentos</p>
-          <div class="dashboard-kpi-group__grid dashboard-kpi-group__grid--row">
-            <article class="stat-card stat-card--danger stat-card--clickable stat-card--compact" data-kpi="devices-suspended" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
-              <span class="stat-card__label">Suspensas</span>
-              <strong class="stat-card__value" id="kpiDevicesSuspended">—</strong>
-            </article>
-            <article class="stat-card stat-card--yellow stat-card--clickable stat-card--compact" data-kpi="devices-occupied" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
-              <span class="stat-card__label">Ocupadas</span>
-              <strong class="stat-card__value" id="kpiDevicesOccupied">—</strong>
-            </article>
-            <article class="stat-card stat-card--available stat-card--clickable stat-card--compact" data-kpi="devices-available" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
-              <span class="stat-card__label">Disponíveis</span>
-              <strong class="stat-card__value" id="kpiDevicesAvailable">—</strong>
-            </article>
-            <article class="stat-card stat-card--orange stat-card--clickable stat-card--compact" data-kpi="devices-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
-              <span class="stat-card__label">Offline rede</span>
-              <strong class="stat-card__value" id="kpiDevicesOffline">—</strong>
-            </article>
+      <section class="dashboard-panel dashboard-panel--devices-kpi dashboard-panel--kpi-duo" id="dashboardDevices">
+        <header class="dashboard-panel__head">
+          <div>
+            <h3 class="dashboard-panel__title">Equipamentos</h3>
+            <p class="dashboard-panel__meta">Clique no card para ver o relatório</p>
           </div>
+        </header>
+        <div class="dashboard-chip-row stats-grid stats-grid--dashboard-duo" id="devicesKpis">
+          <article class="stat-card stat-card--success stat-card--clickable stat-card--chip" data-kpi="devices-online" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+            <span class="stat-card__label">Online</span>
+            <strong class="stat-card__value" id="kpiDevicesOnline">—</strong>
+          </article>
+          <article class="stat-card stat-card--danger stat-card--clickable stat-card--chip" data-kpi="devices-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+            <span class="stat-card__label">Offline</span>
+            <strong class="stat-card__value" id="kpiDevicesOffline">—</strong>
+          </article>
         </div>
-      </div>
+      </section>
     </div>
   </section>
 
