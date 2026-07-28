@@ -1205,6 +1205,28 @@ select.btn {
   transform: rotate(45deg) translate(-1px, -2px);
 }
 
+.confirm-modal__icon--err {
+  background: rgba(239, 68, 68, 0.12);
+  border: 2px solid var(--danger);
+  color: var(--danger);
+  font-size: 1.65rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.confirm-modal__icon--err::after {
+  content: '!';
+}
+
+.confirm-modal--error .confirm-modal__box {
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.confirm-modal__badge--err {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.12);
+}
+
 .confirm-modal__title {
   font-size: 1.2rem;
   font-weight: 700;

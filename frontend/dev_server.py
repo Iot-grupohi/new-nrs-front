@@ -76,11 +76,11 @@ async def proxy_to_backend(request: Request) -> Response:
                 media_type="application/json",
             )
 
-    out_headers: list[tuple[str, str]] = []
+    out_headers: dict[str, str] = {}
     for key, value in upstream.headers.multi_items():
         if key.lower() in HOP_BY_HOP:
             continue
-        out_headers.append((key, value))
+        out_headers[key] = value
 
     return Response(
         content=upstream.content,

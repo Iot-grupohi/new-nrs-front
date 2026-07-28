@@ -8,6 +8,7 @@
     WASHER_DOSAGE_OPTIONS,
     findMachineMeta,
     mergeMachinesCatalog,
+    enrichDoserMeta,
     getCachedStoreEntry,
     fetchStoreStatusFromHeartbeat,
     canOperateMachineStatus,
@@ -16,6 +17,12 @@
     verifyStoreGatewayLed,
     formatStoreGatewayError,
     syncConfigDevices,
+    agentOperationFailureMessage,
+    agentStatusPayloadIndicatesRelease,
+    machineListEntryIndicatesRelease,
+    dryerReleaseVerifyDelayMs,
+    agentPostConfirmsFirstRelease,
+    agentPostExplicitlyReleased,
   } = window.Lav60;
   const { guardPage, mountUserMenu, panelFetch } = window.Lav60Auth;
 
@@ -24,8 +31,9 @@
   const confirmUI = Lav60DeviceUI.createConfirmUI({
     $,
     onToast: (message, ok = true) => showToast(message, ok),
+    formatError: (label, message) => formatOperatorError(label, message),
   });
-  const { confirmAction, showActionConfirm, bindConfirmEvents } = confirmUI;
+  const { confirmAction, showActionConfirm, showActionError, bindConfirmEvents } = confirmUI;
 
   const {
     createDeviceCard,
@@ -527,6 +535,8 @@
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+
+  const RELEASE_VERIFY_INTERVAL_MS = 1000;
 
   function deviceProbeKey(deviceType, machine) {
     return machine ? `${deviceType}:${machine}` : deviceType;
@@ -1119,13 +1129,91 @@
     return runProbeQueue(generation);
   }
 
-  async function runGatewayAction(label, subpath, method = 'POST', body) {
+  async function verifyGatewayDeviceRelease(deviceType, deviceId, options = {}) {
+    const dtype = String(deviceType || '').toLowerCase();
+    const id = normalizeStoreId(deviceId);
+    if (!id || (dtype !== 'washer' && dtype !== 'dryer')) return null;
+
+    if (options.postData && agentPostConfirmsFirstRelease(options.postData)) {
+      return {
+        ...options.postData,
+        release_verified: true,
+        release_confirm_source: 'agent_first_pulse',
+      };
+    }
+
+    const devicePath = `status/${dtype}/${id}`;
+    let initialDelay = Number(options.initialDelayMs);
+    if (!Number.isFinite(initialDelay) || initialDelay < 0) {
+      initialDelay = dtype === 'dryer' ? dryerReleaseVerifyDelayMs(options.minutes) : 500;
+    }
+    if (initialDelay > 0) await sleep(initialDelay);
+
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      if (attempt > 0) await sleep(RELEASE_VERIFY_INTERVAL_MS);
+
+      const result = await gatewayRequest('GET', devicePath, undefined, { allowHttpError: true });
+      if (
+        agentStatusPayloadIndicatesRelease(result.data) ||
+        machineListEntryIndicatesRelease(result.data?.machines, dtype, id)
+      ) {
+        return { ...result.data, release_verified: true };
+      }
+      const fail = agentOperationFailureMessage(result.data);
+      if (fail) throw new Error(fail);
+
+      const storeResult = await gatewayRequest('GET', 'status', undefined, { allowHttpError: true });
+      if (machineListEntryIndicatesRelease(storeResult.data?.machines, dtype, id)) {
+        return { ...storeResult.data, release_verified: true };
+      }
+    }
+
+    if (options.postData && agentPostExplicitlyReleased(options.postData)) {
+      return { ...options.postData, release_verified: true, release_confirm_source: 'agent_post' };
+    }
+
+    const label = dtype === 'dryer' ? 'secadora' : 'lavadora';
+    throw new Error(
+      `Liberação não confirmada — a ${label} ${id.toUpperCase()} não indicou ciclo iniciado. Verifique na loja antes de tentar de novo.`
+    );
+  }
+
+  async function runGatewayAction(label, subpath, method = 'POST', body, options = {}) {
     const result = await gatewayRequest(method, subpath, body);
     if (!result.ok) {
       const err = new Error(readGatewayError(result.data, result.status));
       err.payload = result.data;
       throw err;
     }
+
+    const kind = options.operationKind || null;
+    if (kind && kind.includes('release')) {
+      const fail = agentOperationFailureMessage(result.data);
+      if (fail) throw new Error(fail);
+
+      const match = String(subpath).match(/^(washer|dryer)\/([^/?#]+)/i);
+      if (agentPostConfirmsFirstRelease(result.data)) {
+        return {
+          ...result.data,
+          release_verified: true,
+          release_confirm_source: 'agent_first_pulse',
+          machine: result.data.machine || (match ? match[2] : undefined),
+          minutes: result.data.minutes ?? body?.minutes,
+          _httpStatus: 200,
+        };
+      }
+
+      if (options.verifyRelease !== false) {
+        if (match) {
+          const verified = await verifyGatewayDeviceRelease(match[1], match[2], {
+            minutes: body?.minutes,
+            postData: result.data,
+          });
+          return { ...result.data, ...(verified || {}), release_verified: true };
+        }
+      }
+    }
+
     return result.data;
   }
 
@@ -1204,7 +1292,10 @@
     ], { heading: 'Confirmar liberação' });
     if (!ok) return;
     try {
-      const data = await runGatewayAction(`Secadora ${id}`, `dryer/${id}`, 'POST', { minutes });
+      const data = await runGatewayAction(`Secadora ${id}`, `dryer/${id}`, 'POST', { minutes: Number(minutes) }, {
+        operationKind: 'dryer_release',
+        verifyRelease: true,
+      });
       setDryerLock(id, data.minutes ?? minutes);
       showActionConfirm(`Secadora ${id}`, data);
       await logGatewayAudit({
@@ -1230,7 +1321,11 @@
         device_type: 'dryer',
         device_id: String(id),
       });
-      showToast(formatOperatorError(`Secadora ${id}`, e.message), false);
+      showActionError(`Secadora ${id}`, formatOperatorError(`Secadora ${id}`, e.message), [
+        ['Equipamento', `Secadora ${id}`],
+        ['Tempo', `${minutes} min`],
+      ]);
+      void startBackgroundDeviceProbes({ force: true });
     }
   }
 
@@ -1243,7 +1338,10 @@
     ], { heading: 'Confirmar liberação' });
     if (!ok) return;
     try {
-      const data = await runGatewayAction(`Lavadora ${id}`, `washer/${id}`, 'POST', am ? { am } : {});
+      const data = await runGatewayAction(`Lavadora ${id}`, `washer/${id}`, 'POST', am ? { am } : {}, {
+        operationKind: 'washer_release',
+        verifyRelease: true,
+      });
       setWasherLock(id, getWasherLockMinutes(getMachineMeta(id, 'washer')));
       showActionConfirm(`Lavadora ${id}`, data);
       await logGatewayAudit({
@@ -1269,7 +1367,10 @@
         device_type: 'washer',
         device_id: String(id),
       });
-      showToast(formatOperatorError(`Lavadora ${id}`, e.message), false);
+      showActionError(`Lavadora ${id}`, formatOperatorError(`Lavadora ${id}`, e.message), [
+        ['Equipamento', `Lavadora ${id}`],
+      ]);
+      void startBackgroundDeviceProbes({ force: true });
     }
   }
 
@@ -1398,8 +1499,9 @@
     if (!gatewayConfig) return;
     setSectionCount('dosersCount', pingStatus?.dosers);
     visibleDeviceIds('doser', gatewayConfig.dosers).forEach((id) => {
+      const catalog = getMachinesCatalog();
+      const meta = enrichDoserMeta(getMachineMeta(id, 'doser'), id, catalog);
       const online = deviceOnline('doser', id);
-      const meta = getMachineMeta(id, 'doser');
       const card = createDeviceCard(
         id,
         online,

@@ -34,12 +34,14 @@
     formatOperatorError,
     findMachineMeta,
     mergeMachinesCatalog,
+    enrichDoserMeta,
     canOperateMachineStatus,
     machineMetaFacts,
     deviceUnifiedStatus,
     syncConfigDevices,
     isDeviceVisibleInFrontend,
     applyFrontendDeviceVisibility,
+    resolveDeviceOnline,
     isStoreLav60Suspended,
   } = window.Lav60;
 
@@ -62,8 +64,9 @@
   const confirmUI = Lav60DeviceUI.createConfirmUI({
     $,
     onToast: (message, ok = true) => showToast(message, ok),
+    formatError: (label, message) => formatOperatorError(label, message),
   });
-  const { confirmAction, showActionConfirm, hideActionConfirm, bindConfirmEvents } = confirmUI;
+  const { confirmAction, showActionConfirm, showActionError, hideActionConfirm, bindConfirmEvents } = confirmUI;
 
   const {
     createDeviceCard,
@@ -82,9 +85,34 @@
   const DRYER_LOCK_STORAGE_KEY = 'lav60_dryer_locks';
   const WASHER_LOCK_STORAGE_KEY = 'lav60_washer_locks';
 
-  function showOperatorError(label, error) {
+  function markDeviceOffline(deviceType, id) {
+    if (!statusData || !id) return;
+    const mapKey = deviceType === 'washer' ? 'washers' : deviceType === 'dryer' ? 'dryers' : 'dosers';
+    const mid = String(id).trim().toLowerCase();
+    statusData[mapKey] = { ...(statusData[mapKey] || {}), [mid]: false };
+    if (uiReady) renderDevices();
+  }
+
+  function isDeviceUnreachableError(error) {
+    const msg = String(error?.message || error || '').toLowerCase();
+    return (
+      msg.includes('não respondeu') ||
+      msg.includes('did not respond') ||
+      msg.includes('timeout') ||
+      msg.includes('unreachable') ||
+      msg.includes('sem resposta') ||
+      msg.includes('offline')
+    );
+  }
+
+  function showOperatorError(label, error, options = {}) {
     const msg = error?.message || String(error || '');
-    showToast(formatOperatorError(label, msg), false);
+    const formatted = formatOperatorError(label, msg);
+    if (options.modal !== false && typeof showActionError === 'function') {
+      showActionError(label, formatted, options.rows || []);
+      return;
+    }
+    showToast(formatted, false);
   }
 
   function showToast(message, ok = true) {
@@ -170,23 +198,22 @@
     return false;
   }
 
-  async function apiCall(method, path, body) {
+  async function apiCall(method, path, body, options = {}) {
     if (!ensureTokenIfRequired()) {
       throw new Error('Acesso negado — verifique o token');
     }
     const ep = agentEndpoint || resolveAgentEndpoint(storeMeta, catalog, config);
-    return agentRequest(storeMeta, catalog, agentToken, method, path, body, ep);
+    return agentRequest(storeMeta, catalog, agentToken, method, path, body, ep, options);
   }
 
   function applyStatus(data, options = {}) {
     const acId = catalog?.ac_id || '110';
-    statusData = data ? applyFrontendDeviceVisibility({ ...data }, acId) : data;
-    if (statusData) {
-      const merged = mergeMachinesCatalog(config?.machines, statusData.machines);
-      if (merged.length) {
-        statusData.machines = merged;
-      }
+    let payload = data ? { ...data } : data;
+    if (payload) {
+      const merged = mergeMachinesCatalog(config?.machines, payload.machines);
+      if (merged.length) payload.machines = merged;
     }
+    statusData = payload ? applyFrontendDeviceVisibility(payload, acId) : payload;
     if (config) {
       if (statusData?.machines?.length) {
         config.machines = statusData.machines;
@@ -512,9 +539,14 @@
     return false;
   }
 
+  function deviceNetworkOnline(deviceType, id, meta) {
+    const mapKey = deviceType === 'washer' ? 'washers' : deviceType === 'dryer' ? 'dryers' : 'dosers';
+    return resolveDeviceOnline(statusData?.[mapKey], id, meta);
+  }
+
   function applyDryerLockUI(card, dryerId) {
     const meta = getMachineMeta(dryerId, 'dryer', getMachinesCatalog());
-    const online = Boolean(statusData?.dryers?.[dryerId]);
+    const online = deviceNetworkOnline('dryer', dryerId, meta);
     return syncDryerCardControls(card, meta, online);
   }
 
@@ -559,7 +591,7 @@
 
   function applyWasherLockUI(card, washerId) {
     const meta = getMachineMeta(washerId, 'washer', getMachinesCatalog());
-    const online = Boolean(statusData?.washers?.[washerId]);
+    const online = deviceNetworkOnline('washer', washerId, meta);
     return syncWasherCardControls(card, meta, online);
   }
 
@@ -603,7 +635,10 @@
     ], { heading: 'Confirmar liberação' });
     if (!ok) return;
     try {
-      const data = await apiCall('POST', `/dryer/${id}`, { minutes });
+      const data = await apiCall('POST', `/dryer/${id}`, { minutes }, {
+        operationKind: 'dryer_release',
+        verifyRelease: true,
+      });
       setDryerLock(id, data.minutes ?? minutes);
       showActionConfirm(`Secadora ${id}`, data);
       await logStoreAudit({
@@ -630,7 +665,14 @@
         device_type: 'dryer',
         device_id: String(id),
       });
-      showOperatorError(`Secadora ${id}`, e);
+      showOperatorError(`Secadora ${id}`, e, {
+        rows: [
+          ['Equipamento', `Secadora ${id}`],
+          ['Tempo', `${minutes} min`],
+        ],
+      });
+      if (isDeviceUnreachableError(e)) markDeviceOffline('dryer', id);
+      void refreshStatus({ force: true });
     }
   }
 
@@ -644,7 +686,10 @@
     ], { heading: 'Confirmar liberação' });
     if (!ok) return;
     try {
-      const data = await apiCall('POST', `/washer/${id}`, am ? { am } : {});
+      const data = await apiCall('POST', `/washer/${id}`, am ? { am } : {}, {
+        operationKind: 'washer_release',
+        verifyRelease: true,
+      });
       const meta = getMachineMeta(id, 'washer', getMachinesCatalog());
       setWasherLock(id, getWasherLockMinutes(meta));
       showActionConfirm(`Lavadora ${id}`, data);
@@ -672,7 +717,11 @@
         device_type: 'washer',
         device_id: String(id),
       });
-      showOperatorError(`Lavadora ${id}`, e);
+      showOperatorError(`Lavadora ${id}`, e, {
+        rows: [['Equipamento', `Lavadora ${id}`]],
+      });
+      if (isDeviceUnreachableError(e)) markDeviceOffline('washer', id);
+      void refreshStatus({ force: true });
     }
   }
 
@@ -715,8 +764,8 @@
     if (!config) return;
     setSectionCount('washersCount', statusData?.washers);
     visibleDeviceIds('washer', config.devices.washers).forEach((id) => {
-      const online = Boolean(statusData?.washers?.[id]);
       const meta = getMachineMeta(id, 'washer', getMachinesCatalog());
+      const online = deviceNetworkOnline('washer', id, meta);
       const card = createDeviceCard(
         id,
         online,
@@ -768,8 +817,8 @@
     if (!config) return;
     setSectionCount('dryersCount', statusData?.dryers);
     visibleDeviceIds('dryer', config.devices.dryers).forEach((id) => {
-      const online = Boolean(statusData?.dryers?.[id]);
       const meta = getMachineMeta(id, 'dryer', getMachinesCatalog());
+      const online = deviceNetworkOnline('dryer', id, meta);
       const card = createDeviceCard(
         id,
         online,
@@ -824,8 +873,9 @@
     if (!config) return;
     setSectionCount('dosersCount', statusData?.dosers);
     visibleDeviceIds('doser', config.devices.dosers).forEach((id) => {
-      const online = Boolean(statusData?.dosers?.[id]);
-      const meta = getMachineMeta(id, 'doser', getMachinesCatalog());
+      const catalog = getMachinesCatalog();
+      const meta = enrichDoserMeta(getMachineMeta(id, 'doser', catalog), id, catalog);
+      const online = deviceNetworkOnline('doser', id, meta);
       const card = createDeviceCard(
         id,
         online,

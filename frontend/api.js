@@ -778,12 +778,76 @@
   const MACHINE_CAPACITY_LABELS = {
     normal_capacity: 'giant',
     large_capacity: 'titan',
+    'normal-capacity': 'giant',
+    'large-capacity': 'titan',
+    giant: 'giant',
+    titan: 'titan',
   };
 
   function normalizeMachineCapacity(raw) {
     const key = String(raw || '').trim().toLowerCase();
-    if (!key || key === '—') return '';
+    if (!key || key === '—' || key === '-') return '';
     return MACHINE_CAPACITY_LABELS[key] || key;
+  }
+
+  function machineCapacityRaw(record) {
+    if (!record) return '';
+    const candidates = [
+      record.capacity_raw,
+      record['machine-capacity'],
+      record.machine_capacity,
+      record.model_label,
+      record.capacity,
+    ];
+    for (const raw of candidates) {
+      const key = String(raw || '').trim().toLowerCase();
+      if (!key || key === '—' || key === '-') continue;
+      return key;
+    }
+    return '';
+  }
+
+  /** Modelo comercial lavadora/secadora: giant ou titan. */
+  function machineModelLabel(meta) {
+    if (!meta) return '';
+    const dtype = machineRecordType(meta);
+    if (dtype === 'doser') {
+      const model = meta.paired_washer_model || '';
+      return model === 'giant' || model === 'titan' ? model : '';
+    }
+    if (dtype !== 'washer' && dtype !== 'dryer') return '';
+    const model = normalizeMachineCapacity(machineCapacityRaw(meta));
+    return model === 'giant' || model === 'titan' ? model : '';
+  }
+
+  /** Dosadora espelha a lavadora com o mesmo ID (ex.: dos 432 → lav 432). */
+  function doserWasherLink(doserId, machines) {
+    const did = normalizeStoreId(doserId);
+    if (!did) return null;
+
+    let washerId = did;
+    let washerMeta = findMachineMeta(machines, washerId, 'washer');
+    if (!washerMeta) {
+      washerId = pairedWasherForDoser(did);
+      if (!washerId) return null;
+      washerMeta = findMachineMeta(machines, washerId, 'washer');
+    }
+    if (!washerMeta) return null;
+
+    const model = machineModelLabel(washerMeta);
+    return { washerId, model };
+  }
+
+  function enrichDoserMeta(meta, doserId, machines) {
+    const base = meta || { id: String(doserId || '').trim(), type: 'doser' };
+    if (machineRecordType(base) !== 'doser') return base;
+    const link = doserWasherLink(doserId, machines);
+    if (!link) return base;
+    return {
+      ...base,
+      paired_washer_id: link.washerId,
+      paired_washer_model: link.model,
+    };
   }
 
   function machineRecordType(record) {
@@ -805,12 +869,15 @@
 
   function normalizeMachineRecord(record) {
     if (!record?.id) return null;
-    const capacityRaw =
-      record.capacity_raw ||
-      record['machine-capacity'] ||
-      record.machine_capacity ||
-      (record.capacity && record.capacity !== '—' ? record.capacity : '');
+    const dtype = machineRecordType(record);
+    const capacityRaw = machineCapacityRaw(record);
     const capacity = normalizeMachineCapacity(capacityRaw);
+    const model_label =
+      dtype === 'washer' || dtype === 'dryer'
+        ? capacity === 'giant' || capacity === 'titan'
+          ? capacity
+          : ''
+        : '';
     const statusRaw = record.status_raw || record.status || '';
     const status = normalizeMachineStatus(statusRaw);
     const liter =
@@ -820,7 +887,7 @@
     return {
       ...record,
       id: String(record.id).trim(),
-      type: machineRecordType(record),
+      type: dtype,
       address: record.address || record.ip || '',
       status,
       status_raw: String(statusRaw || '').trim().toLowerCase(),
@@ -833,8 +900,9 @@
             : status === 'suspended'
               ? 'Suspensa'
               : ''),
-      capacity,
+      capacity: model_label || capacity,
       capacity_raw: String(capacityRaw || ''),
+      model_label,
       liter_capacity: liter,
       waiting_minutes: waiting,
       time_dosage: record.time_dosage ?? record['time-dosage'] ?? null,
@@ -852,7 +920,24 @@
     sources.forEach((list) => {
       normalizeMachinesList(list).forEach((record) => {
         const key = `${record.type}:${normalizeStoreId(record.id)}`;
-        merged.set(key, { ...merged.get(key), ...record });
+        const prev = merged.get(key);
+        if (!prev) {
+          merged.set(key, record);
+          return;
+        }
+        const next = { ...prev, ...record };
+        const model = machineModelLabel(next) || machineModelLabel(prev);
+        if (model) {
+          next.model_label = model;
+          next.capacity = model;
+        } else if (machineModelLabel(prev)) {
+          next.model_label = prev.model_label;
+          next.capacity = prev.capacity;
+          if (!next.capacity_raw || next.capacity_raw === '—') {
+            next.capacity_raw = prev.capacity_raw;
+          }
+        }
+        merged.set(key, next);
       });
     });
     return [...merged.values()].sort(
@@ -874,6 +959,18 @@
   function normalizeMachineStatus(status) {
     const s = String(status || '').trim().toLowerCase();
     if (s === 'busy') return 'occupied';
+    if (
+      s === 'running' ||
+      s === 'active' ||
+      s === 'in_use' ||
+      s === 'in-cycle' ||
+      s === 'in_cycle' ||
+      s === 'working' ||
+      s === 'ocupada' ||
+      s === 'ocupado'
+    ) {
+      return 'occupied';
+    }
     if (s === 'suspended' || s === 'suspensa' || s === 'suspens' || s.startsWith('suspend')) {
       return 'suspended';
     }
@@ -893,6 +990,67 @@
     return normalizeMachineStatus(status) === 'available';
   }
 
+  function isNetworkMapOnline(value) {
+    if (value === true || value === 1) return true;
+    if (typeof value === 'string') {
+      const s = value.trim().toLowerCase();
+      return s === 'true' || s === '1' || s === 'online' || s === 'on';
+    }
+    return false;
+  }
+
+  /** Agente obteve status operacional — equipamento respondeu na rede local. */
+  function machineStatusImpliesReachable(meta) {
+    const s = normalizeMachineStatus(meta?.status);
+    return s === 'available' || s === 'occupied' || s === 'suspended';
+  }
+
+  function normalizeNetworkMapKeys(map) {
+    const out = {};
+    Object.entries(map || {}).forEach(([id, value]) => {
+      out[normalizeStoreId(id)] = value;
+    });
+    return out;
+  }
+
+  function resolveDeviceOnline(networkMap, id, meta) {
+    const mid = normalizeStoreId(id);
+    const map = networkMap || {};
+    if (Object.prototype.hasOwnProperty.call(map, mid)) {
+      return isNetworkMapOnline(map[mid]);
+    }
+    return machineStatusImpliesReachable(meta);
+  }
+
+  function reconcileNetworkFromMachines(status) {
+    if (!status) return status;
+    const next = {
+      ...status,
+      washers: normalizeNetworkMapKeys(status.washers),
+      dryers: normalizeNetworkMapKeys(status.dryers),
+      dosers: normalizeNetworkMapKeys(status.dosers),
+    };
+    const machines = normalizeMachinesList(next.machines);
+    if (!machines.length) return next;
+
+    ['washers', 'dryers', 'dosers'].forEach((key) => {
+      const mtype = DEVICE_GROUP_TYPE[key];
+      const block = { ...(next[key] || {}) };
+      machines.forEach((meta) => {
+        if (machineRecordType(meta) !== mtype) return;
+        const id = normalizeStoreId(meta.id);
+        if (Object.prototype.hasOwnProperty.call(block, id) && !isNetworkMapOnline(block[id])) {
+          return;
+        }
+        if (resolveDeviceOnline(block, id, meta)) {
+          block[id] = true;
+        }
+      });
+      next[key] = block;
+    });
+    return next;
+  }
+
   function displayMachineValue(value) {
     if (value === null || value === undefined || value === '') return null;
     return String(value);
@@ -901,6 +1059,9 @@
   function machineMetaFacts(meta) {
     if (!meta) return [];
     const facts = [];
+    if (machineRecordType(meta) === 'doser' && meta.paired_washer_id) {
+      facts.push(`Lavadora ${meta.paired_washer_id}`);
+    }
     if (meta.liter_capacity != null && meta.liter_capacity !== '') {
       facts.push(`${meta.liter_capacity} L`);
     }
@@ -914,6 +1075,14 @@
   }
 
   function deviceUnifiedStatus(online, meta) {
+    if (online === false) {
+      return {
+        label: 'Sem rede',
+        tone: 'offline',
+        pillClass: 'pill--off',
+      };
+    }
+
     const normalized = normalizeMachineStatus(meta?.status);
 
     if (normalized === 'suspended') {
@@ -930,7 +1099,8 @@
         pillClass: 'pill--warn',
       };
     }
-    if (!online) {
+    const effectivelyOnline = online === true || machineStatusImpliesReachable(meta);
+    if (!effectivelyOnline) {
       return {
         label: 'Sem rede',
         tone: 'offline',
@@ -949,15 +1119,20 @@
 
   function machineMetaRows(meta) {
     if (!meta) return [];
+    const model = machineModelLabel(meta);
+    const dtype = machineRecordType(meta);
     return [
       ['Tipo', meta.machine_type_label || meta.machine_type],
+      dtype === 'doser' && meta.paired_washer_id
+        ? ['Lavadora', meta.paired_washer_id]
+        : null,
+      ['Modelo', model ? model.toUpperCase() : null],
       ['Status', meta.status_label],
-      ['Capacidade', meta.capacity && meta.capacity !== '—' ? meta.capacity : null],
       ['Litros', meta.liter_capacity != null && meta.liter_capacity !== '' ? `${meta.liter_capacity} L` : null],
       ['Espera', meta.waiting_minutes != null && meta.waiting_minutes !== '' ? `${meta.waiting_minutes} min` : null],
       ['Dosagem', displayMachineValue(meta.time_dosage)],
       ['Loja', meta.store_code],
-    ].filter(([, v]) => v);
+    ].filter((row) => row && row[1]);
   }
 
   function machineMetaTitle(meta) {
@@ -1076,12 +1251,12 @@
     const key =
       dtype === 'washer' ? 'washers' : dtype === 'dryer' ? 'dryers' : dtype === 'doser' ? 'dosers' : null;
     if (!key || !network) return false;
-    return (network[key] || {})[mid] === true;
+    return isNetworkMapOnline((network[key] || {})[mid]);
   }
 
   function applyFrontendDeviceVisibility(status, acId = '110') {
     if (!status) return status;
-    const next = { ...status };
+    const next = reconcileNetworkFromMachines({ ...status });
     [
       ['washer', 'washers'],
       ['dryer', 'dryers'],
@@ -1178,7 +1353,7 @@
             return {
               ...(meta || {}),
               id,
-              online: Boolean(items[id]),
+              online: resolveDeviceOnline(items, id, meta),
             };
           });
       } else {
@@ -1193,7 +1368,7 @@
             return {
               ...normalized,
               id: normalized.id,
-              online: items[id] === true,
+              online: resolveDeviceOnline(items, id, normalized),
             };
           });
       }
@@ -1206,7 +1381,8 @@
 
   /** Equipamento operacional = responde na rede e não está suspenso. */
   function isDeviceOperational(dev) {
-    if (!dev?.online) return false;
+    const online = dev?.online || machineStatusImpliesReachable(dev);
+    if (!online) return false;
     return normalizeMachineStatus(dev.status) !== 'suspended';
   }
 
@@ -1219,7 +1395,8 @@
   }
 
   function isDeviceAvailable(dev) {
-    if (!dev?.online) return false;
+    const online = dev?.online || machineStatusImpliesReachable(dev);
+    if (!online) return false;
     return normalizeMachineStatus(dev?.status) === 'available';
   }
 
@@ -2706,10 +2883,11 @@
         return { status: null, error: noAgentMessage(catalogId) };
       }
       if (Array.isArray(status.machines)) {
-        status.machines = mergeMachinesCatalog(status.machines);
+        status.machines = mergeMachinesCatalog(status.machines, config.machines);
+      } else if (config.machines?.length) {
+        status.machines = mergeMachinesCatalog(config.machines);
       }
-      if (status && !status.summary) attachSummary(status);
-      return { status, error: null };
+      return { status: applyFrontendDeviceVisibility(status), error: null };
     } catch (e) {
       return { status: null, error: connectionErrorMessage(e, catalogId) };
     }
@@ -2963,7 +3141,205 @@
     return { ...data, washer_dosage_options: WASHER_DOSAGE_OPTIONS };
   }
 
-  async function agentRequest(meta, catalog, token, method, path, body, endpointOverride = null) {
+  const AGENT_FAIL_STATUSES = new Set([
+    'error',
+    'failed',
+    'failure',
+    'timeout',
+    'offline',
+    'refused',
+    'rejected',
+    'unavailable',
+    'unreachable',
+  ]);
+
+  const AGENT_FAIL_MESSAGE =
+    /falhou|failed|not released|n[aã]o liber|did not respond|n[aã]o respondeu|timeout|unreachable|erro ao|could not|unable to|indispon|was not|sem resposta/i;
+
+  function inferAgentOperationKind(method, path) {
+    const p = String(path || '').toLowerCase();
+    if (String(method || '').toUpperCase() !== 'POST') return null;
+    if (/\/dryer\//.test(p)) return 'dryer_release';
+    if (/\/washer\//.test(p)) return 'washer_release';
+    return null;
+  }
+
+  function agentOperationFailureMessage(data) {
+    if (!data || typeof data !== 'object') return 'Resposta inválida do agente.';
+    if (data.success === false || data.ok === false || data.released === false) {
+      return String(data.error || data.message || data.detail || 'Operação recusada pelo equipamento.').trim();
+    }
+    const status = String(data.status || data.result || '').trim().toLowerCase();
+    if (AGENT_FAIL_STATUSES.has(status)) {
+      return String(data.message || data.error || data.detail || 'Operação não concluída.').trim();
+    }
+    const text = String(data.message || data.detail || data.error || data.hint || data.reason || '').trim();
+    if (text && AGENT_FAIL_MESSAGE.test(text)) return text;
+    return null;
+  }
+
+  function evaluateAgentReleaseResponse(data, kind) {
+    const fail = agentOperationFailureMessage(data);
+    if (fail) return { ok: false, error: fail };
+    if (kind === 'dryer_release' || kind === 'washer_release') return { ok: true };
+    return { ok: true };
+  }
+
+  function releaseStatusFromPayload(payload) {
+    if (!payload || typeof payload !== 'object') return '';
+    const nested = [payload, payload.machine, payload.device, payload.dryer, payload.washer, payload.data].filter(
+      (item) => item && typeof item === 'object'
+    );
+    for (const item of nested) {
+      const st = normalizeMachineStatus(
+        item.status || item.machine_status || item.state || item.operational_status
+      );
+      if (st) return st;
+    }
+    return '';
+  }
+
+  function agentStatusPayloadIndicatesRelease(payload) {
+    if (!payload || typeof payload !== 'object') return false;
+    if (payload.released === true) return true;
+    if (payload.running === true || payload.busy === true || payload.in_use === true) return true;
+    const st = releaseStatusFromPayload(payload);
+    return st === 'occupied';
+  }
+
+  function machineListEntryIndicatesRelease(machines, deviceType, deviceId) {
+    const id = normalizeStoreId(deviceId);
+    const dtype = String(deviceType || '').toLowerCase();
+    if (!id || !Array.isArray(machines)) return false;
+    const record = machines.find(
+      (item) => normalizeStoreId(item?.id) === id && machineRecordType(item) === dtype
+    );
+    return record ? agentStatusPayloadIndicatesRelease(record) : false;
+  }
+
+  /** Aguarda o agente concluir os pulsos antes de consultar status (secadora). */
+  function dryerReleaseVerifyDelayMs(minutes) {
+    const m = Number(minutes);
+    if (!Number.isFinite(m) || m <= 0) return 1500;
+    const pulses = m >= 45 ? 3 : m >= 30 ? 2 : 1;
+    return pulses * 1000 + 800;
+  }
+
+  function agentPostConfirmsFirstRelease(data) {
+    if (!data || typeof data !== 'object') return false;
+    if (agentOperationFailureMessage(data)) return false;
+
+    const completed = Number(data.completed_releases);
+    if (Number.isFinite(completed) && completed >= 1) return true;
+
+    if (data.released === true) return true;
+    if (data.success === true || data.ok === true) return true;
+
+    if (
+      data.background_processing === true &&
+      data.machine &&
+      data.minutes != null &&
+      (Number(data.response) === 200 || data.response == null)
+    ) {
+      return true;
+    }
+
+    const msg = String(data.message || data.detail || '').toLowerCase();
+    return /started|iniciad|liberad|released|sucesso|successfully/.test(msg);
+  }
+
+  function agentPostExplicitlyReleased(data) {
+    return agentPostConfirmsFirstRelease(data);
+  }
+
+  function delayMs(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  const RELEASE_VERIFY_INTERVAL_MS = 1000;
+  const RELEASE_VERIFY_ATTEMPTS = 15;
+
+  async function verifyAgentDeviceRelease(
+    meta,
+    catalog,
+    token,
+    deviceType,
+    deviceId,
+    endpointOverride = null,
+    options = {}
+  ) {
+    const dtype = String(deviceType || '').toLowerCase();
+    const id = normalizeStoreId(deviceId);
+    if (!id || (dtype !== 'washer' && dtype !== 'dryer')) return null;
+
+    if (options.postData && agentPostConfirmsFirstRelease(options.postData)) {
+      return {
+        ...options.postData,
+        release_verified: true,
+        release_confirm_source: 'agent_first_pulse',
+      };
+    }
+
+    const devicePath = `/status/${dtype}/${id}`;
+    const storePath = '/status';
+    let initialDelay = Number(options.initialDelayMs);
+    if (!Number.isFinite(initialDelay) || initialDelay < 0) {
+      initialDelay = dtype === 'dryer' ? dryerReleaseVerifyDelayMs(options.minutes) : 500;
+    }
+    if (initialDelay > 0) await delayMs(initialDelay);
+
+    for (let attempt = 0; attempt < RELEASE_VERIFY_ATTEMPTS; attempt += 1) {
+      if (attempt > 0) await delayMs(RELEASE_VERIFY_INTERVAL_MS);
+
+      const payload = await agentRequest(
+        meta,
+        catalog,
+        token,
+        'GET',
+        devicePath,
+        undefined,
+        endpointOverride,
+        { validateOperation: false, verifyRelease: false }
+      );
+      if (
+        agentStatusPayloadIndicatesRelease(payload) ||
+        machineListEntryIndicatesRelease(payload?.machines, dtype, id)
+      ) {
+        return { ...payload, release_verified: true };
+      }
+      const fail = agentOperationFailureMessage(payload);
+      if (fail) throw new Error(fail);
+
+      try {
+        const storePayload = await agentRequest(
+          meta,
+          catalog,
+          token,
+          'GET',
+          storePath,
+          undefined,
+          endpointOverride,
+          { validateOperation: false, verifyRelease: false }
+        );
+        if (machineListEntryIndicatesRelease(storePayload?.machines, dtype, id)) {
+          return { ...storePayload, release_verified: true };
+        }
+      } catch {
+        /* status completo indisponível — continua polling */
+      }
+    }
+
+    if (options.postData && agentPostExplicitlyReleased(options.postData)) {
+      return { ...options.postData, release_verified: true, release_confirm_source: 'agent_post' };
+    }
+
+    const label = dtype === 'dryer' ? 'secadora' : 'lavadora';
+    throw new Error(
+      `Liberação não confirmada — a ${label} ${id.toUpperCase()} não indicou ciclo iniciado. Verifique na loja antes de tentar de novo.`
+    );
+  }
+
+  async function agentRequest(meta, catalog, token, method, path, body, endpointOverride = null, options = {}) {
     const ep = endpointOverride || (await discoverAgentEndpoint(meta, catalog, token));
     if (ep.unmatched || (!ep.base && !ep.panelProxy)) {
       throw new Error(noAgentMessage(meta.id));
@@ -3009,6 +3385,45 @@
       throw new Error(friendlyUserMessage(data.detail || data.message || data.error || `HTTP ${res.status}`, ''));
     }
     data._httpStatus = res.status;
+
+    const validate = options.validateOperation !== false;
+    const kind =
+      options.operationKind || (validate ? inferAgentOperationKind(method, path) : null);
+
+    if (validate && kind && kind.includes('release')) {
+      const verdict = evaluateAgentReleaseResponse(data, kind);
+      if (!verdict.ok) throw new Error(verdict.error);
+
+      const match = String(path).match(/\/(washer|dryer)\/([^/?#]+)/i);
+      if (agentPostConfirmsFirstRelease(data)) {
+        return {
+          ...data,
+          release_verified: true,
+          release_confirm_source: 'agent_first_pulse',
+          machine: data.machine || (match ? match[2] : undefined),
+          minutes: data.minutes ?? body?.minutes,
+        };
+      }
+
+      if (options.verifyRelease !== false) {
+        if (match) {
+          const verified = await verifyAgentDeviceRelease(
+            meta,
+            catalog,
+            token,
+            match[1],
+            match[2],
+            endpointOverride,
+            {
+              minutes: body?.minutes,
+              postData: data,
+            }
+          );
+          return { ...data, ...(verified || {}), release_verified: true };
+        }
+      }
+    }
+
     return data;
   }
 
@@ -3058,9 +3473,16 @@
     findMachineMeta,
     mergeMachinesCatalog,
     normalizeMachineCapacity,
+    machineModelLabel,
+    doserWasherLink,
+    enrichDoserMeta,
     normalizeMachineStatus,
     machineStatusPillClass,
     canOperateMachineStatus,
+    isNetworkMapOnline,
+    machineStatusImpliesReachable,
+    resolveDeviceOnline,
+    reconcileNetworkFromMachines,
     machineMetaRows,
     machineMetaFacts,
     machineMetaTitle,
@@ -3081,6 +3503,14 @@
     mergeCatalogStores,
     fetchAgentConfig,
     agentRequest,
+    inferAgentOperationKind,
+    agentOperationFailureMessage,
+    agentStatusPayloadIndicatesRelease,
+    machineListEntryIndicatesRelease,
+    dryerReleaseVerifyDelayMs,
+    agentPostConfirmsFirstRelease,
+    agentPostExplicitlyReleased,
+    verifyAgentDeviceRelease,
     attachSummary,
     formatOfflineDuration,
     formatOnlineDuration,

@@ -78,22 +78,34 @@
     if (data.doser || data.washer) {
       const rows = [['Lavadora', data.machine || '—']];
       if (data.doser) rows.push(['Dosagem', dosageLabel(data.doser)]);
-      rows.push(['Status', data.background_processing ? 'Liberação em andamento' : 'Liberada']);
+      if (data.release_verified) {
+        rows.push(['Status', 'Máquina liberada · confirmado na loja']);
+      } else {
+        rows.push([
+          'Status',
+          data.background_processing ? 'Liberação em andamento' : 'Liberada',
+        ]);
+      }
       return {
-        title: 'Lavadora liberada',
-        message: '',
+        title: data.release_verified ? 'Máquina liberada' : 'Lavadora liberada',
+        message: data.release_verified
+          ? `A lavadora ${data.machine || ''} foi liberada com sucesso.`
+          : '',
         bodyHtml: renderInfoRows(rows),
       };
     }
 
     if (data.minutes != null) {
+      const rows = [
+        ['Equipamento', `Secadora ${data.machine || '—'}`],
+        ['Duração', `${data.minutes} min`],
+      ];
       return {
-        title: 'Secadora liberada',
-        message: '',
-        bodyHtml: renderInfoRows([
-          ['Equipamento', data.machine || '—'],
-          ['Duração', `${data.minutes} min`],
-        ]),
+        title: 'Máquina liberada',
+        message: data.release_verified
+          ? `A secadora ${data.machine || ''} foi liberada com sucesso.`
+          : '',
+        bodyHtml: renderInfoRows(rows),
       };
     }
 
@@ -132,11 +144,61 @@
     };
   }
 
-  function createConfirmUI({ $, onToast }) {
+  function createConfirmUI({ $, onToast, formatError }) {
     let actionPromptResolver = null;
+
+    function setConfirmModalMode(mode) {
+      const modal = $('confirmModal');
+      const icon = modal?.querySelector('.confirm-modal__icon');
+      const badge = $('confirmStatus');
+      if (!modal || !icon) return;
+      modal.classList.remove('confirm-modal--error', 'confirm-modal--success');
+      icon.classList.remove('confirm-modal__icon--ok', 'confirm-modal__icon--err');
+      if (mode === 'error') {
+        modal.classList.add('confirm-modal--error');
+        icon.classList.add('confirm-modal__icon--err');
+        if (badge) {
+          badge.textContent = 'Erro';
+          badge.classList.add('confirm-modal__badge--err');
+        }
+      } else {
+        modal.classList.add('confirm-modal--success');
+        icon.classList.add('confirm-modal__icon--ok');
+        if (badge) badge.classList.remove('confirm-modal__badge--err');
+      }
+    }
 
     function hideActionConfirm() {
       $('confirmModal')?.classList.add('hidden');
+    }
+
+    function showActionError(label, error, rows = []) {
+      const msg =
+        typeof error === 'string'
+          ? error
+          : error?.message || 'Não foi possível concluir a operação.';
+      const formatted = formatError ? formatError(label, msg) : msg;
+      const isDryer = /secador/i.test(String(label));
+      const isWasher = /lavadora/i.test(String(label));
+
+      setConfirmModalMode('error');
+      $('confirmTitle').textContent = isDryer
+        ? 'Falha ao liberar secadora'
+        : isWasher
+          ? 'Falha ao liberar lavadora'
+          : 'Operação não concluída';
+      $('confirmMessage').textContent = formatted;
+
+      const bodyEl = $('confirmBody');
+      if (Array.isArray(rows) && rows.length) {
+        bodyEl.innerHTML = renderInfoRows(rows);
+        bodyEl.classList.remove('hidden');
+      } else {
+        bodyEl.innerHTML = '';
+        bodyEl.classList.add('hidden');
+      }
+
+      $('confirmModal')?.classList.remove('hidden');
     }
 
     function hideActionPrompt(confirmed) {
@@ -149,12 +211,21 @@
 
     function showActionConfirm(label, data) {
       const status = data._httpStatus || 200;
-      if (status !== 200) {
-        if (typeof onToast === 'function') onToast(formatConfirmMessage(label, data), true);
+      const isRelease = data.minutes != null || data.washer || (data.machine && data.doser);
+      if (status !== 200 || (isRelease && !data.release_verified)) {
+        if (typeof onToast === 'function') {
+          onToast(
+            isRelease && !data.release_verified
+              ? 'Liberação não confirmada na loja.'
+              : formatConfirmMessage(label, data),
+            true
+          );
+        }
         return;
       }
 
       const view = buildConfirmView(label, data);
+      setConfirmModalMode('success');
       $('confirmTitle').textContent = view.title;
       $('confirmMessage').textContent = view.message || '';
 
@@ -167,7 +238,7 @@
         bodyEl.classList.add('hidden');
       }
 
-      $('confirmStatus').textContent = 'Confirmado';
+      $('confirmStatus').textContent = isRelease && data.release_verified ? 'Liberada' : 'Confirmado';
       $('confirmModal').classList.remove('hidden');
     }
 
@@ -222,7 +293,7 @@
       });
     }
 
-    return { confirmAction, showActionConfirm, hideActionConfirm, bindConfirmEvents, buildConfirmView };
+    return { confirmAction, showActionConfirm, showActionError, hideActionConfirm, bindConfirmEvents, buildConfirmView };
   }
 
   function btn(text, className, onclick) {
@@ -311,10 +382,22 @@
   }
 
   function createDeviceUI(Lav60) {
-    const { deviceUnifiedStatus, machineMetaFacts, canOperateMachineStatus } = Lav60;
+    const {
+      deviceUnifiedStatus,
+      machineMetaFacts,
+      canOperateMachineStatus,
+      resolveDeviceOnline,
+      machineStatusImpliesReachable,
+      machineModelLabel,
+    } = Lav60;
 
     function canOperateMachine(meta, online) {
-      if (online !== true) return false;
+      if (online === false) return false;
+      const effectivelyOnline =
+        online === true ||
+        (online !== false &&
+          (resolveDeviceOnline(null, meta?.id, meta) || machineStatusImpliesReachable(meta)));
+      if (!effectivelyOnline) return false;
       return canOperateMachineStatus(meta?.status);
     }
 
@@ -337,9 +420,16 @@
     }
 
     function createDeviceCard(id, online, fillActions, meta, options = {}) {
-      const statusInfo = resolveStatusInfo(online, meta, options);
-      const operable = canOperateMachine(meta, online === null ? false : online) && !options.probing;
-      const capacity = meta?.capacity && meta.capacity !== '—' ? meta.capacity : '';
+      let effectivelyOnline;
+      if (online === true) effectivelyOnline = true;
+      else if (online === false) effectivelyOnline = false;
+      else {
+        effectivelyOnline =
+          resolveDeviceOnline(null, meta?.id, meta) || machineStatusImpliesReachable(meta);
+      }
+      const statusInfo = resolveStatusInfo(effectivelyOnline, meta, options);
+      const operable = canOperateMachine(meta, effectivelyOnline) && !options.probing;
+      const modelLabel = machineModelLabel(meta);
       const facts = machineMetaFacts(meta);
 
       const card = document.createElement('article');
@@ -347,7 +437,7 @@
         'device-card',
         'device-card--tile',
         `device-card--${statusInfo.tone}`,
-        online === true ? 'device-card--online' : online === false ? 'device-card--offline' : '',
+        online === true || effectivelyOnline ? 'device-card--online' : online === false ? 'device-card--offline' : '',
       ]
         .filter(Boolean)
         .join(' ');
@@ -365,7 +455,7 @@
         <header class="device-card__head">
           <div class="device-card__title-row">
             <h3 class="device-card__id">${escapeHtml(String(id))}</h3>
-            ${capacity ? `<span class="device-card__cap">${escapeHtml(capacity)}</span>` : ''}
+            ${modelLabel ? `<span class="device-card__cap device-card__model">${escapeHtml(modelLabel)}</span>` : ''}
           </div>
           <span class="device-card__status pill ${statusInfo.pillClass}">${escapeHtml(statusInfo.label)}</span>
         </header>
@@ -374,7 +464,12 @@
       `;
 
       const actions = card.querySelector('.device-card__actions');
-      const ctx = { operable, online: online === true, statusInfo, probing: Boolean(options.probing) };
+      const ctx = {
+        operable,
+        online: effectivelyOnline,
+        statusInfo,
+        probing: Boolean(options.probing),
+      };
       fillActions(actions, card, ctx);
 
       if (!operable) {
