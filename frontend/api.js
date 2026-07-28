@@ -8,6 +8,7 @@
   let cachedAgentToken = null;
   let cachedAgentTokenConfigured = false;
   let panelBootstrapCache = null;
+  let storesLoadGeneration = 0;
 
   async function fetchPanelBootstrap() {
     if (panelBootstrapCache) return panelBootstrapCache;
@@ -472,8 +473,12 @@
       .slice(0, MAX_AGENT_PROBES_PER_CYCLE);
   }
 
+  function reapplyAllStoreCardPolicies(cards, catalog) {
+    return (cards || []).map((card) => reapplyStoreCardPolicy(card, catalog));
+  }
+
   function cardNeedsAgentValidation(card, catalog) {
-    if (!card || card.loading || card.storeSuspended) return false;
+    if (!card || card.loading || isStoreCardSuspended(card, catalog)) return false;
     if (card.fromLiveProbe && !card.agentPulseStale && !card.staleSnapshot) return false;
 
     const id = normalizeStoreId(card.id);
@@ -1523,6 +1528,20 @@
     return set;
   }
 
+  function isStoreCardSuspended(card, catalog) {
+    if (!card || card.loading) return false;
+    if (
+      card.storeSuspended ||
+      card.lav60Status === 'suspended' ||
+      card.lav60_status === 'suspended' ||
+      card.state === 'suspended'
+    ) {
+      return true;
+    }
+    const sid = normalizeStoreId(card.id);
+    return Boolean(sid && catalogSuspendedIdSet(catalog).has(sid));
+  }
+
   function resolveStoreLav60Status(meta, hb, catalog) {
     const payload = heartbeatPayload(hb);
     const fromAgent = lav60StatusFromPayload(payload);
@@ -1667,7 +1686,7 @@
   }
 
   function isCardAgentReachable(card) {
-    if (!card || card.loading || card.storeSuspended) return false;
+    if (!card || card.loading || isStoreCardSuspended(card, heartbeatCatalog)) return false;
     if (card.agentProbeFailed || card.agentUnavailable) return false;
     if (card.accessible === false) return false;
     return card.heartbeatAlive === true;
@@ -1676,17 +1695,21 @@
   function buildDashboard(cards) {
     const ready = cards.filter((c) => !c.loading);
     const connected = ready.filter((c) => c.accessible);
-    const storesSuspendedCards = ready.filter((c) => c.storeSuspended);
-    const heartbeatOnlineStores = ready.filter((c) => !c.storeSuspended && isCardAgentReachable(c));
-    const heartbeatOfflineStores = ready.filter(
-      (c) => !c.storeSuspended && !isCardAgentReachable(c)
+    const storesSuspendedCards = ready.filter((c) => isStoreCardSuspended(c, heartbeatCatalog));
+    const heartbeatOnlineStores = ready.filter(
+      (c) => !isStoreCardSuspended(c, heartbeatCatalog) && isCardAgentReachable(c)
     );
-    const unreachable = ready.filter((c) => !c.storeSuspended && !c.accessible);
+    const heartbeatOfflineStores = ready.filter(
+      (c) => !isStoreCardSuspended(c, heartbeatCatalog) && !isCardAgentReachable(c)
+    );
+    const unreachable = ready.filter(
+      (c) => !isStoreCardSuspended(c, heartbeatCatalog) && !c.accessible
+    );
     const allDevicesOffline = connected.filter(
-      (c) => !c.storeSuspended && (c.summary?.online ?? 0) <= 0
+      (c) => !isStoreCardSuspended(c, heartbeatCatalog) && (c.summary?.online ?? 0) <= 0
     );
     const partialCount = connected.filter((c) => {
-      if (c.storeSuspended || !isCardAgentReachable(c)) return false;
+      if (isStoreCardSuspended(c, heartbeatCatalog) || !isCardAgentReachable(c)) return false;
       const on = c.summary?.online ?? 0;
       const tot = c.summary?.total ?? 0;
       return on > 0 && on < tot;
@@ -1721,7 +1744,7 @@
         summary_online: card.summary?.online ?? 0,
         summary_total: card.summary?.total ?? 0,
       };
-      if (card.storeSuspended) {
+      if (isStoreCardSuspended(card, heartbeatCatalog)) {
         storesSuspendedEvents.push({
           ...storeEntry,
           reason: card.storeNotice || STORE_SUSPENDED_NOTICE,
@@ -3146,14 +3169,15 @@
 
   async function loadAllStores(token, options = {}) {
     const { onUpdate } = options;
-    let catalog = await loadCatalog();
+    const loadGeneration = ++storesLoadGeneration;
+    let catalog = await loadCatalog({ force: true });
     heartbeatPageStartedAt = Date.now();
     catalog = rebuildCatalogStores(catalog, null);
     rememberCatalogSuspension(catalog);
     heartbeatCatalog = catalog;
 
     function emitBootstrapPaint(cards, extra = {}) {
-      if (!onUpdate || !cards?.length) return;
+      if (!onUpdate || !cards?.length || loadGeneration !== storesLoadGeneration) return;
       onUpdate(
         assemblePayload(cards, {
           fromCache: true,
@@ -3169,6 +3193,7 @@
 
     statusBulkPromise
       .then((bulk) => {
+        if (loadGeneration !== storesLoadGeneration) return;
         setLastStatusBulkMap(bulk);
         if (!bulk?.available || !bulk?.stores) return;
         emitBootstrapPaint(buildCardsFromStatusCacheBulk(catalog, bulk), {
@@ -3179,6 +3204,7 @@
       .catch(() => {});
 
     const [snapshot, statusBulk] = await Promise.all([heartbeatPromise, statusBulkPromise]);
+    if (loadGeneration !== storesLoadGeneration) return null;
     setLastStatusBulkMap(statusBulk);
     ingestHeartbeatSnapshot(snapshot);
 
@@ -3187,6 +3213,7 @@
     enrichCardsFromStatusCache(cards, catalog, statusBulk);
     await validateStoresWithAgentProbe(cards, catalog, token);
     enrichOfflineCardsFromCache(cards, catalog, statusBulk);
+    cards = reapplyAllStoreCardPolicies(cards, catalog);
 
     const payload = assemblePayload(cards, {
       fromHeartbeat: true,
@@ -3201,6 +3228,7 @@
     startHeartbeatMonitor(
       catalog,
       (partial) => {
+        if (loadGeneration !== storesLoadGeneration) return;
         if (onUpdate) onUpdate({ ...partial, live: true, fromCache: false });
       },
       token
@@ -3621,6 +3649,7 @@
     applyFrontendDeviceVisibility,
     resolveStoreLav60Status,
     isStoreLav60Suspended,
+    isStoreCardSuspended,
     lav60StatusFromPayload,
     buildStoreCard,
     findStoreInCatalog,

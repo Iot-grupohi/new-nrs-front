@@ -11,6 +11,7 @@
     isAgentUnavailableError,
     loadCatalog,
     stopHeartbeatMonitor,
+    isStoreCardSuspended,
     machineMetaTitle,
     normalizeMachineStatus,
     verifyStoreGatewayLed,
@@ -259,7 +260,7 @@
   function storeSortRank(store) {
     if (store.loading) return 4;
     if (isStoreOnline(store)) return 0;
-    if (store.state === 'partial') return 1;
+    if (resolveStoreDisplayState(store) === 'partial') return 1;
     if (isStoreSuspended(store)) return 2;
     return 3;
   }
@@ -311,6 +312,7 @@
   }
 
   function isStoreSuspended(store) {
+    if (isStoreCardSuspended?.(store)) return true;
     return Boolean(
       store?.storeSuspended ||
         store?.lav60Status === 'suspended' ||
@@ -319,28 +321,59 @@
     );
   }
 
-  function isStoreOnline(store) {
+  /** Agente respondendo: pulso recente + HTTP ok (sem falha de probe). */
+  function isStoreAgentReachable(store) {
     if (isStoreSuspended(store) || store.loading) return false;
-    if (store.accessible !== true) return false;
-    if (store.agentProbeFailed) return false;
-    const online = store.summary?.online ?? 0;
-    return online > 0 || store.state === 'ok' || store.state === 'partial';
+    if (store.agentProbeFailed || store.agentUnavailable) return false;
+    if (store.accessible === false) return false;
+    return store.heartbeatAlive === true;
+  }
+
+  function isStoreOnline(store) {
+    return isStoreAgentReachable(store);
+  }
+
+  /** Saúde dos equipamentos (independente do heartbeat). */
+  function resolveStoreEquipmentState(store) {
+    const summary = store.summary || {};
+    const online = summary.online ?? 0;
+    const total = summary.total ?? 0;
+    if (total <= 0) return 'unknown';
+    if (online >= total) return 'ok';
+    if (online <= 0) return 'offline';
+    return 'partial';
+  }
+
+  /** Estado visual do card: agente inacessível → offline; equipamentos refinam ok/parcial. */
+  function resolveStoreDisplayState(store) {
+    if (store.loading) return 'unknown';
+    if (isStoreSuspended(store)) return 'suspended';
+    if (!isStoreAgentReachable(store)) {
+      return store.agentUnavailable ||
+        store.agentProbeFailed ||
+        store.state === 'unreachable'
+        ? 'unreachable'
+        : 'offline';
+    }
+    const equip = resolveStoreEquipmentState(store);
+    if (equip === 'unknown') return 'ok';
+    return equip;
   }
 
   function matchesFilter(store) {
     if (activeFilter === 'all') return true;
     if (activeFilter === 'online') return isStoreOnline(store);
+    if (activeFilter === 'ok') {
+      return isStoreOnline(store) && resolveStoreDisplayState(store) === 'ok';
+    }
+    if (activeFilter === 'partial') {
+      return isStoreOnline(store) && resolveStoreDisplayState(store) === 'partial';
+    }
     if (activeFilter === 'suspended') return isStoreSuspended(store);
     if (activeFilter === 'unreachable') {
-      return (
-        !isStoreSuspended(store) &&
-        (store.state === 'unreachable' ||
-          store.state === 'offline' ||
-          store.agentUnavailable ||
-          isAgentUnavailableError(store.error))
-      );
+      return !isStoreSuspended(store) && !isStoreOnline(store);
     }
-    return store.state === activeFilter;
+    return resolveStoreDisplayState(store) === activeFilter;
   }
 
   function matchesSearch(store) {
@@ -419,11 +452,13 @@
       return { tone: 'neutral', segments: [], offlineReason: '' };
     }
 
+    const heartbeatUp = store.heartbeatAlive === true;
+    const agentUp = isStoreAgentReachable(store);
     const segments = [];
     let tone = 'neutral';
     let offlineReason = '';
 
-    if (operable && !suspended) {
+    if (agentUp && !suspended) {
       if (total > 0) {
         segments.push({ kind: 'equip', text: `${online}/${total}` });
         segments.push({ kind: 'pct', text: `${pct}%` });
@@ -442,7 +477,7 @@
         });
       }
       tone = pct >= 90 ? 'ok' : pct >= 70 ? 'warn' : 'danger';
-    } else if (operable && suspended) {
+    } else if (agentUp && suspended) {
       if (total > 0) segments.push({ kind: 'equip', text: `${online}/${total}` });
       const updated = formatTime(store.timestamp);
       if (updated !== '—') segments.push({ kind: 'updated', text: `Atualizado ${updated}` });
@@ -548,7 +583,8 @@
 
   function renderStoreCardBody(store, { accessible, online, total, pct }) {
     const suspended = isStoreSuspended(store);
-    const operable = accessible && !store.loading;
+    const agentUp = isStoreAgentReachable(store);
+    const operable = agentUp && !store.loading;
     const metrics = buildStoreMetrics(store, {
       accessible,
       online,
@@ -720,11 +756,13 @@
     const total = summary.total ?? 0;
     const pct = healthPercent(summary);
     const suspended = isStoreSuspended(store);
+    const heartbeatUp = store.heartbeatAlive === true;
+    const agentUp = isStoreAgentReachable(store);
     const accessible = store.accessible === true && !store.loading;
-    const operable = accessible && !store.loading;
+    const operable = agentUp && !store.loading;
     const canPickChannel = !store.loading;
-    const isOfflineAlert = !store.loading && !accessible && !suspended;
-    const state = store.loading ? 'unknown' : store.state || 'unreachable';
+    const isOfflineAlert = !store.loading && !agentUp && !suspended;
+    const state = store.loading ? 'unknown' : resolveStoreDisplayState(store);
     const pillState = suspended ? 'suspended' : state;
     const stateLabel = store.loading
       ? '…'
@@ -752,7 +790,7 @@
     if (isOfflineAlert && store.offlineSince) {
       card.dataset.offlineSince = String(store.offlineSince);
     }
-    if (store.onlineSince && operable) {
+    if (store.onlineSince && agentUp) {
       card.dataset.onlineSince = String(store.onlineSince);
     }
 
@@ -1003,7 +1041,9 @@
     if (currentPageMode === 'lojas' && lojasSubtitle) {
       if (payload.fromCache && payload.live === false) {
         const count = payload.stores?.length || dashboard.stores?.total || 0;
-        lojasSubtitle.textContent = `${count} loja(s) · sincronizando…`;
+        const source =
+          payload.source === 'firebase' || payload.fromFirebase ? 'cache Firebase' : 'cache';
+        lojasSubtitle.textContent = `${count} loja(s) · ${source} · sincronizando…`;
         return;
       }
       if (payload.refreshing && payload.progress?.total) {
@@ -1131,13 +1171,17 @@
 
   function agentChannelSummary(store) {
     if (!store || store.loading) return { ready: false, label: 'Carregando', detail: 'Aguardando dados do agente' };
-    if (store.accessible) {
+    if (store.heartbeatAlive) {
       const online = store.summary?.online ?? 0;
       const total = store.summary?.total ?? 0;
       return {
-        ready: true,
-        label: 'Online',
-        detail: total ? `${online} de ${total} equipamentos na rede` : 'Agente respondendo',
+        ready: store.accessible === true,
+        label: store.accessible ? 'Online' : 'Agente ativo',
+        detail: total
+          ? `${online} de ${total} equipamentos na rede`
+          : store.accessible
+            ? 'Agente respondendo'
+            : 'Pulso recebido · validando equipamentos',
       };
     }
     if (store.storeSuspended && !store.accessible) {
@@ -2355,8 +2399,8 @@
 
     void (async () => {
       try {
-        await ensureDefaultAgentToken();
-        catalogConfig = await loadCatalog();
+        const [, cat] = await Promise.all([ensureDefaultAgentToken(), loadCatalog()]);
+        catalogConfig = cat;
         await loadStores();
         storesBootstrapped = true;
         if (mode === 'dashboard') initGatewayDashboardPanel();
