@@ -856,9 +856,11 @@
     updateHeader();
     updatePersistenceMeta();
     renderHub();
+    await window.Lav60SupportChat?.init?.();
   }
 
   async function destroy() {
+    window.Lav60SupportChat?.destroy?.();
     pageAbort?.abort();
     pageAbort = null;
     closeEditor();
@@ -867,5 +869,5 @@
     closeMapModal();
   }
 
-  window.Lav60SupportPage = { init, destroy };
+  window.Lav60SupportPage = { init, destroy, openProcedure };
 })();

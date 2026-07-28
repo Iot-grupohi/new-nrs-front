@@ -419,6 +419,55 @@
     return results;
   }
 
+  function stripProcedureBody(html) {
+    return String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function searchForChat(query, limit = 8) {
+    const normalized = String(query || '').trim().toLowerCase();
+    if (!normalized) return [];
+
+    const words = normalized.split(/\s+/).filter((word) => word.length > 1);
+    if (!words.length) return [];
+
+    const scored = [];
+
+    for (const category of CATEGORIES) {
+      for (const procedure of category.procedures) {
+        const searchable = [
+          category.id,
+          category.title,
+          category.summary,
+          procedure.id,
+          procedure.title,
+          ...(procedure.keywords || []),
+          stripProcedureBody(procedure.body),
+        ]
+          .join(' ')
+          .toLowerCase();
+
+        let score = 0;
+        words.forEach((word) => {
+          if (searchable.includes(word)) score += 1;
+        });
+        if (score <= 0) continue;
+
+        scored.push({
+          score,
+          category_id: category.id,
+          category_title: category.title,
+          procedure_id: procedure.id,
+          title: procedure.title,
+          body: stripProcedureBody(procedure.body),
+        });
+      }
+    }
+
+    return scored
+      .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+      .slice(0, Math.max(1, limit));
+  }
+
   const searchSuggestions = [
     'maquineta',
     'microtef',
@@ -453,6 +502,7 @@
     BASE_CATEGORIES,
     findProcedure,
     search,
+    searchForChat,
     searchSuggestions,
     loadCustomEntries,
     isCustomProcedure,

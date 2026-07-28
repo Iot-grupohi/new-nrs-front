@@ -54,6 +54,28 @@
       </button>
     </div>
 
+    <section class="support-chat" id="supportChat" aria-label="Assistente de suporte">
+      <header class="support-chat__head">
+        <div>
+          <h3 class="support-chat__title">Assistente IA</h3>
+          <p class="support-chat__subtitle">Respostas com base nos runbooks operacionais</p>
+        </div>
+        <button type="button" class="btn btn--ghost btn--sm" id="supportChatClear">Limpar</button>
+      </header>
+      <div class="support-chat__messages" id="supportChatMessages">
+        <p class="support-chat__empty">Faça uma pergunta sobre equipamentos, pagamentos ou atendimento SAC.</p>
+      </div>
+      <div class="support-chat__suggestions" id="supportChatSuggestions" aria-label="Sugestões rápidas"></div>
+      <form class="support-chat__composer" id="supportChatForm">
+        <label class="support-chat__input-wrap">
+          <span class="visually-hidden">Pergunta para o assistente</span>
+          <textarea id="supportChatInput" rows="2" maxlength="4000" placeholder="Ex.: Maquineta offline no totem, o que fazer?"></textarea>
+        </label>
+        <button type="submit" class="btn btn--primary btn--sm" id="supportChatSend">Enviar</button>
+      </form>
+      <p class="support-chat__status" id="supportChatStatus">Carregando assistente…</p>
+    </section>
+
     <div id="supportContent" class="support-content">
       <div class="stores-empty-state">
         <div class="spinner" aria-hidden="true"></div>
