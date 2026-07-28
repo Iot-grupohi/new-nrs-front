@@ -12,6 +12,7 @@
     fetchStoreStatuses,
     applyStoreStatusRows,
     formatOfflineDuration,
+    isStoreCardSuspended,
     GATEWAY_TTL_MS,
   } = window.Lav60;
 
@@ -23,10 +24,6 @@
     'gateway-offline': {
       title: 'Gateways offline',
       empty: 'Nenhuma loja com gateway offline.',
-    },
-    'gateway-pending': {
-      title: 'Sem verificação recente',
-      empty: 'Todas as lojas já foram verificadas antes.',
     },
   };
 
@@ -40,6 +37,16 @@
   let onRefresh = null;
 
   const $ = (id) => document.getElementById(id);
+
+  function isGatewayScopeSuspended(meta) {
+    if (!meta) return false;
+    if (typeof isStoreCardSuspended === 'function' && isStoreCardSuspended(meta)) return true;
+    return String(meta.lav60_status || '').toLowerCase() === 'suspended';
+  }
+
+  function getGatewayScopeStores() {
+    return getStores().filter((meta) => !isGatewayScopeSuspended(meta));
+  }
 
   function escapeHtml(text) {
     return String(text ?? '')
@@ -62,7 +69,7 @@
 
   function hydrateOverviewFromCache() {
     Object.keys(storeOverviewStatus).forEach((key) => delete storeOverviewStatus[key]);
-    getStores().forEach((meta) => {
+    getGatewayScopeStores().forEach((meta) => {
       const sid = normalizeStoreId(meta.id);
       const cached = getStoreGatewayCacheEntry(sid);
       if (cached) storeOverviewStatus[sid] = { ...cached, checking: false };
@@ -77,8 +84,7 @@
   function buildGatewayEventLists() {
     const online = [];
     const offline = [];
-    const pending = [];
-    getStores().forEach((meta) => {
+    getGatewayScopeStores().forEach((meta) => {
       const sid = normalizeStoreId(meta.id);
       const status = overviewStatusForStore(sid);
       const entry = {
@@ -92,17 +98,13 @@
         agentOfflineSinceMs: status?.agentOfflineSinceMs,
         gatewayOfflineSinceMs: status?.gatewayOfflineSinceMs,
       };
-      if (!status || status.online == null) {
-        if (status?.agentAlive === false) offline.push(entry);
-        else pending.push(entry);
-      } else if (status.online) online.push(entry);
+      if (status?.online === true) online.push(entry);
       else offline.push(entry);
     });
     const sort = (a, b) => a.store.localeCompare(b.store);
     online.sort(sort);
     offline.sort(sort);
-    pending.sort(sort);
-    return { online, offline, pending };
+    return { online, offline };
   }
 
   function gatewayPageHref(storeId) {
@@ -140,6 +142,8 @@
       }
     } else if (entry.agentAlive === false && !parts.length) {
       parts.push('Agente offline');
+    } else if (entry.online == null && !entry.checking) {
+      parts.push('Ainda não verificada');
     }
     return parts.join(' · ') || 'Sem conexão';
   }
@@ -154,22 +158,6 @@
           const sub = age ? `${reason} · verificado ${age}` : reason;
           return `
         <li class="kpi-event-item kpi-event-item--alert">
-          <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
-          <span class="kpi-event-item__sub">${escapeHtml(sub)}</span>
-        </li>`;
-        })
-        .join('')}
-    </ul>`;
-  }
-
-  function renderGatewayPendingEvents(items) {
-    if (!items?.length) return '';
-    return `<ul class="kpi-event-list kpi-event-list--stores">
-      ${items
-        .map((entry) => {
-          const sub = entry.checking ? 'Verificando…' : 'Ainda não verificada nesta sessão';
-          return `
-        <li class="kpi-event-item">
           <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
           <span class="kpi-event-item__sub">${escapeHtml(sub)}</span>
         </li>`;
@@ -284,9 +272,6 @@
     } else if (kpiKey === 'gateway-offline') {
       count = lists.offline.length;
       html = renderGatewayOfflineEvents(lists.offline);
-    } else if (kpiKey === 'gateway-pending') {
-      count = lists.pending.length;
-      html = renderGatewayPendingEvents(lists.pending);
     }
 
     const titleEl = $('agentKpiModalTitle');
@@ -345,24 +330,11 @@
   }
 
   function updateGatewayOverviewKpis() {
-    const stores = getStores();
-    let online = 0;
-    let offline = 0;
-    let pending = 0;
-    stores.forEach((meta) => {
-      const status = overviewStatusForStore(meta.id);
-      if (!status || status.online == null) {
-        if (status?.agentAlive === false) offline += 1;
-        else pending += 1;
-      } else if (status.online) online += 1;
-      else offline += 1;
-    });
+    const lists = buildGatewayEventLists();
     const onlineEl = $('kpiGatewayOnline');
     const offlineEl = $('kpiGatewayOffline');
-    const pendingEl = $('kpiGatewayPending');
-    if (onlineEl) onlineEl.textContent = String(online);
-    if (offlineEl) offlineEl.textContent = String(offline);
-    if (pendingEl) pendingEl.textContent = String(pending);
+    if (onlineEl) onlineEl.textContent = String(lists.online.length);
+    if (offlineEl) offlineEl.textContent = String(lists.offline.length);
   }
 
   function updateGatewayOverviewMeta(scanning = false) {
@@ -392,9 +364,10 @@
     try {
       const rows = await fetchStoreStatuses(fetchFn);
       if (typeof applyStoreStatusRows === 'function') applyStoreStatusRows(rows);
+      const scopeIds = new Set(getGatewayScopeStores().map((meta) => normalizeStoreId(meta.id)));
       rows.forEach((row) => {
         const sid = normalizeStoreId(row?.store);
-        if (!sid) return;
+        if (!sid || !scopeIds.has(sid)) return;
         storeOverviewStatus[sid] = {
           online: row.gateway_online === true ? true : (row.gateway_online === false ? false : null),
           error: row.gateway_error || null,
@@ -451,7 +424,7 @@
 
   async function scanAll({ force = false, skipStores = null } = {}) {
     if (overviewScanRunning || !fetchFn || !$('gatewayOverview')) return;
-    const stores = getStores();
+    const stores = getGatewayScopeStores();
     if (!stores.length) return;
 
     overviewScanRunning = true;
