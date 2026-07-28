@@ -547,6 +547,9 @@
       });
       applyStatusCacheAvailabilityMeta(card, doc);
     }
+    cards.forEach((card, index) => {
+      cards[index] = reapplyStoreCardPolicy(card, catalog);
+    });
   }
 
   function panelAgentGatewayUrl(storeId, path) {
@@ -1510,10 +1513,8 @@
 
   function catalogSuspendedIdSet(catalog) {
     const cat = catalog || heartbeatCatalog;
-    if (!cat && panelCatalogSuspendedIds.size) return panelCatalogSuspendedIds;
-    if (!cat) return new Set();
-    if (cat._suspendedIdSet instanceof Set) return cat._suspendedIdSet;
     const set = new Set(panelCatalogSuspendedIds);
+    if (!cat) return set;
     (cat.suspended_store_ids || []).forEach((id) => {
       const sid = normalizeStoreId(id);
       if (sid) set.add(sid);
@@ -1524,22 +1525,20 @@
         if (sid) set.add(sid);
       }
     });
-    cat._suspendedIdSet = set;
     return set;
   }
 
   function isStoreCardSuspended(card, catalog) {
-    if (!card || card.loading) return false;
-    if (
-      card.storeSuspended ||
-      card.lav60Status === 'suspended' ||
-      card.lav60_status === 'suspended' ||
-      card.state === 'suspended'
-    ) {
-      return true;
-    }
+    if (!card) return false;
     const sid = normalizeStoreId(card.id);
-    return Boolean(sid && catalogSuspendedIdSet(catalog).has(sid));
+    if (sid && catalogSuspendedIdSet(catalog).has(sid)) return true;
+    if (card.loading) return false;
+    return Boolean(
+      card.storeSuspended ||
+        card.lav60Status === 'suspended' ||
+        card.lav60_status === 'suspended' ||
+        card.state === 'suspended'
+    );
   }
 
   function resolveStoreLav60Status(meta, hb, catalog) {
@@ -1695,7 +1694,10 @@
   function buildDashboard(cards) {
     const ready = cards.filter((c) => !c.loading);
     const connected = ready.filter((c) => c.accessible);
-    const storesSuspendedCards = ready.filter((c) => isStoreCardSuspended(c, heartbeatCatalog));
+    const suspendedIdSet = catalogSuspendedIdSet(heartbeatCatalog);
+    const storesSuspendedCards = ready.filter((c) =>
+      suspendedIdSet.has(normalizeStoreId(c.id))
+    );
     const heartbeatOnlineStores = ready.filter(
       (c) => !isStoreCardSuspended(c, heartbeatCatalog) && isCardAgentReachable(c)
     );
@@ -2175,7 +2177,7 @@
   let panelCatalogSuspendedIds = new Set();
 
   function rememberCatalogSuspension(catalog) {
-    const set = new Set();
+    const set = new Set(panelCatalogSuspendedIds);
     (catalog?.suspended_store_ids || []).forEach((id) => {
       const sid = normalizeStoreId(id);
       if (sid) set.add(sid);
@@ -2187,9 +2189,6 @@
       }
     });
     panelCatalogSuspendedIds = set;
-    if (catalog && typeof catalog === 'object') {
-      delete catalog._suspendedIdSet;
-    }
   }
 
   function catalogStoreMeta(catalog, storeId) {
@@ -2950,7 +2949,6 @@
     });
     const stores = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
     const merged = { ...(catalog || {}), stores };
-    delete merged._suspendedIdSet;
     return merged;
   }
 
@@ -3164,6 +3162,9 @@
       card.timestamp = status.timestamp || null;
       card.staleSnapshot = true;
       applyStatusCacheAvailabilityMeta(card, doc);
+    });
+    cards.forEach((card, index) => {
+      cards[index] = reapplyStoreCardPolicy(card, catalog);
     });
   }
 
