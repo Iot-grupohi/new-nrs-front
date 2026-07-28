@@ -285,7 +285,7 @@
   }
 
   function applyAgentProbeBatchResult(card, row, catalog) {
-    const meta = { id: card.id, name: card.name };
+    const meta = catalogStoreMeta(catalog, card.id);
     const hb = heartbeatState.get(normalizeStoreId(card.id));
     const id = normalizeStoreId(card.id);
 
@@ -529,7 +529,7 @@
       const doc = storesMap[normalizeStoreId(card.id)];
       if (!doc) continue;
       applyStatusCacheAvailabilityMeta(card, doc);
-      const meta = { id: card.id, name: card.name };
+      const meta = catalogStoreMeta(catalog, card.id);
       const status = statusFromStatusCacheDoc(meta, doc, card.id);
       if (!status?.summary?.total) continue;
       const hb = heartbeatState.get(normalizeStoreId(card.id));
@@ -1505,9 +1505,10 @@
 
   function catalogSuspendedIdSet(catalog) {
     const cat = catalog || heartbeatCatalog;
+    if (!cat && panelCatalogSuspendedIds.size) return panelCatalogSuspendedIds;
     if (!cat) return new Set();
     if (cat._suspendedIdSet instanceof Set) return cat._suspendedIdSet;
-    const set = new Set();
+    const set = new Set(panelCatalogSuspendedIds);
     (cat.suspended_store_ids || []).forEach((id) => {
       const sid = normalizeStoreId(id);
       if (sid) set.add(sid);
@@ -2089,7 +2090,10 @@
 
   function assemblePayload(cards, extra = {}) {
     const cat = heartbeatCatalog;
-    const enriched = (cards || []).map((card) => enrichCardHeartbeatAlive(card, cat));
+    const enriched = (cards || []).map((card) => {
+      const withPolicy = reapplyStoreCardPolicy(card, cat);
+      return enrichCardHeartbeatAlive(withPolicy, cat);
+    });
     syncStoreOfflineSince(enriched);
     enriched.sort((a, b) => a.id.localeCompare(b.id));
     return {
@@ -2144,6 +2148,46 @@
   let heartbeatOnUpdate = null;
   let heartbeatAuthToken = '';
   let lastStatusBulkMap = {};
+  /** IDs suspensos no catálogo Lav60 — não perder ao aplicar saúde de rede / heartbeat. */
+  let panelCatalogSuspendedIds = new Set();
+
+  function rememberCatalogSuspension(catalog) {
+    const set = new Set();
+    (catalog?.suspended_store_ids || []).forEach((id) => {
+      const sid = normalizeStoreId(id);
+      if (sid) set.add(sid);
+    });
+    (catalog?.stores || []).forEach((store) => {
+      if (String(store?.lav60_status || '').toLowerCase() === 'suspended') {
+        const sid = normalizeStoreId(store.id);
+        if (sid) set.add(sid);
+      }
+    });
+    panelCatalogSuspendedIds = set;
+    if (catalog && typeof catalog === 'object') {
+      delete catalog._suspendedIdSet;
+    }
+  }
+
+  function catalogStoreMeta(catalog, storeId) {
+    const sid = normalizeStoreId(storeId);
+    if (!sid) return { id: '', name: '' };
+    const cat = catalog || heartbeatCatalog;
+    const found = (cat?.stores || []).find((row) => normalizeStoreId(row.id) === sid);
+    if (found) return found;
+    if (panelCatalogSuspendedIds.has(sid)) {
+      return { id: sid, name: sid.toUpperCase(), lav60_status: 'suspended' };
+    }
+    return { id: sid, name: sid.toUpperCase() };
+  }
+
+  function reapplyStoreCardPolicy(card, catalog) {
+    if (!card || card.loading) return card;
+    const cat = catalog || heartbeatCatalog;
+    const meta = catalogStoreMeta(cat, card.id);
+    const hb = heartbeatState.get(normalizeStoreId(card.id));
+    return withStoreCardPolicy(card, meta, hb, cat);
+  }
 
   function getStatusCacheDoc(storeId) {
     return lastStatusBulkMap[normalizeStoreId(storeId)] || null;
@@ -2485,6 +2529,7 @@
   function emitHeartbeatUpdate(extra = {}) {
     if (!heartbeatCatalog || !heartbeatOnUpdate) return;
     heartbeatCatalog = rebuildCatalogStores(heartbeatCatalog, null);
+    rememberCatalogSuspension(heartbeatCatalog);
     const payload = buildPayloadFromHeartbeats(heartbeatCatalog, extra);
     heartbeatOnUpdate(payload);
   }
@@ -2808,7 +2853,7 @@
     }
     if (!res.ok) throw new Error('Configuração do painel indisponível');
     const catalog = await res.json();
-    delete catalog._suspendedIdSet;
+    rememberCatalogSuspension(catalog);
     return catalog;
   }
 
@@ -2861,9 +2906,12 @@
       if (!sid) return;
       if (allowed.size && !allowed.has(sid)) return;
       const prev = byId.get(sid) || {};
+      const suspendedIds = catalogSuspendedIdSet(catalog);
       const fromHb = storeMetaFromId(id, {
         payload: hb.payload,
-        lav60_status: lav60StatusFromPayload(hb.payload) || prev.lav60_status,
+        lav60_status: suspendedIds.has(sid)
+          ? 'suspended'
+          : lav60StatusFromPayload(hb.payload) || prev.lav60_status,
       });
       byId.set(sid, { ...prev, ...fromHb });
     });
@@ -2878,7 +2926,9 @@
       });
     });
     const stores = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
-    return { ...(catalog || {}), stores };
+    const merged = { ...(catalog || {}), stores };
+    delete merged._suspendedIdSet;
+    return merged;
   }
 
   async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -3099,6 +3149,7 @@
     let catalog = await loadCatalog();
     heartbeatPageStartedAt = Date.now();
     catalog = rebuildCatalogStores(catalog, null);
+    rememberCatalogSuspension(catalog);
     heartbeatCatalog = catalog;
 
     function emitBootstrapPaint(cards, extra = {}) {
