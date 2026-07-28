@@ -1008,6 +1008,68 @@ body.support-modal-open {
   color: var(--muted);
 }
 
+.support-map-modal .credit-day-modal__panel,
+.support-map-modal__panel {
+  max-width: min(1120px, 98vw);
+  width: min(1120px, 98vw);
+}
+
+.support-map-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.35rem;
+}
+
+.support-map-modal__regions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.support-map-modal__frame-wrap {
+  position: relative;
+  width: 100%;
+  min-height: 420px;
+  aspect-ratio: 16 / 10;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface-card-muted);
+}
+
+.support-map-modal__frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.support-map-modal__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.support-map-modal__states {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.support-map-modal__external {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--link-accent, var(--primary));
+  text-decoration: none;
+}
+
+.support-map-modal__external:hover {
+  text-decoration: underline;
+}
+
 @media (max-width: 720px) {
   .support-editor-form__grid {
     grid-template-columns: 1fr;
@@ -1028,6 +1090,11 @@ body.support-modal-open {
 
   .support-panel__controls .search-field {
     width: 100%;
+  }
+
+  .support-map-modal__frame-wrap {
+    min-height: 280px;
+    aspect-ratio: 4 / 3;
   }
 }
 

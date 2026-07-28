@@ -33,12 +33,17 @@ $monitorToken = Read-DotEnvValue "MONITOR_SITES_BEARER_TOKEN"
 $cloudflareToken = Read-DotEnvValue "CLOUDFLARE_API_TOKEN"
 $gatewayToken = Read-DotEnvValue "GATEWAY_API_TOKEN"
 $xToken = Read-DotEnvValue "X_TOKEN"
+$openAiKey = Read-DotEnvValue "OPENAI_API_KEY"
+$openAiModel = Read-DotEnvValue "OPENAI_MODEL"
 
 if (-not $doToken) {
   Write-Host "AVISO: DIGITALOCEAN_TOKEN nao encontrado no .env local" -ForegroundColor Yellow
 }
 if (-not $cloudflareToken) {
   Write-Host "AVISO: CLOUDFLARE_API_TOKEN nao encontrado no .env local" -ForegroundColor Yellow
+}
+if (-not $openAiKey) {
+  Write-Host "AVISO: OPENAI_API_KEY nao encontrado no .env local (assistente IA desativado)" -ForegroundColor Yellow
 }
 
 Write-Host "1/2 Enviando service account para VPS..." -ForegroundColor Cyan
@@ -54,6 +59,8 @@ export MONITOR_SITES_BEARER_TOKEN='$monitorToken' && \
 export CLOUDFLARE_API_TOKEN='$cloudflareToken' && \
 export GATEWAY_API_TOKEN='$gatewayToken' && \
 export X_TOKEN='$xToken' && \
+export OPENAI_API_KEY='$openAiKey' && \
+export OPENAI_MODEL='$openAiModel' && \
 git fetch origin main && git reset --hard origin/main && \
 bash deploy/vps-update-all.sh
 "@

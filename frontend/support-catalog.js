@@ -6,39 +6,48 @@
       id: 'norte',
       title: 'Lojas do Norte',
       states: 'AC - AM - AP - PA - RO - RR - TO',
-      url: 'https://www.google.com/maps/d/u/0/edit?mid=1dn53HpediSihL7-am8NMVRg_o_PLAu4&usp=sharing',
+      mid: '1dn53HpediSihL7-am8NMVRg_o_PLAu4',
+      url: 'https://www.google.com/maps/d/u/0/viewer?mid=1dn53HpediSihL7-am8NMVRg_o_PLAu4',
     },
     {
       id: 'nordeste',
       title: 'Lojas do Nordeste',
       states: 'AL - BA - CE - MA - PB - PE - PI - RN',
+      mid: '19aUDdiyUwuvMNPQ1uwpT8Jw-F70ZezY',
       url: 'https://www.google.com/maps/d/u/0/viewer?mid=19aUDdiyUwuvMNPQ1uwpT8Jw-F70ZezY&ll=-10.102174947744842%2C-41.16191960000002&z=5',
     },
     {
       id: 'centro-oeste',
       title: 'Lojas do Centro-Oeste',
       states: 'DF - GO - MS - MT',
+      mid: '1runCan1qeidGojzbXytuAI-uhEkjXis',
       url: 'https://www.google.com/maps/d/u/0/viewer?mid=1runCan1qeidGojzbXytuAI-uhEkjXis&ll=-18.940603342332015%2C-51.98935009999999&z=7',
     },
     {
       id: 'sudeste',
       title: 'Lojas do Sudeste',
       states: 'ES - MG - RJ',
+      mid: '1rsMONiA78L5W_vkgUyhbhiieT6heQZg',
       url: 'https://www.google.com/maps/d/u/0/viewer?mid=1rsMONiA78L5W_vkgUyhbhiieT6heQZg&ll=-21.64142220737699%2C-44.64952075&z=6',
     },
     {
       id: 'sul',
       title: 'Lojas do Sul',
       states: 'PR - RS - SC',
+      mid: '1UfKJWaf9y7DyNewYcAwM86VKAY9JCrk',
       url: 'https://www.google.com/maps/d/u/0/viewer?mid=1UfKJWaf9y7DyNewYcAwM86VKAY9JCrk&ll=-27.619521919757208%2C-51.49806214999999&z=6',
     },
     {
       id: 'sao-paulo',
       title: 'Lojas de São Paulo',
       states: 'SP',
+      mid: '1NFr8lx6xylk9vMdCknWNMeDp3Po4ql0',
       url: 'https://www.google.com/maps/d/u/0/viewer?mid=1NFr8lx6xylk9vMdCknWNMeDp3Po4ql0&ll=-22.577052395234443%2C-48.41055760000001&z=7',
     },
-  ];
+  ].map((region) => ({
+    ...region,
+    embedUrl: `https://www.google.com/maps/d/embed?mid=${encodeURIComponent(region.mid)}`,
+  }));
 
   const BASE_CATEGORIES = [
     {

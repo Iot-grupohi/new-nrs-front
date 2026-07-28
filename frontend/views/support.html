@@ -221,17 +221,26 @@
   </div>
 </div>
 
-<div id="supportMapModal" class="credit-day-modal support-modal hidden" role="dialog" aria-modal="true" aria-labelledby="supportMapModalTitle">
+<div id="supportMapModal" class="credit-day-modal support-modal support-map-modal hidden" role="dialog" aria-modal="true" aria-labelledby="supportMapModalTitle">
   <div class="credit-day-modal__backdrop" data-support-map-dismiss tabindex="-1"></div>
-  <div class="credit-day-modal__panel">
+  <div class="credit-day-modal__panel support-map-modal__panel">
     <header class="credit-day-modal__head">
       <div class="credit-day-modal__intro">
         <span class="credit-day-modal__eyebrow">Localização</span>
         <h2 id="supportMapModalTitle" class="credit-day-modal__title">Mapa de lojas</h2>
-        <p class="credit-day-modal__subtitle">Escolha a região</p>
+        <p class="credit-day-modal__subtitle">Selecione a região para visualizar no painel</p>
       </div>
       <button type="button" class="credit-day-modal__close" data-support-map-dismiss aria-label="Fechar">×</button>
     </header>
-    <div class="credit-day-modal__body support-modal__body" id="supportMapModalBody"></div>
+    <div class="credit-day-modal__body support-modal__body support-map-modal__body">
+      <div class="support-map-modal__regions filter-chips" id="supportMapRegions" role="tablist" aria-label="Regiões do mapa"></div>
+      <div class="support-map-modal__frame-wrap">
+        <iframe id="supportMapFrame" class="support-map-modal__frame" title="Mapa de lojas LAV60" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
+      </div>
+      <footer class="support-map-modal__foot">
+        <p class="support-map-modal__states" id="supportMapStates">—</p>
+        <a id="supportMapExternal" class="support-map-modal__external" href="#" target="_blank" rel="noopener noreferrer">Abrir no Google Maps ↗</a>
+      </footer>
+    </div>
   </div>
 </div>

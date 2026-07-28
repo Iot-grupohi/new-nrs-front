@@ -11,6 +11,7 @@
   let editorMode = 'create';
   let openProcedureRef = null;
   let editingCategoryId = null;
+  let activeMapRegionId = null;
 
   function panelFetch(url, options = {}) {
     const fetcher = window.Lav60Auth?.panelFetch || ((target, opts) => fetch(target, { ...opts, credentials: 'same-origin' }));
@@ -711,25 +712,44 @@
   }
 
   function renderMapModal() {
-    const body = $('supportMapModalBody');
     const regions = catalog()?.MAP_REGIONS || [];
-    if (!body) return;
-    body.innerHTML = `
-      <ul class="support-map-list">
-        ${regions.map((region) => `
-          <li>
-            <a href="${escapeHtml(region.url)}" target="_blank" rel="noopener noreferrer">
-              <span class="support-map-list__title">${escapeHtml(region.title)}</span>
-              <span class="support-map-list__states">${escapeHtml(region.states)}</span>
-            </a>
-          </li>
-        `).join('')}
-      </ul>`;
+    const tabs = $('supportMapRegions');
+    if (!regions.length || !tabs) return;
+
+    tabs.innerHTML = regions.map((region) => (
+      `<button type="button" class="chip${region.id === activeMapRegionId ? ' chip--active' : ''}" data-support-map-region="${escapeHtml(region.id)}" role="tab" aria-selected="${region.id === activeMapRegionId ? 'true' : 'false'}">${escapeHtml(region.title)}</button>`
+    )).join('');
+
+    const defaultRegion = regions.find((region) => region.id === activeMapRegionId) || regions[0];
+    selectMapRegion(defaultRegion.id);
+
     $('supportMapModal')?.classList.remove('hidden');
     document.body.classList.add('support-modal-open');
   }
 
+  function selectMapRegion(regionId) {
+    const region = catalog()?.MAP_REGIONS?.find((item) => item.id === regionId);
+    const frame = $('supportMapFrame');
+    if (!region || !frame) return;
+
+    activeMapRegionId = region.id;
+    frame.src = region.embedUrl || region.url;
+
+    const statesEl = $('supportMapStates');
+    if (statesEl) statesEl.textContent = region.states;
+
+    const externalEl = $('supportMapExternal');
+    if (externalEl) externalEl.href = region.url;
+
+    document.querySelectorAll('[data-support-map-region]').forEach((btn) => {
+      const active = btn.dataset.supportMapRegion === region.id;
+      btn.classList.toggle('chip--active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
   function closeMapModal() {
+    $('supportMapFrame')?.removeAttribute('src');
     $('supportMapModal')?.classList.add('hidden');
     if ($('supportModal')?.classList.contains('hidden')) {
       document.body.classList.remove('support-modal-open');
@@ -747,6 +767,12 @@
     $('supportModalBack')?.addEventListener('click', closeProcedureModal, { signal });
 
     $('supportMapBtn')?.addEventListener('click', renderMapModal, { signal });
+
+    $('supportMapModal')?.addEventListener('click', (event) => {
+      const regionBtn = event.target.closest('[data-support-map-region]');
+      if (!regionBtn) return;
+      selectMapRegion(regionBtn.dataset.supportMapRegion);
+    }, { signal });
 
     $('supportAddBtn')?.addEventListener('click', () => openEditor({ mode: 'create' }), { signal });
     $('supportEditorForm')?.addEventListener('submit', submitEditor, { signal });

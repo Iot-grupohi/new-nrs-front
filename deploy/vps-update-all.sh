@@ -73,12 +73,23 @@ fi
 if [[ -n "${X_TOKEN:-}" ]]; then
   patch_env "X_TOKEN" "$X_TOKEN"
 fi
+if [[ -n "${OPENAI_API_KEY:-}" ]]; then
+  patch_env "OPENAI_API_KEY" "$OPENAI_API_KEY"
+fi
+if [[ -n "${OPENAI_MODEL:-}" ]]; then
+  patch_env "OPENAI_MODEL" "$OPENAI_MODEL"
+fi
 
 echo "==> Tokens operacionais"
 if grep -q '^CLOUDFLARE_API_TOKEN=.' "$ENV_FILE" 2>/dev/null; then
   echo "  CLOUDFLARE_API_TOKEN: configurado"
 else
   echo "  AVISO: CLOUDFLARE_API_TOKEN vazio (liberar/consultar equipamento vai falhar)"
+fi
+if grep -q '^OPENAI_API_KEY=.' "$ENV_FILE" 2>/dev/null; then
+  echo "  OPENAI_API_KEY: configurado"
+else
+  echo "  AVISO: OPENAI_API_KEY vazio (assistente IA desativado)"
 fi
 
 echo "==> Removendo artefatos do Firebase antigo (hipag-02)"
@@ -113,6 +124,7 @@ else
   curl -sf "http://127.0.0.1:3000/api/audit/logs?limit=3" | python3 -c "import sys,json; d=json.load(sys.stdin); print('logs:', len(d.get('items') or []), 'available:', d.get('available'))"
   curl -sf "http://127.0.0.1:3000/api/catalog?force=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print('catalog stores:', len(d.get('stores') or []), 'suspended:', d.get('suspended_count', 0))"
   curl -sf "http://127.0.0.1:3000/api/infra/metrics?window=3600&include_databases=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print('infra vps:', len(d.get('vps') or []), 'databases:', len(d.get('databases') or []))"
+  curl -sf "http://127.0.0.1:3000/api/support/chat/status" | python3 -c "import sys,json; d=json.load(sys.stdin); print('support chat:', 'ativo' if d.get('available') else 'desativado', 'model:', d.get('model'))"
 fi
 echo ""
 git log -1 --oneline
