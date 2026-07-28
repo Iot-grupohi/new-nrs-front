@@ -48,6 +48,9 @@ patch_env "FIREBASE_APP_ID" "1:233168175568:web:64044f316c1ec7188a39d5"
 patch_env "FIREBASE_SERVICE_ACCOUNT_FILE" "$SA_FILE"
 patch_env "FIREBASE_AUDIT_COLLECTION" "audit_logs"
 patch_env "FIREBASE_STATUS_COLLECTION" "store_status"
+patch_env "FIREBASE_STATUS_WRITE_INTERVAL_SEC" "45"
+patch_env "FIREBASE_STATUS_READ_FIRESTORE" "1"
+patch_env "FIREBASE_STATUS_HYDRATE_ON_START" "1"
 
 if [[ -n "${DIGITALOCEAN_TOKEN:-}" ]]; then
   patch_env "DIGITALOCEAN_TOKEN" "$DIGITALOCEAN_TOKEN"
@@ -108,6 +111,7 @@ else
   curl -sf "http://127.0.0.1:3000/api/audit/status" | python3 -m json.tool
   echo ""
   curl -sf "http://127.0.0.1:3000/api/audit/logs?limit=3" | python3 -c "import sys,json; d=json.load(sys.stdin); print('logs:', len(d.get('items') or []), 'available:', d.get('available'))"
+  curl -sf "http://127.0.0.1:3000/api/catalog?force=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print('catalog stores:', len(d.get('stores') or []), 'suspended:', d.get('suspended_count', 0))"
   curl -sf "http://127.0.0.1:3000/api/infra/metrics?window=3600&include_databases=1" | python3 -c "import sys,json; d=json.load(sys.stdin); print('infra vps:', len(d.get('vps') or []), 'databases:', len(d.get('databases') or []))"
 fi
 echo ""

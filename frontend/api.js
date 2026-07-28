@@ -4,7 +4,6 @@
   const OFFLINE_SINCE_KEY = 'lav60_offline_since';
   const ONLINE_SINCE_KEY = 'lav60_online_since';
   const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
-  const Cache = window.Lav60Cache;
 
   let cachedAgentToken = null;
   let cachedAgentTokenConfigured = false;
@@ -316,6 +315,15 @@
         error: friendlyUserMessage(`HTTP ${row.status || 502}`),
         transient: true,
       });
+      if (Number(row.status) === 530) {
+        applyAgentProbeFailure(
+          card,
+          meta,
+          hb,
+          catalog,
+          friendlyUserMessage('Túnel Cloudflare indisponível (HTTP 530)')
+        );
+      }
     }
   }
 
@@ -501,6 +509,17 @@
     });
   }
 
+  function applyStatusCacheAvailabilityMeta(card, doc) {
+    if (!card || !doc || typeof doc !== 'object') return card;
+    if (doc.agent_online_since_ms != null) {
+      card.agent_online_since_ms = doc.agent_online_since_ms;
+    }
+    if (doc.agent_offline_since_ms != null) {
+      card.agent_offline_since_ms = doc.agent_offline_since_ms;
+    }
+    return card;
+  }
+
   function enrichCardsFromStatusCache(cards, catalog, bulk) {
     const storesMap = bulk?.stores;
     if (!bulk?.available || !storesMap || typeof storesMap !== 'object') return;
@@ -509,6 +528,7 @@
       if (card.accessible && !card.agentPulseStale && card.fromLiveProbe) continue;
       const doc = storesMap[normalizeStoreId(card.id)];
       if (!doc) continue;
+      applyStatusCacheAvailabilityMeta(card, doc);
       const meta = { id: card.id, name: card.name };
       const status = statusFromStatusCacheDoc(meta, doc, card.id);
       if (!status?.summary?.total) continue;
@@ -518,7 +538,9 @@
         agentPulseStale: pulseStale,
         staleSnapshot: pulseStale || !doc.alive,
         fromHeartbeat: false,
+        accessible: pulseStale ? false : undefined,
       });
+      applyStatusCacheAvailabilityMeta(card, doc);
     }
   }
 
@@ -604,7 +626,6 @@
 
   function isHeartbeatEntryAlive(entry, catalog) {
     if (!entry) return false;
-    if (entry.alive === false) return false;
     const timeoutMs = getHeartbeatTimeoutMs(catalog);
     const receivedAt =
       typeof entry.received_at === 'number' ? entry.received_at * 1000 : entry.receivedAt || 0;
@@ -1482,11 +1503,32 @@
     return null;
   }
 
-  function resolveStoreLav60Status(meta, hb) {
+  function catalogSuspendedIdSet(catalog) {
+    const cat = catalog || heartbeatCatalog;
+    if (!cat) return new Set();
+    if (cat._suspendedIdSet instanceof Set) return cat._suspendedIdSet;
+    const set = new Set();
+    (cat.suspended_store_ids || []).forEach((id) => {
+      const sid = normalizeStoreId(id);
+      if (sid) set.add(sid);
+    });
+    (cat.stores || []).forEach((store) => {
+      if (String(store?.lav60_status || '').toLowerCase() === 'suspended') {
+        const sid = normalizeStoreId(store.id);
+        if (sid) set.add(sid);
+      }
+    });
+    cat._suspendedIdSet = set;
+    return set;
+  }
+
+  function resolveStoreLav60Status(meta, hb, catalog) {
     const payload = heartbeatPayload(hb);
     const fromAgent = lav60StatusFromPayload(payload);
     const metaStatus =
       typeof meta?.lav60_status === 'string' ? meta.lav60_status.trim().toLowerCase() : '';
+    const sid = normalizeStoreId(meta?.id);
+    if (sid && catalogSuspendedIdSet(catalog).has(sid)) return 'suspended';
 
     if (fromAgent === 'suspended' || metaStatus === 'suspended') return 'suspended';
     if (fromAgent === 'ok') return 'ok';
@@ -1496,13 +1538,13 @@
     return 'ok';
   }
 
-  function isStoreLav60Suspended(meta, hb) {
-    return resolveStoreLav60Status(meta, hb) === 'suspended';
+  function isStoreLav60Suspended(meta, hb, catalog) {
+    return resolveStoreLav60Status(meta, hb, catalog) === 'suspended';
   }
 
   function finalizeStoreCard(card, meta, hb, catalog) {
     if (!card || card.loading) return card;
-    if (!isStoreLav60Suspended(meta, hb)) return card;
+    if (!isStoreLav60Suspended(meta, hb, catalog)) return card;
 
     const hbAlive = hb && isStoreHeartbeatAlive(hb, catalog);
     const base = {
@@ -1575,19 +1617,75 @@
     });
   }
 
+  /** Card mínimo do catálogo — sem spinner (lista grande de lojas). */
+  function buildCatalogPlaceholderCard(meta, catalog) {
+    return buildStoreCard(meta, null, null, catalog, {
+      accessible: false,
+      state: 'unreachable',
+      loading: false,
+      error: null,
+      staleSnapshot: true,
+    });
+  }
+
+  function buildCardsFromStatusCacheBulk(catalog, bulk) {
+    const storesMap = bulk?.stores;
+    if (!bulk?.available || !storesMap || typeof storesMap !== 'object') {
+      return (catalog.stores || []).map((meta) =>
+        withStoreCardPolicy(buildCatalogPlaceholderCard(meta, catalog), meta, null, catalog)
+      );
+    }
+
+    return (catalog.stores || []).map((meta) => {
+      const id = normalizeStoreId(meta.id);
+      const doc = storesMap[id];
+      const hb = heartbeatState.get(id);
+      if (!doc) {
+        return withStoreCardPolicy(buildCatalogPlaceholderCard(meta, catalog), meta, hb, catalog);
+      }
+      const card = cardFromStatusCacheEntry(meta, doc, catalog);
+      if (!card) {
+        return withStoreCardPolicy(buildCatalogPlaceholderCard(meta, catalog), meta, hb, catalog);
+      }
+      return withStoreCardPolicy(card, meta, hb, catalog);
+    });
+  }
+
+  function isStoreCardHeartbeatAlive(card, catalog) {
+    if (!card || card.loading) return false;
+    const hb = heartbeatState.get(normalizeStoreId(card.id));
+    return isStoreHeartbeatAlive(hb, catalog || heartbeatCatalog);
+  }
+
+  function enrichCardHeartbeatAlive(card, catalog) {
+    if (!card || typeof card !== 'object') return card;
+    return {
+      ...card,
+      heartbeatAlive: isStoreCardHeartbeatAlive(card, catalog),
+    };
+  }
+
+  function isCardAgentReachable(card) {
+    if (!card || card.loading || card.storeSuspended) return false;
+    if (card.agentProbeFailed || card.agentUnavailable) return false;
+    if (card.accessible === false) return false;
+    return card.heartbeatAlive === true;
+  }
+
   function buildDashboard(cards) {
     const ready = cards.filter((c) => !c.loading);
     const connected = ready.filter((c) => c.accessible);
     const storesSuspendedCards = ready.filter((c) => c.storeSuspended);
-    const operational = ready.filter(
-      (c) => !c.storeSuspended && c.accessible && (c.summary?.online ?? 0) > 0
+    const heartbeatOnlineStores = ready.filter((c) => !c.storeSuspended && isCardAgentReachable(c));
+    const heartbeatOfflineStores = ready.filter(
+      (c) => !c.storeSuspended && !isCardAgentReachable(c)
     );
     const unreachable = ready.filter((c) => !c.storeSuspended && !c.accessible);
     const allDevicesOffline = connected.filter(
       (c) => !c.storeSuspended && (c.summary?.online ?? 0) <= 0
     );
     const partialCount = connected.filter((c) => {
-      if (c.storeSuspended) return false;
+      if (c.storeSuspended || !isCardAgentReachable(c)) return false;
       const on = c.summary?.online ?? 0;
       const tot = c.summary?.total ?? 0;
       return on > 0 && on < tot;
@@ -1626,9 +1724,9 @@
         storesSuspendedEvents.push({
           ...storeEntry,
           reason: card.storeNotice || STORE_SUSPENDED_NOTICE,
-          agent_online: card.accessible,
+          agent_online: card.heartbeatAlive,
         });
-      } else if (card.accessible && (card.summary?.online ?? 0) > 0) {
+      } else if (isCardAgentReachable(card)) {
         const healthPct = card.summary?.total
           ? Math.round(((card.summary?.online ?? 0) / card.summary.total) * 100)
           : 0;
@@ -1644,17 +1742,23 @@
             health_pct: healthPct,
           });
         }
-      }
-      if (!card.accessible) {
+      } else {
         storesOfflineEvents.push({
           ...storeEntry,
-          kind: 'unreachable',
-          reason: card.agentUnavailable
-            ? noAgentMessage(card.id)
-            : card.error || 'Loja indisponível',
+          kind: card.heartbeatAlive ? 'agent_unreachable' : 'heartbeat_offline',
+          reason: card.agentProbeFailed
+            ? card.error || 'Agente não respondeu'
+            : card.heartbeatAlive
+              ? card.error || 'Agente sem resposta HTTP'
+              : 'Sem pulso do agente',
           offline_since: card.offlineSince || null,
         });
-      } else if ((card.summary?.online ?? 0) <= 0 && (card.summary?.total ?? 0) > 0) {
+      }
+      if (
+        isCardAgentReachable(card) &&
+        (card.summary?.online ?? 0) <= 0 &&
+        (card.summary?.total ?? 0) > 0
+      ) {
         storesOfflineEvents.push({
           ...storeEntry,
           kind: 'devices_down',
@@ -1715,12 +1819,14 @@
     return {
       stores: {
         total: cards.length,
-        online: operational.length,
+        online: heartbeatOnlineStores.length,
         connected: connected.length,
-        offline: unreachable.length + allDevicesOffline.length,
+        offline: heartbeatOfflineStores.length,
         partial: partialCount,
         suspended: storesSuspendedCards.length,
         pending: cards.filter((c) => c.loading).length,
+        unreachable: unreachable.length,
+        devices_all_offline: allDevicesOffline.length,
       },
       devices: {
         online: devicesOnline,
@@ -1915,10 +2021,13 @@
     cards.forEach((card) => {
       if (card.loading) return;
 
-      if (!card.accessible) {
-        const serverSince = card.agent_offline_since_ms;
-        if (serverSince) {
-          card.offlineSince = serverSince;
+      if (!isCardAgentReachable(card)) {
+        if (card.agent_offline_since_ms != null) {
+          card.offlineSince = card.agent_offline_since_ms;
+          if (offlineMap[card.id] !== card.agent_offline_since_ms) {
+            offlineMap[card.id] = card.agent_offline_since_ms;
+            offlineChanged = true;
+          }
         } else if (!offlineMap[card.id]) {
           offlineMap[card.id] = now;
           offlineChanged = true;
@@ -1937,11 +2046,19 @@
           offlineChanged = true;
         }
         card.offlineSince = null;
-        if (!onlineMap[card.id]) {
+        if (card.agent_online_since_ms != null) {
+          card.onlineSince = card.agent_online_since_ms;
+          if (onlineMap[card.id] !== card.agent_online_since_ms) {
+            onlineMap[card.id] = card.agent_online_since_ms;
+            onlineChanged = true;
+          }
+        } else if (!onlineMap[card.id]) {
           onlineMap[card.id] = now;
           onlineChanged = true;
+          card.onlineSince = onlineMap[card.id];
+        } else {
+          card.onlineSince = onlineMap[card.id];
         }
-        card.onlineSince = onlineMap[card.id];
       }
     });
 
@@ -1971,11 +2088,13 @@
   }
 
   function assemblePayload(cards, extra = {}) {
-    syncStoreOfflineSince(cards);
-    cards.sort((a, b) => a.id.localeCompare(b.id));
+    const cat = heartbeatCatalog;
+    const enriched = (cards || []).map((card) => enrichCardHeartbeatAlive(card, cat));
+    syncStoreOfflineSince(enriched);
+    enriched.sort((a, b) => a.id.localeCompare(b.id));
     return {
-      stores: cards,
-      dashboard: buildDashboard(cards),
+      stores: enriched,
+      dashboard: buildDashboard(enriched),
       timestamp: new Date().toISOString(),
       ...extra,
     };
@@ -1999,7 +2118,7 @@
 
   function getHeartbeatTimeoutMs(catalog) {
     if (catalog?.heartbeat_timeout_seconds) return catalog.heartbeat_timeout_seconds * 1000;
-    return 90000;
+    return 120000;
   }
 
   /** Tempo sem heartbeat antes do card do dashboard mostrar offline (>= timeout técnico). */
@@ -2024,8 +2143,39 @@
   let heartbeatCatalog = null;
   let heartbeatOnUpdate = null;
   let heartbeatAuthToken = '';
-  let dashboardCacheMap = {};
-  let persistDashboardTimer = null;
+  let lastStatusBulkMap = {};
+
+  function getStatusCacheDoc(storeId) {
+    return lastStatusBulkMap[normalizeStoreId(storeId)] || null;
+  }
+
+  function setLastStatusBulkMap(bulk) {
+    lastStatusBulkMap =
+      bulk?.stores && typeof bulk.stores === 'object' ? { ...bulk.stores } : {};
+  }
+
+  function cardFromStatusCacheEntry(meta, doc, catalog) {
+    if (!doc) return null;
+    const id = normalizeStoreId(meta.id);
+    const status = statusFromStatusCacheDoc(meta, doc, id);
+    if (!status?.summary?.total) return null;
+    const pulseStale = doc.alive === false;
+    let card = buildStoreCard(
+      meta,
+      status,
+      pulseStale ? friendlyUserMessage('Sem pulso recente do agente') : null,
+      catalog,
+      {
+        fromCache: true,
+        staleSnapshot: pulseStale,
+        agentPulseStale: pulseStale,
+        accessible: pulseStale ? false : undefined,
+      }
+    );
+    const agentUrl = doc.agent_url || doc.config_snapshot?.agent_url;
+    if (agentUrl) card.agent = normalizeAgentUrl(agentUrl);
+    return applyStatusCacheAvailabilityMeta(card, doc);
+  }
 
   function cardHasDeviceDots(card) {
     return Object.values(card?.devices || {}).some(
@@ -2033,77 +2183,8 @@
     );
   }
 
-  function cardFromCacheRow(meta, row, catalog) {
-    if (!row?.card) return null;
-    const acId = catalog?.ac_id || '110';
-    const card = normalizeCardAccess({ ...row.card, loading: false });
-    let status = row.status ? { ...row.status } : statusFromCard(row.card);
-    if (status) {
-      status.machines = mergeMachinesCatalog(
-        status.machines,
-        row.card?.machines,
-        machinesFromCardDevices(row.card)
-      );
-      status = applyFrontendDeviceVisibility(status, acId);
-      card.devices = buildDeviceDots(status, acId);
-      card.summary = status.summary || card.summary;
-      card.timestamp = status.timestamp || card.timestamp;
-      card.machines = status.machines || card.machines || [];
-    }
-    if (card.summary && !card.storeSuspended && card.lav60Status !== 'suspended') {
-      card.state = storeHealthState(card.summary, card.error);
-    }
-    card.fromCache = true;
-    card.cachedAt = row.cachedAt;
-    return card;
-  }
-
-  async function loadDashboardCacheMap(_catalog) {
-    const rows = await Cache.getAll();
-    const map = {};
-    (rows || []).forEach((row) => {
-      if (row?.id) map[row.id] = row;
-    });
-    return map;
-  }
-
-  function schedulePersistDashboardCards(cards, catalog) {
-    if (persistDashboardTimer) clearTimeout(persistDashboardTimer);
-    persistDashboardTimer = setTimeout(() => {
-      persistDashboardCards(cards, catalog).catch(() => {});
-    }, 1200);
-  }
-
-  async function persistDashboardCards(cards, catalog) {
-    const hash = Cache.catalogHash(catalog.stores || []);
-    const entries = (cards || [])
-      .filter((c) => c && !c.loading)
-      .map((c) => {
-        const copy = { ...c, loading: false };
-        delete copy.fromCache;
-        delete copy.cachedAt;
-        return [c.id, copy, statusFromCard(c)];
-      });
-    if (!entries.length) return;
-    await Cache.setManyWithStatus(entries, hash);
-  }
-
-  function buildCardsFromCache(catalog, cacheMap) {
-    return (catalog.stores || []).map((meta) => {
-      const id = normalizeStoreId(meta.id);
-      const row = cacheMap[id];
-      const hb = heartbeatState.get(id);
-      if (row) {
-        const card = cardFromCacheRow(meta, row, catalog);
-        if (card) return withStoreCardPolicy(card, meta, hb, catalog);
-      }
-      return withStoreCardPolicy(buildPlaceholderCard(meta, catalog), meta, hb, catalog);
-    });
-  }
-
   function isStoreHeartbeatAlive(hb, catalog) {
     if (!hb) return false;
-    if (hb.alive === false) return false;
     const timeoutMs = getHeartbeatTimeoutMs(catalog);
     const receivedAt = hb.receivedAt || 0;
     return Boolean(receivedAt && Date.now() - receivedAt <= timeoutMs);
@@ -2113,18 +2194,21 @@
     const id = normalizeStoreId(storeId);
     if (!id) return;
     const prev = heartbeatState.get(id);
-    const receivedAt =
+    const incomingAt =
       typeof entry?.received_at === 'number'
         ? entry.received_at * 1000
-        : entry?.receivedAt || Date.now();
-    const payload = entry?.payload || entry;
+        : entry?.receivedAt || 0;
+    const prevAt = prev?.receivedAt || 0;
+    if (prev && incomingAt > 0 && prevAt > incomingAt) return;
+    const receivedAt = incomingAt > 0 ? Math.max(incomingAt, prevAt) : prevAt || Date.now();
+    const payload =
+      incomingAt >= prevAt ? entry?.payload || entry : prev?.payload || entry?.payload || entry;
     const status = statusFromHeartbeatPayload(null, payload, id);
-    const alive = entry?.alive !== false;
     heartbeatState.set(id, {
       receivedAt,
       payload,
       lastStatus: status || prev?.lastStatus || null,
-      alive,
+      alive: Date.now() - receivedAt <= getHeartbeatTimeoutMs(heartbeatCatalog),
     });
   }
 
@@ -2264,14 +2348,10 @@
     });
   }
 
-  function buildOfflineCardFromHeartbeat(meta, catalog, hb, cacheMap) {
+  function buildOfflineCardFromHeartbeat(meta, catalog, hb) {
     const id = normalizeStoreId(meta.id);
-    const cachedRow = cacheMap?.[id];
-    const cachedMachines = mergeMachinesCatalog(
-      cachedRow?.status?.machines,
-      cachedRow?.card?.machines,
-      machinesFromCardDevices(cachedRow?.card)
-    );
+    const statusDoc = getStatusCacheDoc(id);
+    const cachedMachines = mergeMachinesCatalog(statusDoc?.machines);
     let lastStatus =
       hb?.lastStatus || statusFromHeartbeatPayload(meta, hb?.payload, id) || null;
     if (lastStatus && cachedMachines.length) {
@@ -2291,22 +2371,20 @@
         catalog
       );
     }
-    if (cachedRow) {
-      const cached = cardFromCacheRow(meta, cachedRow, catalog);
-      if (cached) {
-        return withStoreCardPolicy(
-          {
-            ...cached,
-            accessible: false,
-            staleSnapshot: true,
-            error: friendlyUserMessage('Sem conexão com a loja'),
-            state: 'unreachable',
-          },
-          meta,
-          hb,
-          catalog
-        );
-      }
+    const cached = cardFromStatusCacheEntry(meta, statusDoc, catalog);
+    if (cached) {
+      return withStoreCardPolicy(
+        {
+          ...cached,
+          accessible: false,
+          staleSnapshot: true,
+          error: friendlyUserMessage('Sem conexão com a loja'),
+          state: 'unreachable',
+        },
+        meta,
+        hb,
+        catalog
+      );
     }
     return withStoreCardPolicy(
       buildStoreCard(meta, null, 'Sem conexão com a loja', catalog),
@@ -2316,19 +2394,17 @@
     );
   }
 
-  function buildCardFromHeartbeat(meta, catalog, cacheMap = dashboardCacheMap) {
+  function buildCardFromHeartbeat(meta, catalog) {
     const id = normalizeStoreId(meta.id);
     const hb = heartbeatState.get(id);
     const now = Date.now();
-    const cachedRow = cacheMap?.[id];
 
-    function fromCache() {
-      if (!cachedRow) return null;
-      return cardFromCacheRow(meta, cachedRow, catalog);
+    function fromStatusCache() {
+      return cardFromStatusCacheEntry(meta, getStatusCacheDoc(id), catalog);
     }
 
     function offlineFromCacheOrEmpty() {
-      const cached = fromCache();
+      const cached = fromStatusCache();
       if (cached) {
         return {
           ...cached,
@@ -2344,7 +2420,7 @@
     if (!hb) {
       const snapshotGraceMs = 12000;
       if (now - heartbeatPageStartedAt < snapshotGraceMs) {
-        const cached = fromCache();
+        const cached = fromStatusCache();
         if (cached?.accessible) {
           return withStoreCardPolicy(
             {
@@ -2360,13 +2436,13 @@
           );
         }
         if (cached) return withStoreCardPolicy(cached, meta, null, catalog);
-        return buildPlaceholderCard(meta, catalog);
+        return withStoreCardPolicy(buildPlaceholderCard(meta, catalog), meta, null, catalog);
       }
       return withStoreCardPolicy(offlineFromCacheOrEmpty(), meta, null, catalog);
     }
 
     if (!isStoreHeartbeatAlive(hb, catalog)) {
-      return buildOfflineCardFromHeartbeat(meta, catalog, hb, cacheMap);
+      return buildOfflineCardFromHeartbeat(meta, catalog, hb);
     }
 
     const probeFailure = recentAgentProbeFailure(id);
@@ -2395,22 +2471,21 @@
       return buildOnlineCardFromHeartbeat(meta, catalog, hb, status);
     }
 
-    const cached = fromCache();
+    const cached = fromStatusCache();
     if (cached) return withStoreCardPolicy(cached, meta, hb, catalog);
     return withStoreCardPolicy(buildPlaceholderCard(meta, catalog), meta, hb, catalog);
   }
 
   function buildPayloadFromHeartbeats(catalog, extra = {}) {
     const list = catalog.stores || [];
-    const cards = list.map((meta) => buildCardFromHeartbeat(meta, catalog, dashboardCacheMap));
+    const cards = list.map((meta) => buildCardFromHeartbeat(meta, catalog));
     return assemblePayload(cards, { fromHeartbeat: true, ...extra });
   }
 
   function emitHeartbeatUpdate(extra = {}) {
     if (!heartbeatCatalog || !heartbeatOnUpdate) return;
-    heartbeatCatalog = rebuildCatalogStores(heartbeatCatalog, dashboardCacheMap);
+    heartbeatCatalog = rebuildCatalogStores(heartbeatCatalog, null);
     const payload = buildPayloadFromHeartbeats(heartbeatCatalog, extra);
-    schedulePersistDashboardCards(payload.stores, heartbeatCatalog);
     heartbeatOnUpdate(payload);
   }
 
@@ -2439,7 +2514,7 @@
     if (!heartbeatCatalog || !heartbeatMonitorStarted) return;
 
     const cards = (heartbeatCatalog.stores || [])
-      .map((meta) => buildCardFromHeartbeat(meta, heartbeatCatalog, dashboardCacheMap))
+      .map((meta) => buildCardFromHeartbeat(meta, heartbeatCatalog))
       .filter((card) => cardNeedsAgentValidation(card, heartbeatCatalog));
     const targets = selectAgentProbeTargets(cards, heartbeatCatalog);
     if (!targets.length) return;
@@ -2717,28 +2792,24 @@
     return friendlyUserMessage(msg || 'Falha de rede');
   }
 
-  function shouldRefreshStore(meta, row, hash, catalog, force) {
-    if (force) return true;
-    if (!row || row.catalogHash !== hash) return true;
-    const card = normalizeCardAccess(row.card);
-    if (!card.accessible || card.agentUnavailable || card.loading) {
-      return !Cache.isFresh(row, hash, getOfflineRetryTtlMs(catalog));
-    }
-    // Loja online também revalida no intervalo curto (detecta agente parado)
-    return !Cache.isFresh(row, hash, getOnlineRetryTtlMs(catalog));
+  function shouldRefreshStore(_meta, _row, _hash, _catalog, force) {
+    return force === true;
   }
 
   function getConcurrency(catalog) {
     return catalog?.refresh_concurrency || 15;
   }
 
-  async function loadCatalog() {
-    let res = await fetch('/api/catalog', { cache: 'no-store', credentials: 'same-origin' });
+  async function loadCatalog(options = {}) {
+    const force = options.force === true ? '?force=1' : '';
+    let res = await fetch(`/api/catalog${force}`, { cache: 'no-store', credentials: 'same-origin' });
     if (!res.ok) {
       res = await fetch(`./stores.json?_=${Date.now()}`, { cache: 'no-store', credentials: 'same-origin' });
     }
     if (!res.ok) throw new Error('Configuração do painel indisponível');
-    return res.json();
+    const catalog = await res.json();
+    delete catalog._suspendedIdSet;
+    return catalog;
   }
 
   function storeMetaFromId(storeId, entry = null) {
@@ -2911,13 +2982,10 @@
     return done;
   }
 
-  async function refreshOneStore(meta, catalog, token, hash, endpointOverride = null) {
-    const id = normalizeStoreId(meta.id);
+  async function refreshOneStore(meta, catalog, token, _hash, endpointOverride = null) {
     const { status, error } = await fetchStoreStatus(meta, catalog, token, endpointOverride);
     if (status && !status.summary) attachSummary(status);
-    const card = buildStoreCard(meta, status, error, catalog, { fromCache: false });
-    await Cache.setStore(id, card, hash, status);
-    return card;
+    return buildStoreCard(meta, status, error, catalog, { fromCache: false });
   }
 
   function machinesFromCardDevices(card) {
@@ -2980,19 +3048,19 @@
   }
 
   async function getCachedStoreEntry(meta, catalog) {
-    if (!meta?.id || !catalog || !Cache) return null;
+    if (!meta?.id || !catalog) return null;
     const id = normalizeStoreId(meta.id);
-    const hash = Cache.catalogHash(catalog.stores || []);
-    const row = await Cache.getStore(id);
-    if (!row || row.catalogHash !== hash) {
-      return null;
-    }
-    const status = row.status ? { ...row.status } : statusFromCard(row.card);
+    const doc = await fetchStoreStatusCache(id, catalog);
+    if (!doc?.hit) return null;
+    const status = statusFromStatusCacheDoc(meta, doc, id);
+    if (!status) return null;
+    const card = cardFromStatusCacheEntry(meta, doc, catalog);
+    if (!card) return null;
     return {
-      card: row.card,
+      card,
       status,
-      cachedAt: row.cachedAt,
-      fresh: Cache.isFresh(row, hash, getCacheTtlMs(catalog)),
+      cachedAt: doc.updated_at_ms || null,
+      fresh: doc.alive === true,
     };
   }
 
@@ -3000,64 +3068,74 @@
    * Dashboard: recebe heartbeats dos agentes via painel (push).
    * options: { force, onUpdate }
    */
-  async function enrichOfflineCardsFromCache(cards, catalog) {
-    const hash = Cache.catalogHash(catalog.stores || []);
+  async function enrichOfflineCardsFromCache(cards, catalog, bulk) {
+    const storesMap = bulk?.stores;
+    if (!bulk?.available || !storesMap) return;
     const acId = catalog?.ac_id || '110';
 
-    await Promise.all(
-      cards.map(async (card) => {
-        if (card.accessible || card.loading) return;
-        const hasDots = Object.values(card.devices || {}).some(
-          (list) => Array.isArray(list) && list.length
-        );
-        if (hasDots) return;
+    cards.forEach((card) => {
+      if (card.accessible || card.loading) return;
+      const hasDots = Object.values(card.devices || {}).some(
+        (list) => Array.isArray(list) && list.length
+      );
+      if (hasDots) return;
 
-        const row = await Cache.getStore(card.id);
-        if (!row || row.catalogHash !== hash) return;
+      const doc = storesMap[normalizeStoreId(card.id)];
+      if (!doc) return;
+      const status = statusFromStatusCacheDoc({ id: card.id, name: card.name }, doc, card.id);
+      if (!status) return;
 
-        const status = row.status ? { ...row.status } : statusFromCard(row.card);
-        if (!status) return;
-
-        reconcileStatusSummary(status, acId);
-        card.devices = buildDeviceDots(status, acId);
-        card.summary = status.summary || row.card?.summary || null;
-        card.timestamp = status.timestamp || row.card?.timestamp || null;
-        card.staleSnapshot = true;
-      })
-    );
+      reconcileStatusSummary(status, acId);
+      card.devices = buildDeviceDots(status, acId);
+      card.summary = status.summary || null;
+      card.timestamp = status.timestamp || null;
+      card.staleSnapshot = true;
+      applyStatusCacheAvailabilityMeta(card, doc);
+    });
   }
 
   async function loadAllStores(token, options = {}) {
     const { onUpdate } = options;
     let catalog = await loadCatalog();
     heartbeatPageStartedAt = Date.now();
-
-    dashboardCacheMap = options.force ? {} : await loadDashboardCacheMap(catalog);
-    catalog = mergeCatalogStores(catalog, dashboardCacheMap);
-    catalog = rebuildCatalogStores(catalog, dashboardCacheMap);
+    catalog = rebuildCatalogStores(catalog, null);
     heartbeatCatalog = catalog;
 
-    if (!options.force && Object.keys(dashboardCacheMap).length && onUpdate) {
+    function emitBootstrapPaint(cards, extra = {}) {
+      if (!onUpdate || !cards?.length) return;
       onUpdate(
-        assemblePayload(buildCardsFromCache(catalog, dashboardCacheMap), {
+        assemblePayload(cards, {
           fromCache: true,
           live: false,
           refreshing: true,
+          ...extra,
         })
       );
     }
 
-    const snapshot = await fetchHeartbeatsSnapshot();
+    const statusBulkPromise = fetchStoresStatusCacheBulk(catalog);
+    const heartbeatPromise = fetchHeartbeatsSnapshot();
+
+    statusBulkPromise
+      .then((bulk) => {
+        setLastStatusBulkMap(bulk);
+        if (!bulk?.available || !bulk?.stores) return;
+        emitBootstrapPaint(buildCardsFromStatusCacheBulk(catalog, bulk), {
+          source: 'firebase',
+          fromFirebase: true,
+        });
+      })
+      .catch(() => {});
+
+    const [snapshot, statusBulk] = await Promise.all([heartbeatPromise, statusBulkPromise]);
+    setLastStatusBulkMap(statusBulk);
     ingestHeartbeatSnapshot(snapshot);
 
-    let cards = (catalog.stores || []).map((meta) =>
-      buildCardFromHeartbeat(meta, catalog, dashboardCacheMap)
-    );
+    let cards = (catalog.stores || []).map((meta) => buildCardFromHeartbeat(meta, catalog));
 
-    const statusBulk = await fetchStoresStatusCacheBulk(catalog);
     enrichCardsFromStatusCache(cards, catalog, statusBulk);
     await validateStoresWithAgentProbe(cards, catalog, token);
-    await enrichOfflineCardsFromCache(cards, catalog);
+    enrichOfflineCardsFromCache(cards, catalog, statusBulk);
 
     const payload = assemblePayload(cards, {
       fromHeartbeat: true,
@@ -3067,13 +3145,11 @@
       heartbeatTimeoutSeconds: snapshot.timeout_seconds,
     });
 
-    schedulePersistDashboardCards(payload.stores, catalog);
     if (onUpdate) onUpdate(payload);
 
     startHeartbeatMonitor(
       catalog,
       (partial) => {
-        schedulePersistDashboardCards(partial.stores, catalog);
         if (onUpdate) onUpdate({ ...partial, live: true, fromCache: false });
       },
       token
@@ -3083,14 +3159,14 @@
 
   async function loadStoreCached(meta, catalog, token, options = {}) {
     const id = normalizeStoreId(meta.id);
-    const hash = Cache.catalogHash(catalog.stores || []);
     const force = options.force === true;
 
     if (!force) {
-      const row = await Cache.getStore(id);
-      if (row && !shouldRefreshStore(meta, row, hash, catalog, false)) {
-        const status = row.status ? { ...row.status } : statusFromCard(row.card);
-        return { card: normalizeCardAccess(row.card), status, fromCache: true };
+      const doc = await fetchStoreStatusCache(id, catalog);
+      const status = statusFromStatusCacheDoc(meta, doc, id);
+      if (doc?.hit && status?.summary?.total) {
+        const card = cardFromStatusCacheEntry(meta, doc, catalog);
+        return { card: card || buildStoreCard(meta, status, null, catalog, { fromCache: true }), status, fromCache: true };
       }
     }
 
@@ -3103,7 +3179,6 @@
     );
     if (status && !status.summary) attachSummary(status);
     const card = buildStoreCard(meta, status, error, catalog, { fromCache: false });
-    await Cache.setStore(id, card, hash, status);
     return { card, status, fromCache: false };
   }
 
