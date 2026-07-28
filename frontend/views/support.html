@@ -25,13 +25,18 @@
 
 <main class="main-content">
   <section class="stores-panel support-panel">
-    <div class="stores-panel__toolbar">
-      <div class="stores-panel__head">
-        <h2 class="stores-panel__title" id="supportPanelTitle">Base de conhecimento</h2>
-        <span class="stores-panel__meta" id="supportMeta">—</span>
+    <div class="support-toolbar">
+      <div class="support-toolbar__head">
+        <div class="stores-panel__head">
+          <h2 class="stores-panel__title" id="supportPanelTitle">Base de conhecimento</h2>
+          <span class="stores-panel__meta" id="supportMeta">—</span>
+        </div>
+        <button type="button" class="btn btn--primary btn--sm support-add-btn hidden" id="supportAddBtn">
+          + Adicionar procedimento
+        </button>
       </div>
       <div class="stores-panel__controls support-panel__controls">
-        <label class="search-field">
+        <label class="search-field support-toolbar__search">
           <span class="visually-hidden">Buscar procedimento</span>
           <span class="search-field__icon" aria-hidden="true">⌕</span>
           <input type="search" id="supportSearch" placeholder="Buscar maquineta, lavadora, pagamento…" autocomplete="off">
@@ -44,42 +49,54 @@
       </div>
     </div>
 
-    <div class="support-quick-actions" id="supportQuickActions">
-      <button type="button" class="btn btn--primary btn--sm support-add-btn hidden" id="supportAddBtn">
-        + Adicionar procedimento
-      </button>
-      <button type="button" class="btn btn--ghost btn--sm support-map-btn" id="supportMapBtn">
-        <img src="/fac/img/Icons/location.svg" alt="" class="support-map-btn__icon" width="18" height="18">
-        Mapa de lojas
-      </button>
-    </div>
-
-    <section class="support-chat" id="supportChat" aria-label="Assistente de suporte">
-      <header class="support-chat__head">
-        <div>
-          <h3 class="support-chat__title">Assistente IA</h3>
-          <p class="support-chat__subtitle">Respostas com base nos runbooks operacionais</p>
+    <div class="support-layout">
+      <aside class="support-layout__tools" aria-label="Ferramentas de suporte">
+        <div class="support-tools-intro">
+          <h3 class="support-tools-intro__title">Ferramentas</h3>
+          <p class="support-tools-intro__meta">Mapa e assistente para operação</p>
         </div>
-        <button type="button" class="btn btn--ghost btn--sm" id="supportChatClear">Limpar</button>
-      </header>
-      <div class="support-chat__messages" id="supportChatMessages">
-        <p class="support-chat__empty">Faça uma pergunta sobre equipamentos, pagamentos ou atendimento SAC.</p>
-      </div>
-      <div class="support-chat__suggestions" id="supportChatSuggestions" aria-label="Sugestões rápidas"></div>
-      <form class="support-chat__composer" id="supportChatForm">
-        <label class="support-chat__input-wrap">
-          <span class="visually-hidden">Pergunta para o assistente</span>
-          <textarea id="supportChatInput" rows="2" maxlength="4000" placeholder="Ex.: Maquineta offline no totem, o que fazer?"></textarea>
-        </label>
-        <button type="submit" class="btn btn--primary btn--sm" id="supportChatSend">Enviar</button>
-      </form>
-      <p class="support-chat__status" id="supportChatStatus">Carregando assistente…</p>
-    </section>
 
-    <div id="supportContent" class="support-content">
-      <div class="stores-empty-state">
-        <div class="spinner" aria-hidden="true"></div>
-        <p>Carregando runbooks…</p>
+        <button type="button" class="support-map-card" id="supportMapBtn">
+          <span class="support-map-card__visual" aria-hidden="true">
+            <img src="/fac/img/Icons/location.svg" alt="" class="support-map-card__icon" width="28" height="28">
+          </span>
+          <span class="support-map-card__copy">
+            <strong class="support-map-card__title">Mapa de lojas</strong>
+            <span class="support-map-card__meta">6 regiões · legenda integrada</span>
+          </span>
+          <span class="support-map-card__action" aria-hidden="true">Abrir</span>
+        </button>
+
+        <section class="support-chat" id="supportChat" aria-label="Assistente de suporte">
+          <header class="support-chat__head">
+            <div>
+              <h3 class="support-chat__title">Assistente IA</h3>
+              <p class="support-chat__subtitle">Respostas com base nos runbooks</p>
+            </div>
+            <button type="button" class="btn btn--ghost btn--sm" id="supportChatClear">Limpar</button>
+          </header>
+          <div class="support-chat__messages" id="supportChatMessages">
+            <p class="support-chat__empty">Faça uma pergunta sobre equipamentos, pagamentos ou atendimento SAC.</p>
+          </div>
+          <div class="support-chat__suggestions" id="supportChatSuggestions" aria-label="Sugestões rápidas"></div>
+          <form class="support-chat__composer" id="supportChatForm">
+            <label class="support-chat__input-wrap">
+              <span class="visually-hidden">Pergunta para o assistente</span>
+              <textarea id="supportChatInput" rows="2" maxlength="4000" placeholder="Ex.: Maquineta offline no totem, o que fazer?"></textarea>
+            </label>
+            <button type="submit" class="btn btn--primary btn--sm" id="supportChatSend">Enviar</button>
+          </form>
+          <p class="support-chat__status" id="supportChatStatus">Carregando assistente…</p>
+        </section>
+      </aside>
+
+      <div class="support-layout__main">
+        <div id="supportContent" class="support-content">
+          <div class="stores-empty-state">
+            <div class="spinner" aria-hidden="true"></div>
+            <p>Carregando runbooks…</p>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -224,23 +241,33 @@
 <div id="supportMapModal" class="credit-day-modal support-modal support-map-modal hidden" role="dialog" aria-modal="true" aria-labelledby="supportMapModalTitle">
   <div class="credit-day-modal__backdrop" data-support-map-dismiss tabindex="-1"></div>
   <div class="credit-day-modal__panel support-map-modal__panel">
-    <header class="credit-day-modal__head">
+    <header class="credit-day-modal__head support-map-modal__head">
       <div class="credit-day-modal__intro">
-        <span class="credit-day-modal__eyebrow">Localização</span>
+        <span class="credit-day-modal__eyebrow">Rede LAV60</span>
         <h2 id="supportMapModalTitle" class="credit-day-modal__title">Mapa de lojas</h2>
-        <p class="credit-day-modal__subtitle">Selecione a região para visualizar no painel</p>
+        <p class="credit-day-modal__subtitle" id="supportMapModalSubtitle">Selecione a região e consulte a legenda</p>
       </div>
       <button type="button" class="credit-day-modal__close" data-support-map-dismiss aria-label="Fechar">×</button>
     </header>
     <div class="credit-day-modal__body support-modal__body support-map-modal__body">
-      <div class="support-map-modal__regions filter-chips" id="supportMapRegions" role="tablist" aria-label="Regiões do mapa"></div>
-      <div class="support-map-modal__frame-wrap">
-        <iframe id="supportMapFrame" class="support-map-modal__frame" title="Mapa de lojas LAV60" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
+      <div class="support-map-modal__regions" id="supportMapRegions" role="tablist" aria-label="Regiões do mapa"></div>
+      <div class="support-map-modal__workspace">
+        <div class="support-map-modal__frame-wrap">
+          <iframe id="supportMapFrame" class="support-map-modal__frame" title="Mapa de lojas LAV60" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
+        </div>
+        <aside class="support-map-modal__sidebar" aria-label="Legenda e detalhes">
+          <div class="support-map-modal__sidebar-block">
+            <h3 class="support-map-modal__sidebar-title">Região selecionada</h3>
+            <p class="support-map-modal__states" id="supportMapStates">—</p>
+          </div>
+          <div class="support-map-modal__sidebar-block">
+            <h3 class="support-map-modal__sidebar-title">Legenda</h3>
+            <ul class="support-map-legend" id="supportMapLegend"></ul>
+            <p class="support-map-modal__legend-note">Pins e camadas adicionais podem aparecer no painel lateral do Google Maps.</p>
+          </div>
+          <a id="supportMapExternal" class="support-map-modal__external btn btn--ghost btn--sm" href="#" target="_blank" rel="noopener noreferrer">Abrir no Google Maps ↗</a>
+        </aside>
       </div>
-      <footer class="support-map-modal__foot">
-        <p class="support-map-modal__states" id="supportMapStates">—</p>
-        <a id="supportMapExternal" class="support-map-modal__external" href="#" target="_blank" rel="noopener noreferrer">Abrir no Google Maps ↗</a>
-      </footer>
     </div>
   </div>
 </div>

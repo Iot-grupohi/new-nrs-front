@@ -345,11 +345,11 @@
     const stats = $('supportHeaderStats');
     const iconWrap = $('supportHeaderIconWrap');
     const icon = $('supportHeaderIcon');
-    const quickActions = $('supportQuickActions');
+    const toolsAside = document.querySelector('.support-layout__tools');
     const state = viewState();
 
     header?.classList.remove('support-header--category', 'support-header--search');
-    quickActions?.classList.toggle('hidden', state !== 'hub');
+    toolsAside?.classList.toggle('support-layout__tools--compact', state !== 'hub');
 
     if (state === 'hub') {
       if (backLabel) backLabel.textContent = 'Painel LAV60';
@@ -711,14 +711,34 @@
     }
   }
 
+  function renderMapLegend() {
+    const list = $('supportMapLegend');
+    const items = catalog()?.MAP_LEGEND || [];
+    if (!list) return;
+    list.innerHTML = items.map((item) => (
+      `<li class="support-map-legend__item">
+        <span class="support-map-legend__swatch" style="background:${escapeHtml(item.color)}"></span>
+        <div class="support-map-legend__copy">
+          <strong>${escapeHtml(item.label)}</strong>
+          <span>${escapeHtml(item.description)}</span>
+        </div>
+      </li>`
+    )).join('');
+  }
+
   function renderMapModal() {
     const regions = catalog()?.MAP_REGIONS || [];
     const tabs = $('supportMapRegions');
     if (!regions.length || !tabs) return;
 
     tabs.innerHTML = regions.map((region) => (
-      `<button type="button" class="chip${region.id === activeMapRegionId ? ' chip--active' : ''}" data-support-map-region="${escapeHtml(region.id)}" role="tab" aria-selected="${region.id === activeMapRegionId ? 'true' : 'false'}">${escapeHtml(region.title)}</button>`
+      `<button type="button" class="support-map-region${region.id === activeMapRegionId ? ' support-map-region--active' : ''}" data-support-map-region="${escapeHtml(region.id)}" role="tab" aria-selected="${region.id === activeMapRegionId ? 'true' : 'false'}">
+        <span class="support-map-region__title">${escapeHtml(region.title.replace('Lojas do ', '').replace('Lojas de ', ''))}</span>
+        <span class="support-map-region__states">${escapeHtml(region.states)}</span>
+      </button>`
     )).join('');
+
+    renderMapLegend();
 
     const defaultRegion = regions.find((region) => region.id === activeMapRegionId) || regions[0];
     selectMapRegion(defaultRegion.id);
@@ -738,12 +758,15 @@
     const statesEl = $('supportMapStates');
     if (statesEl) statesEl.textContent = region.states;
 
+    const subtitleEl = $('supportMapModalSubtitle');
+    if (subtitleEl) subtitleEl.textContent = region.title;
+
     const externalEl = $('supportMapExternal');
     if (externalEl) externalEl.href = region.url;
 
     document.querySelectorAll('[data-support-map-region]').forEach((btn) => {
       const active = btn.dataset.supportMapRegion === region.id;
-      btn.classList.toggle('chip--active', active);
+      btn.classList.toggle('support-map-region--active', active);
       btn.setAttribute('aria-selected', active ? 'true' : 'false');
     });
   }

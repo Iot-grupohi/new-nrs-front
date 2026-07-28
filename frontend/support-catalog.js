@@ -49,6 +49,34 @@
     embedUrl: `https://www.google.com/maps/d/embed?mid=${encodeURIComponent(region.mid)}`,
   }));
 
+  const MAP_LEGEND = [
+    {
+      color: '#22c55e',
+      label: 'Loja operacional',
+      description: 'Unidade em funcionamento normal',
+    },
+    {
+      color: '#ef4444',
+      label: 'Loja suspensa',
+      description: 'Operação temporariamente interrompida',
+    },
+    {
+      color: '#f59e0b',
+      label: 'Em implantação',
+      description: 'Obra, montagem ou abertura em andamento',
+    },
+    {
+      color: '#3b82f6',
+      label: 'Ponto mapeado',
+      description: 'Localização cadastrada no mapa regional',
+    },
+    {
+      color: '#a855f7',
+      label: 'Outros status',
+      description: 'Consulte detalhes no pin ou no Google Maps',
+    },
+  ];
+
   const BASE_CATEGORIES = [
     {
       id: 'maquineta',
@@ -507,6 +535,7 @@
 
   window.Lav60SupportCatalog = {
     MAP_REGIONS,
+    MAP_LEGEND,
     get CATEGORIES() { return CATEGORIES; },
     BASE_CATEGORIES,
     findProcedure,
