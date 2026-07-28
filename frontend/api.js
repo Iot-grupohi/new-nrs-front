@@ -1628,10 +1628,11 @@
   }
 
   function buildPlaceholderCard(meta, catalog) {
+    const suspended = catalogSuspendedIdSet(catalog).has(normalizeStoreId(meta?.id));
     return buildStoreCard(meta, null, null, catalog, {
       accessible: false,
-      state: 'unknown',
-      loading: true,
+      state: suspended ? 'suspended' : 'unknown',
+      loading: suspended ? false : true,
       error: null,
     });
   }
@@ -1692,26 +1693,32 @@
   }
 
   function buildDashboard(cards) {
-    const ready = cards.filter((c) => !c.loading);
+    const all = cards || [];
+    const ready = all.filter((c) => !c.loading);
     const connected = ready.filter((c) => c.accessible);
     const suspendedIdSet = catalogSuspendedIdSet(heartbeatCatalog);
-    const storesSuspendedCards = ready.filter((c) =>
+    const storesSuspendedCards = all.filter((c) =>
       suspendedIdSet.has(normalizeStoreId(c.id))
     );
+    const suspendedCount = Math.max(
+      storesSuspendedCards.length,
+      Number(heartbeatCatalog?.suspended_count) || 0,
+      panelCatalogSuspendedIds.size
+    );
     const heartbeatOnlineStores = ready.filter(
-      (c) => !isStoreCardSuspended(c, heartbeatCatalog) && isCardAgentReachable(c)
+      (c) => !suspendedIdSet.has(normalizeStoreId(c.id)) && isCardAgentReachable(c)
     );
     const heartbeatOfflineStores = ready.filter(
-      (c) => !isStoreCardSuspended(c, heartbeatCatalog) && !isCardAgentReachable(c)
+      (c) => !suspendedIdSet.has(normalizeStoreId(c.id)) && !isCardAgentReachable(c)
     );
     const unreachable = ready.filter(
-      (c) => !isStoreCardSuspended(c, heartbeatCatalog) && !c.accessible
+      (c) => !suspendedIdSet.has(normalizeStoreId(c.id)) && !c.accessible
     );
     const allDevicesOffline = connected.filter(
-      (c) => !isStoreCardSuspended(c, heartbeatCatalog) && (c.summary?.online ?? 0) <= 0
+      (c) => !suspendedIdSet.has(normalizeStoreId(c.id)) && (c.summary?.online ?? 0) <= 0
     );
     const partialCount = connected.filter((c) => {
-      if (isStoreCardSuspended(c, heartbeatCatalog) || !isCardAgentReachable(c)) return false;
+      if (suspendedIdSet.has(normalizeStoreId(c.id)) || !isCardAgentReachable(c)) return false;
       const on = c.summary?.online ?? 0;
       const tot = c.summary?.total ?? 0;
       return on > 0 && on < tot;
@@ -1746,7 +1753,7 @@
         summary_online: card.summary?.online ?? 0,
         summary_total: card.summary?.total ?? 0,
       };
-      if (isStoreCardSuspended(card, heartbeatCatalog)) {
+      if (suspendedIdSet.has(normalizeStoreId(card.id))) {
         storesSuspendedEvents.push({
           ...storeEntry,
           reason: card.storeNotice || STORE_SUSPENDED_NOTICE,
@@ -1849,8 +1856,8 @@
         connected: connected.length,
         offline: heartbeatOfflineStores.length,
         partial: partialCount,
-        suspended: storesSuspendedCards.length,
-        pending: cards.filter((c) => c.loading).length,
+        suspended: suspendedCount,
+        pending: all.filter((c) => c.loading).length,
         unreachable: unreachable.length,
         devices_all_offline: allDevicesOffline.length,
       },
@@ -2189,7 +2196,55 @@
       }
     });
     panelCatalogSuspendedIds = set;
+    try {
+      if (set.size) {
+        sessionStorage.setItem(
+          'lav60:catalog:suspended-ids',
+          JSON.stringify([...set].sort())
+        );
+      }
+    } catch {
+      /* private mode */
+    }
   }
+
+  function restoreCatalogSuspension() {
+    try {
+      const raw = sessionStorage.getItem('lav60:catalog:suspended-ids');
+      if (!raw) return;
+      const ids = JSON.parse(raw);
+      if (!Array.isArray(ids) || !ids.length) return;
+      const set = new Set(panelCatalogSuspendedIds);
+      ids.forEach((id) => {
+        const sid = normalizeStoreId(id);
+        if (sid) set.add(sid);
+      });
+      panelCatalogSuspendedIds = set;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Garante lav60_status suspensa no catálogo após merge com heartbeat. */
+  function applyCatalogSuspensionMeta(catalog) {
+    if (!catalog || typeof catalog !== 'object') return catalog;
+    rememberCatalogSuspension(catalog);
+    if (!panelCatalogSuspendedIds.size) return catalog;
+    catalog.suspended_store_ids = [...panelCatalogSuspendedIds].sort();
+    catalog.suspended_count = panelCatalogSuspendedIds.size;
+    catalog.stores = (catalog.stores || []).map((store) => {
+      const sid = normalizeStoreId(store.id);
+      if (!panelCatalogSuspendedIds.has(sid)) return store;
+      return { ...store, lav60_status: 'suspended' };
+    });
+    return catalog;
+  }
+
+  function syncCatalogSuspension(catalog) {
+    return applyCatalogSuspensionMeta(catalog);
+  }
+
+  restoreCatalogSuspension();
 
   function catalogStoreMeta(catalog, storeId) {
     const sid = normalizeStoreId(storeId);
@@ -2204,10 +2259,13 @@
   }
 
   function reapplyStoreCardPolicy(card, catalog) {
-    if (!card || card.loading) return card;
+    if (!card) return card;
     const cat = catalog || heartbeatCatalog;
+    const sid = normalizeStoreId(card.id);
+    const catalogSuspended = sid && catalogSuspendedIdSet(cat).has(sid);
+    if (card.loading && !catalogSuspended) return card;
     const meta = catalogStoreMeta(cat, card.id);
-    const hb = heartbeatState.get(normalizeStoreId(card.id));
+    const hb = heartbeatState.get(sid);
     return withStoreCardPolicy(card, meta, hb, cat);
   }
 
@@ -2550,8 +2608,7 @@
 
   function emitHeartbeatUpdate(extra = {}) {
     if (!heartbeatCatalog || !heartbeatOnUpdate) return;
-    heartbeatCatalog = rebuildCatalogStores(heartbeatCatalog, null);
-    rememberCatalogSuspension(heartbeatCatalog);
+    heartbeatCatalog = syncCatalogSuspension(rebuildCatalogStores(heartbeatCatalog, null));
     const payload = buildPayloadFromHeartbeats(heartbeatCatalog, extra);
     heartbeatOnUpdate(payload);
   }
@@ -2875,8 +2932,7 @@
     }
     if (!res.ok) throw new Error('Configuração do painel indisponível');
     const catalog = await res.json();
-    rememberCatalogSuspension(catalog);
-    return catalog;
+    return syncCatalogSuspension(catalog);
   }
 
   function storeMetaFromId(storeId, entry = null) {
@@ -2949,7 +3005,7 @@
     });
     const stores = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
     const merged = { ...(catalog || {}), stores };
-    return merged;
+    return syncCatalogSuspension(merged);
   }
 
   async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
@@ -3173,8 +3229,7 @@
     const loadGeneration = ++storesLoadGeneration;
     let catalog = await loadCatalog({ force: true });
     heartbeatPageStartedAt = Date.now();
-    catalog = rebuildCatalogStores(catalog, null);
-    rememberCatalogSuspension(catalog);
+    catalog = syncCatalogSuspension(rebuildCatalogStores(catalog, null));
     heartbeatCatalog = catalog;
 
     function emitBootstrapPaint(cards, extra = {}) {
