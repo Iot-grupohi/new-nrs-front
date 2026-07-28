@@ -711,21 +711,6 @@
     }
   }
 
-  function renderMapLegend() {
-    const list = $('supportMapLegend');
-    const items = catalog()?.MAP_LEGEND || [];
-    if (!list) return;
-    list.innerHTML = items.map((item) => (
-      `<li class="support-map-legend__item">
-        <span class="support-map-legend__swatch" style="background:${escapeHtml(item.color)}"></span>
-        <div class="support-map-legend__copy">
-          <strong>${escapeHtml(item.label)}</strong>
-          <span>${escapeHtml(item.description)}</span>
-        </div>
-      </li>`
-    )).join('');
-  }
-
   function renderMapModal() {
     const regions = catalog()?.MAP_REGIONS || [];
     const tabs = $('supportMapRegions');
@@ -737,8 +722,6 @@
         <span class="support-map-region__states">${escapeHtml(region.states)}</span>
       </button>`
     )).join('');
-
-    renderMapLegend();
 
     const defaultRegion = regions.find((region) => region.id === activeMapRegionId) || regions[0];
     selectMapRegion(defaultRegion.id);

@@ -1255,56 +1255,6 @@ body.support-modal-open {
   color: var(--text);
 }
 
-.support-map-legend {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-}
-
-.support-map-legend__item {
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr);
-  gap: 0.55rem;
-  align-items: start;
-}
-
-.support-map-legend__swatch {
-  width: 14px;
-  height: 14px;
-  margin-top: 0.15rem;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
-}
-
-.support-map-legend__copy {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  min-width: 0;
-}
-
-.support-map-legend__copy strong {
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-
-.support-map-legend__copy span {
-  font-size: 0.72rem;
-  color: var(--muted);
-  line-height: 1.35;
-}
-
-.support-map-modal__legend-note {
-  margin: 0;
-  font-size: 0.7rem;
-  line-height: 1.4;
-  color: var(--muted);
-}
-
 .support-map-modal__external {
   margin-top: auto;
   justify-content: center;

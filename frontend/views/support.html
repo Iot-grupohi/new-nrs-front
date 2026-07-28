@@ -62,7 +62,7 @@
           </span>
           <span class="support-map-card__copy">
             <strong class="support-map-card__title">Mapa de lojas</strong>
-            <span class="support-map-card__meta">6 regiões · legenda integrada</span>
+            <span class="support-map-card__meta">6 regiões · Google Maps</span>
           </span>
           <span class="support-map-card__action" aria-hidden="true">Abrir</span>
         </button>
@@ -245,7 +245,7 @@
       <div class="credit-day-modal__intro">
         <span class="credit-day-modal__eyebrow">Rede LAV60</span>
         <h2 id="supportMapModalTitle" class="credit-day-modal__title">Mapa de lojas</h2>
-        <p class="credit-day-modal__subtitle" id="supportMapModalSubtitle">Selecione a região e consulte a legenda</p>
+        <p class="credit-day-modal__subtitle" id="supportMapModalSubtitle">Selecione a região para visualizar no painel</p>
       </div>
       <button type="button" class="credit-day-modal__close" data-support-map-dismiss aria-label="Fechar">×</button>
     </header>
@@ -255,15 +255,10 @@
         <div class="support-map-modal__frame-wrap">
           <iframe id="supportMapFrame" class="support-map-modal__frame" title="Mapa de lojas LAV60" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen></iframe>
         </div>
-        <aside class="support-map-modal__sidebar" aria-label="Legenda e detalhes">
+        <aside class="support-map-modal__sidebar" aria-label="Detalhes da região">
           <div class="support-map-modal__sidebar-block">
             <h3 class="support-map-modal__sidebar-title">Região selecionada</h3>
             <p class="support-map-modal__states" id="supportMapStates">—</p>
-          </div>
-          <div class="support-map-modal__sidebar-block">
-            <h3 class="support-map-modal__sidebar-title">Legenda</h3>
-            <ul class="support-map-legend" id="supportMapLegend"></ul>
-            <p class="support-map-modal__legend-note">Pins e camadas adicionais podem aparecer no painel lateral do Google Maps.</p>
           </div>
           <a id="supportMapExternal" class="support-map-modal__external btn btn--ghost btn--sm" href="#" target="_blank" rel="noopener noreferrer">Abrir no Google Maps ↗</a>
         </aside>

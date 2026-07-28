@@ -35,7 +35,7 @@
     suporte: {
       nav: 'suporte',
       title: 'LAV60 — Suporte / Runbooks',
-      view: 'views/support.html?v=8',
+      view: 'views/support.html?v=9',
       pageClass: 'page-records page-support',
     },
     'monitor-sites': {
