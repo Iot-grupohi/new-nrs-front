@@ -1141,30 +1141,40 @@ body.support-modal-open {
 .support-map-modal__panel {
   max-width: min(1180px, 98vw);
   width: min(1180px, 98vw);
+  max-height: min(92vh, 900px);
 }
 
 .support-map-modal__head {
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
 
+.support-map-modal__regions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.75rem 1rem 0.35rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  background: var(--surface-modal-head);
+}
+
 .support-map-modal__body {
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
-  padding-top: 0.5rem;
-}
-
-.support-map-modal__regions {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 0.45rem;
+  gap: 0;
+  padding-top: 0.75rem;
+  max-height: none;
+  overflow: visible;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .support-map-region {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  min-width: 0;
+  min-width: 118px;
+  flex: 1 1 118px;
+  max-width: calc(16.666% - 0.4rem);
   padding: 0.62rem 0.7rem;
   border-radius: 0.75rem;
   border: 1px solid rgba(148, 163, 184, 0.16);
@@ -1203,6 +1213,8 @@ body.support-modal-open {
   grid-template-columns: minmax(0, 1fr) 260px;
   gap: 0.85rem;
   align-items: stretch;
+  min-height: 420px;
+  overflow: hidden;
 }
 
 .support-map-modal__frame-wrap {
@@ -1296,7 +1308,12 @@ body.support-modal-open {
   }
 
   .support-map-modal__regions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-inline: 0.75rem;
+  }
+
+  .support-map-region {
+    max-width: calc(50% - 0.25rem);
+    flex-basis: calc(50% - 0.25rem);
   }
 
   .support-map-modal__workspace {

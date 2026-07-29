@@ -774,9 +774,11 @@
 
     $('supportMapBtn')?.addEventListener('click', renderMapModal, { signal });
 
-    $('supportMapModal')?.addEventListener('click', (event) => {
+    $('supportMapRegions')?.addEventListener('click', (event) => {
       const regionBtn = event.target.closest('[data-support-map-region]');
       if (!regionBtn) return;
+      event.preventDefault();
+      event.stopPropagation();
       selectMapRegion(regionBtn.dataset.supportMapRegion);
     }, { signal });
 
