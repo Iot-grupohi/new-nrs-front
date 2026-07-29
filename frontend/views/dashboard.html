@@ -62,6 +62,31 @@
     </div>
   </section>
 
+  <section class="dashboard-section dashboard-section--map" aria-label="Mapa das lojas" id="dashboardStoreMap">
+    <header class="dashboard-section__head dashboard-section__head--split">
+      <div>
+        <h2 class="dashboard-section__title">Mapa das lojas</h2>
+        <p class="dashboard-section__meta" id="dashboardStoreMapMeta">Carregando localização…</p>
+      </div>
+      <div class="filter-chips dashboard-store-map__filters" role="tablist" aria-label="Filtrar mapa">
+        <button type="button" class="chip chip--active" data-dashboard-map-filter="all">Todas</button>
+        <button type="button" class="chip" data-dashboard-map-filter="online">Online</button>
+        <button type="button" class="chip" data-dashboard-map-filter="offline">Offline</button>
+        <button type="button" class="chip" data-dashboard-map-filter="partial">Parciais</button>
+        <button type="button" class="chip" data-dashboard-map-filter="suspended">Suspensas</button>
+      </div>
+    </header>
+    <div class="dashboard-store-map">
+      <div class="dashboard-store-map__legend" aria-hidden="true">
+        <span><i style="background:#22c55e"></i>Online</span>
+        <span><i style="background:#f97316"></i>Offline</span>
+        <span><i style="background:#eab308"></i>Parcial</span>
+        <span><i style="background:#64748b"></i>Suspensa</span>
+      </div>
+      <div class="dashboard-store-map__canvas" id="dashboardStoreMapCanvas" role="application" aria-label="Mapa interativo das lojas"></div>
+    </div>
+  </section>
+
   <section class="dashboard-section" aria-label="Agentes e equipamentos">
     <header class="dashboard-section__head">
       <h2 class="dashboard-section__title">Agentes e equipamentos</h2>

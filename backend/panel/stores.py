@@ -13,6 +13,8 @@ from fastapi.responses import JSONResponse, Response
 from panel.catalog import _catalog_settings
 from panel.gateway import _gateway_verify_cache
 from panel import status_store
+from panel.store_map import build_map_locations
+from panel import stores_cache
 
 router = APIRouter(prefix="/api/stores", tags=["panel-stores"])
 
@@ -78,7 +80,7 @@ def register_stores(
     async def stores_status_cache_bulk() -> dict[str, Any]:
         timeout = 60
         try:
-            timeout = max(15, int(_catalog_settings().get("heartbeat_timeout_seconds") or 60))
+            timeout = max(15, int(_catalog_settings().get("heartbeat_timeout_seconds") or 120))
         except (TypeError, ValueError):
             pass
         return status_store.list_store_cache(timeout_seconds=timeout)
@@ -91,7 +93,7 @@ def register_stores(
     async def store_status_cache(store_id: str) -> dict[str, Any]:
         timeout = 60
         try:
-            timeout = max(15, int(_catalog_settings().get("heartbeat_timeout_seconds") or 60))
+            timeout = max(15, int(_catalog_settings().get("heartbeat_timeout_seconds") or 120))
         except (TypeError, ValueError):
             pass
         return status_store.get_store_cache(store_id, timeout_seconds=timeout)
@@ -129,9 +131,9 @@ def register_stores(
                     entry: dict[str, Any] = {
                         "status": res.status_code,
                         "reachable": res.status_code < 400,
-                        "definite_offline": res.status_code in (404, 401, 403),
-                        "transient_error": res.status_code in (502, 503, 504, 530)
-                        or res.status_code >= 500,
+                        "definite_offline": res.status_code in (404, 401, 403, 530),
+                        "transient_error": res.status_code in (502, 503, 504)
+                        or (res.status_code >= 500 and res.status_code != 530),
                     }
                     if res.status_code < 400:
                         try:
@@ -266,5 +268,24 @@ def register_stores(
                 raise HTTPException(502, f"MQTT Gateway indisponível: {exc}") from exc
 
             return _proxy_response(gateway_response)
+
+    @router.get("/map-locations")
+    async def store_map_locations() -> dict[str, Any]:
+        from panel.catalog import build_catalog
+
+        from panel import deps
+
+        catalog = await build_catalog(deps.upstream_get)
+        stores_meta = catalog.get("stores") or []
+        cached = stores_cache.read_catalog_file()
+        details_by_id = stores_cache.stores_by_id(cached.get("stores") or []) if cached else {}
+        locations = build_map_locations(stores_meta, details_by_id)
+        located = sum(1 for row in locations if row.get("state"))
+        return {
+            "stores": locations,
+            "count": len(locations),
+            "located_count": located,
+            "details_cached": bool(details_by_id),
+        }
 
     return router

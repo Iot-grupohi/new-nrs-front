@@ -142,10 +142,13 @@ def _parse_store_row(
     attrs = data.get("attributes") or data
     code = str(attrs.get("code") or data.get("code") or "").strip().lower()
     city = str(attrs.get("city") or "").strip()
+    state = str(attrs.get("state") or (cnpj_info or {}).get("uf") or "").strip().upper()[:2]
     return {
         "id": code,
         "store_code": code.upper(),
         "name": attrs.get("name") or code.upper(),
+        "city": city or str((cnpj_info or {}).get("municipio") or "").strip(),
+        "state": state,
         "address": (
             str(cnpj_info.get("address") or "").strip()
             if cnpj_info and cnpj_info.get("address")

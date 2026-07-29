@@ -2271,6 +2271,9 @@
     allStores = data.stores || [];
     renderDashboard(data.dashboard || {}, data);
     filterAndRender();
+    if (currentPageMode === 'dashboard') {
+      window.Lav60DashboardStoreMap?.update?.(allStores);
+    }
   }
 
   async function loadStores(options = {}) {
@@ -2349,6 +2352,7 @@
     pageAbort = null;
     closeAgentKpiModal();
     window.Lav60GatewayOverview?.destroy();
+    window.Lav60DashboardStoreMap?.destroy?.();
     currentPageMode = null;
   }
 
@@ -2360,6 +2364,17 @@
       onStoreAction: (storeId) => {
         window.location.href = gatewayPageHref(storeId);
       },
+    });
+  }
+
+  function initDashboardStoreMapPanel(signal) {
+    if (currentPageMode !== 'dashboard' || !$('dashboardStoreMap') || !panelFetch) return;
+    void window.Lav60DashboardStoreMap?.init?.({
+      panelFetch,
+      signal,
+      resolveStoreDisplayState,
+      storePageHref,
+      getStores: () => allStores,
     });
   }
 
@@ -2388,12 +2403,16 @@
       loadSitesDashboardSummary();
       initInfraDashboardPanel(signal);
       initSitesDashboardPanel(signal);
+      initDashboardStoreMapPanel(signal);
     }
 
     if (storesBootstrapped && allStores.length) {
       renderDashboard(lastPayload?.dashboard || {}, lastPayload || {});
       filterAndRender();
-      if (mode === 'dashboard') initGatewayDashboardPanel();
+      if (mode === 'dashboard') {
+        initGatewayDashboardPanel();
+        initDashboardStoreMapPanel(pageAbort?.signal);
+      }
       return;
     }
 
@@ -2403,7 +2422,10 @@
         catalogConfig = cat;
         await loadStores();
         storesBootstrapped = true;
-        if (mode === 'dashboard') initGatewayDashboardPanel();
+        if (mode === 'dashboard') {
+        initGatewayDashboardPanel();
+        initDashboardStoreMapPanel(pageAbort?.signal);
+      }
       } catch (e) {
         const grid = $('storesGrid');
         if (grid) {
