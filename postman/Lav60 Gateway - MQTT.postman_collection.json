@@ -1,8 +1,8 @@
 {
   "info": {
-    "_postman_id": "5bd73a84-c504-4352-a84e-52d04aa301ec",
+    "_postman_id": "19c76d95-4d74-41f8-a98a-a70e661146eb",
     "name": "Lav60 Gateway - MQTT",
-    "description": "API de controle remoto via **MQTT** — lavadoras, secadoras, ar-condicionado e dosadoras.\n\n**Via servidor unificado:** `{{serverUrl}}/gateway/{{storeCode}}/...`  \n**Direto:** `https://gateway.lav60.com` · [Swagger](https://gateway.lav60.com/docs)\n\nDocumentação: `docs/guides/controle-remoto-gateway.md`\n\n## Variáveis\n| Variável | Exemplo | Descrição |\n|----------|---------|------------|\n| `serverUrl` | `http://127.0.0.1:3100` | Servidor local unificado |\n| `storeCode` | `pb05` | Código da loja (minúsculas) |\n| `token` | `GATEWAY_API_TOKEN` | Header `X-Token` |\n| `washerId` / `dryerId` / `doserId` | `321` / `765` / `432` | IDs numéricos |\n\n## Autenticação\nTodos os endpoints **exceto** `GET /` exigem:\n```\nX-Token: {{token}}\n```\n\nPOST com body JSON exige também `Content-Type: application/json`.",
+    "description": "API de controle remoto via **MQTT (GET-02)** em `https://gateway.lav60.com`.\n\nLavadoras, secadoras, ar-condicionado, dosadoras e LED.\n\n[Swagger](https://gateway.lav60.com/docs)\n\n## URL base\n\n```\n{{gatewayBaseUrl}}/{storeCode}/...\n```\n\nExemplo: `POST https://gateway.lav60.com/pb05/led/on`\n\n## Variáveis\n\n| Variável | Padrão | Descrição |\n|----------|--------|------------|\n| `gatewayBaseUrl` | `https://gateway.lav60.com` | Host GET-02 |\n| `storeCode` | `pb05` | Código da loja (minúsculas) |\n| `token` | — | Header `X-Token` |\n| `washerId` / `dryerId` / `doserId` | IDs numéricos | Equipamentos |\n\n## Autenticação\n\nTodos os endpoints **exceto** `GET /` exigem `X-Token: {{token}}`.\n\n## Atenção\n\n- **Não** use `/gateway/` no path — isso retorna 404. O correto é `/{store}/led/on`, não `/gateway/{store}/led/on`.\n- `GET /{store}/status` (todos) dispara ping MQTT em **todos** os equipamentos — o portal evita esse endpoint.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "6806954"
   },
@@ -19,9 +19,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{serverUrl}}/gateway/",
+              "raw": "{{gatewayBaseUrl}}/",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 ""
@@ -33,17 +33,70 @@
       ]
     },
     {
+      "name": "LED",
+      "item": [
+        {
+          "name": "POST /{store}/led/on",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/led/on",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "led",
+                "on"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /{store}/led/off",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/led/off",
+              "host": [
+                "{{gatewayBaseUrl}}"
+              ],
+              "path": [
+                "{{storeCode}}",
+                "led",
+                "off"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Status",
       "item": [
         {
-          "name": "GET /{store}/status (todos)",
+          "name": "GET /{store}/status (todos) ⚠️ ping all MQTT",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/status",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/status",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -59,9 +112,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/status/washer/{{washerId}}",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/status/washer/{{washerId}}",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -79,9 +132,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/status/dryer/{{dryerId}}",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/status/dryer/{{dryerId}}",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -99,9 +152,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/status/doser/{{doserId}}",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/status/doser/{{doserId}}",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -119,111 +172,14 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/status/ac",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/status/ac",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
                 "status",
                 "ac"
-              ]
-            }
-          },
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "LED",
-      "item": [
-        {
-          "name": "POST /{store}/led/on",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/led/on",
-              "host": [
-                "{{serverUrl}}/gateway"
-              ],
-              "path": [
-                "{{storeCode}}",
-                "led",
-                "on"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /{store}/led/off",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/led/off",
-              "host": [
-                "{{serverUrl}}/gateway"
-              ],
-              "path": [
-                "{{storeCode}}",
-                "led",
-                "off"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /{store}/led (command ON)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"command\": \"ON\"\n}"
-            },
-            "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/led",
-              "host": [
-                "{{serverUrl}}/gateway"
-              ],
-              "path": [
-                "{{storeCode}}",
-                "led"
-              ]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "POST /{store}/led (command OFF)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"command\": \"OFF\"\n}"
-            },
-            "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/led",
-              "host": [
-                "{{serverUrl}}/gateway"
-              ],
-              "path": [
-                "{{storeCode}}",
-                "led"
               ]
             }
           },
@@ -240,9 +196,9 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/washer/{{washerId}}",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/washer/{{washerId}}",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -268,9 +224,9 @@
               "raw": "{\n  \"am\": \"am01-1\"\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/washer/{{washerId}}",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/washer/{{washerId}}",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -296,9 +252,9 @@
               "raw": "{\n  \"minutes\": 15\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/dryer/{{dryerId}}",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/dryer/{{dryerId}}",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -324,9 +280,9 @@
               "raw": "{\n  \"minutes\": 30\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/dryer/{{dryerId}}",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/dryer/{{dryerId}}",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -352,9 +308,9 @@
               "raw": "{\n  \"minutes\": 45\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/dryer/{{dryerId}}",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/dryer/{{dryerId}}",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -380,9 +336,9 @@
               "raw": "{\n  \"temperature\": \"22\"\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/ac",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/ac",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -407,9 +363,9 @@
               "raw": "{\n  \"temperature\": \"18\"\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/ac",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/ac",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -434,9 +390,9 @@
               "raw": "{\n  \"temperature\": \"off\"\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/ac",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/ac",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -466,9 +422,9 @@
               "raw": "{\n  \"type\": \"softener1\"\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -494,9 +450,9 @@
               "raw": "{\n  \"type\": \"am01-1\"\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -522,9 +478,9 @@
               "raw": "{\n  \"type\": \"rele1on\"\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -550,9 +506,9 @@
               "raw": "{\n  \"number\": 2\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/amaciante",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}/amaciante",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -579,9 +535,9 @@
               "raw": "{\n  \"endpoint\": \"softener2\"\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/amaciante",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}/amaciante",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -608,9 +564,9 @@
               "raw": "{\n  \"endpoint\": \"am02-1\"\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/dosagem",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}/dosagem",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -637,9 +593,9 @@
               "raw": "{\n  \"pump\": 1\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/bomba",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}/bomba",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -666,9 +622,9 @@
               "raw": "{\n  \"pump\": 2\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/bomba",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}/bomba",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -695,9 +651,9 @@
               "raw": "{\n  \"pump\": 3\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/bomba",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}/bomba",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -715,9 +671,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/consulta",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}/consulta",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -735,9 +691,9 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/device-status",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}/device-status",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -764,9 +720,9 @@
               "raw": "{\n  \"rele\": 1,\n  \"seconds\": 11\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/settime",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}/settime",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -793,9 +749,9 @@
               "raw": "{\n  \"seconds\": 11\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/settime/sabao",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}/settime/sabao",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -823,9 +779,9 @@
               "raw": "{\n  \"seconds\": 13\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/settime/floral",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}/settime/floral",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -853,9 +809,9 @@
               "raw": "{\n  \"seconds\": 12\n}"
             },
             "url": {
-              "raw": "{{serverUrl}}/gateway/{{storeCode}}/doser/{{doserId}}/settime/sport",
+              "raw": "{{gatewayBaseUrl}}/{{storeCode}}/doser/{{doserId}}/settime/sport",
               "host": [
-                "{{serverUrl}}/gateway"
+                "{{gatewayBaseUrl}}"
               ],
               "path": [
                 "{{storeCode}}",
@@ -917,8 +873,8 @@
   ],
   "variable": [
     {
-      "key": "serverUrl",
-      "value": "http://127.0.0.1:3100"
+      "key": "gatewayBaseUrl",
+      "value": "https://gateway.lav60.com"
     },
     {
       "key": "storeCode",

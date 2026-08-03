@@ -3,8 +3,9 @@
     <nav class="page-header__nav" aria-label="Navegação da página">
       <button type="button" class="page-header__back" data-page-back="dashboard">← Painel LAV60</button>
     </nav>
+    <p class="agent-page__eyebrow">Infraestrutura</p>
     <h1 class="page-header__title">VPS</h1>
-    <p class="page-header__subtitle" id="infraMetricsSubtitle">DigitalOcean</p>
+    <p class="page-header__subtitle" id="infraMetricsSubtitle">DigitalOcean · métricas em tempo real</p>
   </div>
   <div class="page-header__actions page-header__actions--infra">
     <label class="infra-period-select" for="infraMetricsPeriod">
@@ -18,7 +19,7 @@
 <main class="main-content main-content--infra-metrics">
   <section class="records-audit-banner hidden" id="infraMetricsBanner" role="alert"></section>
 
-  <div class="infra-vps-toolbar panel">
+  <div class="infra-vps-toolbar panel portal-panel-card">
     <div class="infra-vps-toolbar__row">
       <div class="infra-vps-tabs" id="infraVpsTabs" role="tablist" aria-label="VPS cadastradas"></div>
       <form class="infra-vps-add" id="infraVpsAddForm">

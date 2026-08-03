@@ -389,6 +389,7 @@
       resolveDeviceOnline,
       machineStatusImpliesReachable,
       machineModelLabel,
+      machineDisplayTitle,
     } = Lav60;
 
     function canOperateMachine(meta, online) {
@@ -403,15 +404,30 @@
 
     function deviceStatusHint(ctx) {
       if (ctx.probing) return 'Verificando conexão…';
+      if (ctx.awaitingProbe) return 'Aguardando verificação MQTT';
       if (!ctx.online) return 'Sem conexão na rede';
       if (!ctx.operable) return ctx.statusInfo.label;
       return '';
     }
 
     function resolveStatusInfo(online, meta, options = {}) {
-      if (options.probing || online === null) {
+      if (options.probing) {
         return {
-          label: options.probing ? 'Verificando…' : 'Não verificado',
+          label: 'Verificando…',
+          tone: 'checking',
+          pillClass: 'pill--warn',
+        };
+      }
+      if (options.requireProbeOnline && online === null) {
+        return {
+          label: options.pendingLabel || 'Aguardando',
+          tone: 'checking',
+          pillClass: 'pill--warn',
+        };
+      }
+      if (online === null) {
+        return {
+          label: 'Não verificado',
           tone: 'checking',
           pillClass: 'pill--warn',
         };
@@ -420,16 +436,31 @@
     }
 
     function createDeviceCard(id, online, fillActions, meta, options = {}) {
+      const requireProbe = options.requireProbeOnline === true;
       let effectivelyOnline;
-      if (online === true) effectivelyOnline = true;
-      else if (online === false) effectivelyOnline = false;
-      else {
+      if (requireProbe) {
+        effectivelyOnline = online === true;
+      } else if (online === true) {
+        effectivelyOnline = true;
+      } else if (online === false) {
+        effectivelyOnline = false;
+      } else {
         effectivelyOnline =
           resolveDeviceOnline(null, meta?.id, meta) || machineStatusImpliesReachable(meta);
       }
-      const statusInfo = resolveStatusInfo(effectivelyOnline, meta, options);
-      const operable = canOperateMachine(meta, effectivelyOnline) && !options.probing;
+      const statusOnline = requireProbe
+        ? online === true
+          ? true
+          : online === false
+            ? false
+            : null
+        : effectivelyOnline;
+      const statusInfo = resolveStatusInfo(statusOnline, meta, options);
+      const operable = requireProbe
+        ? online === true && canOperateMachine(meta, true) && !options.probing
+        : canOperateMachine(meta, effectivelyOnline) && !options.probing;
       const modelLabel = machineModelLabel(meta);
+      const title = machineDisplayTitle(id, meta);
       const facts = machineMetaFacts(meta);
 
       const card = document.createElement('article');
@@ -437,7 +468,17 @@
         'device-card',
         'device-card--tile',
         `device-card--${statusInfo.tone}`,
-        online === true || effectivelyOnline ? 'device-card--online' : online === false ? 'device-card--offline' : '',
+        requireProbe
+          ? online === true
+            ? 'device-card--online'
+            : online === false
+              ? 'device-card--offline'
+              : ''
+          : online === true || effectivelyOnline
+            ? 'device-card--online'
+            : online === false
+              ? 'device-card--offline'
+              : '',
       ]
         .filter(Boolean)
         .join(' ');
@@ -451,13 +492,21 @@
         ? `<p class="device-card__facts">${facts.map((f) => escapeHtml(f)).join('<span class="device-card__sep">·</span>')}</p>`
         : '';
 
+      const refreshDisabled = options.probing || options.canRefresh === false;
+      const refreshHtml = options.refreshKey
+        ? `<button type="button" class="device-card__refresh btn btn--sm btn--ghost" data-refresh-device="${escapeHtml(options.refreshKey)}" title="Atualizar status MQTT" aria-label="Atualizar status MQTT"${refreshDisabled ? ' disabled' : ''}>${options.probing ? '…' : '↻'}</button>`
+        : '';
+
       card.innerHTML = `
         <header class="device-card__head">
           <div class="device-card__title-row">
-            <h3 class="device-card__id">${escapeHtml(String(id))}</h3>
+            <h3 class="device-card__id">${escapeHtml(title)}</h3>
             ${modelLabel ? `<span class="device-card__cap device-card__model">${escapeHtml(modelLabel)}</span>` : ''}
           </div>
-          <span class="device-card__status pill ${statusInfo.pillClass}">${escapeHtml(statusInfo.label)}</span>
+          <div class="device-card__head-actions">
+            ${refreshHtml}
+            <span class="device-card__status pill ${statusInfo.pillClass}">${escapeHtml(statusInfo.label)}</span>
+          </div>
         </header>
         ${factsHtml}
         <div class="device-card__actions"></div>
@@ -469,6 +518,7 @@
         online: effectivelyOnline,
         statusInfo,
         probing: Boolean(options.probing),
+        awaitingProbe: requireProbe && online === null && !options.probing,
       };
       fillActions(actions, card, ctx);
 

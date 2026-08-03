@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import secrets
 import time
@@ -78,6 +79,26 @@ def get_session_user(request: Request) -> dict[str, Any] | None:
     return user
 
 
+def is_panel_auth_public(path: str) -> bool:
+    """Rotas do painel que não exigem cookie de sessão."""
+    if path.startswith("/api/auth/"):
+        return True
+    # Só indica se o token existe no servidor — sem vazar o segredo.
+    if path == "/api/panel/bootstrap":
+        return True
+    return False
+
+
+def require_panel_session(request: Request) -> None:
+    """Exige sessão quando PANEL auth está habilitado."""
+    if not auth_enabled():
+        return
+    if is_panel_auth_public(request.url.path):
+        return
+    if get_session_user(request) is None:
+        raise HTTPException(401, "Login required")
+
+
 def _cookie_secure(request: Request) -> bool:
     forwarded = str(request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
     if forwarded == "https":
@@ -128,9 +149,20 @@ def _queue_auth_audit(
 async def auth_config() -> dict[str, Any]:
     firebase = _firebase_config()
     enabled = auth_enabled()
+    verify_mode = "none"
+    if enabled:
+        from panel.firebase_client import service_account_path
+
+        if _jwt_fallback_enabled():
+            verify_mode = "jwt_local"
+        elif service_account_path() or env_value("FIREBASE_API_KEY"):
+            verify_mode = "firebase"
+        elif env_value("PANEL_DEV_EMAIL"):
+            verify_mode = "dev"
     return {
         "enabled": enabled,
         "firebase": firebase if enabled else None,
+        "verify_mode": verify_mode,
         "session_idle_minutes": int(env_value("PANEL_SESSION_IDLE_MINUTES", "30") or "30"),
     }
 
@@ -194,32 +226,204 @@ async def auth_session(
     return {"user": user}
 
 
+def _is_network_unavailable(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    needles = (
+        "getaddrinfo",
+        "name resolution",
+        "11001",
+        "failed to resolve",
+        "max retries exceeded",
+        "connection refused",
+        "network is unreachable",
+        "nodename nor servname",
+        "name or service not known",
+    )
+    return any(n in msg for n in needles)
+
+
+def _is_clock_skew_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "too early" in msg or "clock" in msg
+
+
+def _firebase_clock_skew_seconds() -> int:
+    raw = env_value("FIREBASE_TOKEN_CLOCK_SKEW_SECONDS", "60")
+    try:
+        return max(0, min(300, int(raw or 60)))
+    except (TypeError, ValueError):
+        return 60
+
+
+def _jwt_fallback_enabled() -> bool:
+    return env_bool("PANEL_AUTH_OFFLINE") or env_bool("PANEL_AUTH_JWT_FALLBACK")
+
+
+def _jwt_fallback_on_dns() -> bool:
+    return env_bool("PANEL_AUTH_JWT_FALLBACK_ON_DNS", default=True)
+
+
+def _decode_jwt_payload(id_token: str) -> dict[str, Any]:
+    parts = str(id_token or "").strip().split(".")
+    if len(parts) != 3:
+        raise ValueError("JWT malformado")
+    segment = parts[1]
+    pad = "=" * (-len(segment) % 4)
+    raw = base64.urlsafe_b64decode(segment + pad)
+    data = json.loads(raw.decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("JWT payload inválido")
+    return data
+
+
+def _verify_firebase_token_jwt_local(id_token: str) -> dict[str, str]:
+    """Fallback sem chamar Google — exp/aud/iss (login já ocorreu no browser)."""
+    try:
+        payload = _decode_jwt_payload(id_token)
+    except Exception as exc:
+        raise HTTPException(401, "Token Firebase inválido") from exc
+
+    skew = _firebase_clock_skew_seconds()
+    now = time.time()
+
+    iat = payload.get("iat")
+    if isinstance(iat, (int, float)) and now + skew < float(iat):
+        raise HTTPException(401, "Token Firebase inválido")
+
+    nbf = payload.get("nbf")
+    if isinstance(nbf, (int, float)) and now + skew < float(nbf):
+        raise HTTPException(401, "Token Firebase inválido")
+
+    exp = payload.get("exp")
+    if isinstance(exp, (int, float)) and now - skew > float(exp):
+        raise HTTPException(401, "Token Firebase expirado")
+
+    iss = str(payload.get("iss") or "")
+    if iss and "securetoken@system.gserviceaccount.com" not in iss:
+        raise HTTPException(401, "Token Firebase inválido")
+
+    project_id = env_value("FIREBASE_PROJECT_ID")
+    aud = payload.get("aud")
+    if project_id and aud and str(aud) != project_id:
+        raise HTTPException(401, "Token Firebase inválido (projeto)")
+
+    email = str(payload.get("email") or "").strip()
+    if not email:
+        raise HTTPException(401, "Token sem e-mail")
+
+    if not payload.get("sub") and not payload.get("user_id"):
+        raise HTTPException(401, "Token Firebase inválido")
+
+    return {"email": email}
+
+
 async def _verify_firebase_token(id_token: str) -> dict[str, str]:
+    """Valida idToken Firebase — admin, REST ou JWT local (DNS/offline)."""
+    import asyncio
+
+    from panel.firebase_client import service_account_path
+
+    if _jwt_fallback_enabled():
+        return _verify_firebase_token_jwt_local(id_token)
+
+    network_error: Exception | None = None
+
+    if service_account_path():
+        try:
+            return await asyncio.to_thread(_verify_firebase_token_admin, id_token)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            msg = str(exc).lower()
+            if any(k in msg for k in ("expired", "invalid", "decode", "revoked", "segments")):
+                raise HTTPException(401, "Token Firebase inválido ou expirado") from exc
+            if _is_clock_skew_error(exc):
+                return _verify_firebase_token_jwt_local(id_token)
+            if _is_network_unavailable(exc):
+                network_error = exc
+            else:
+                raise HTTPException(
+                    502,
+                    f"Firebase indisponível (verificação local): {exc}",
+                ) from exc
+
     api_key = env_value("FIREBASE_API_KEY")
-    if api_key:
-        url = f"https://identitytoolkit.googleapis.com/v1/accounts:lookup?key={api_key}"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                res = await client.post(url, json={"idToken": id_token})
-            except httpx.RequestError as exc:
-                raise HTTPException(502, f"Firebase indisponível: {exc}") from exc
-        if res.status_code != 200:
-            raise HTTPException(401, "Token Firebase inválido ou expirado")
-        users = (res.json() or {}).get("users") or []
-        if not users:
-            raise HTTPException(401, "Token Firebase inválido ou expirado")
-        email = str(users[0].get("email") or "").strip()
-        if not email:
-            raise HTTPException(401, "Usuário sem e-mail no Firebase")
-        return {"email": email}
+    if api_key and network_error is None:
+        try:
+            return await _verify_firebase_token_rest(id_token, api_key)
+        except HTTPException as exc:
+            if exc.status_code != 502:
+                raise
+            network_error = exc
+        except httpx.RequestError as exc:
+            network_error = exc
+
+    if network_error and _jwt_fallback_on_dns():
+        return _verify_firebase_token_jwt_local(id_token)
+
+    if network_error:
+        raise HTTPException(
+            502,
+            "Sem acesso a googleapis.com — defina PANEL_AUTH_OFFLINE=1 ou "
+            "PANEL_AUTH_DISABLED=1 no .env (dev local)",
+        ) from network_error
 
     email = env_value("PANEL_DEV_EMAIL")
     if email:
         return {"email": email}
     raise HTTPException(
         500,
-        "Configure FIREBASE_API_KEY no .env para validar login",
+        "Configure FIREBASE_SERVICE_ACCOUNT_FILE ou FIREBASE_API_KEY no .env",
     )
+
+
+def _verify_firebase_token_admin(id_token: str) -> dict[str, str]:
+    from firebase_admin import auth as firebase_auth
+
+    from panel.firebase_client import _ensure_app
+
+    _ensure_app()
+    decoded = firebase_auth.verify_id_token(
+        id_token,
+        check_revoked=False,
+        clock_skew_seconds=_firebase_clock_skew_seconds(),
+    )
+    email = str(decoded.get("email") or "").strip()
+    if not email:
+        raise ValueError("Usuário sem e-mail no token Firebase")
+    return {"email": email}
+
+
+async def _verify_firebase_token_rest(id_token: str, api_key: str) -> dict[str, str]:
+    from panel import http_client
+
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:lookup?key={api_key}"
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            res = await http_client.client().post(
+                url, json={"idToken": id_token}, timeout=15.0
+            )
+            if res.status_code != 200:
+                raise HTTPException(401, "Token Firebase inválido ou expirado")
+            users = (res.json() or {}).get("users") or []
+            if not users:
+                raise HTTPException(401, "Token Firebase inválido ou expirado")
+            email = str(users[0].get("email") or "").strip()
+            if not email:
+                raise HTTPException(401, "Usuário sem e-mail no Firebase")
+            return {"email": email}
+        except HTTPException:
+            raise
+        except httpx.RequestError as exc:
+            last_exc = exc
+            if attempt == 0:
+                continue
+            raise HTTPException(
+                502,
+                "Firebase indisponível — verifique internet/DNS e tente de novo",
+            ) from exc
+    raise HTTPException(502, f"Firebase indisponível: {last_exc}") from last_exc
 
 
 @router.post("/touch")

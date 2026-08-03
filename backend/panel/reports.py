@@ -16,6 +16,19 @@ UpstreamGet = Callable[[str, dict | None], Awaitable[Any]]
 router = APIRouter(prefix="/api/reports", tags=["panel-reports"])
 
 _store_details_cache: dict[str, Any] = {"data": None, "expires_at": 0.0, "refreshing": False}
+_hi_bank_statuses_cache: dict[str, Any] = {"data": None, "expires_at": 0.0, "refreshing": False}
+_HI_BANK_STATUSES_TTL_SEC = 300.0
+
+
+def _statuses_from_store_rows(rows: list[dict[str, Any]] | None) -> dict[str, bool]:
+    statuses: dict[str, bool] = {}
+    for row in rows or []:
+        sid = str(row.get("id") or row.get("store_code") or "").strip().lower()
+        if not sid:
+            continue
+        if "hi_bank_active" in row:
+            statuses[sid] = bool(row.get("hi_bank_active"))
+    return statuses
 
 
 def _digits_only(value: str) -> str:
@@ -142,13 +155,10 @@ def _parse_store_row(
     attrs = data.get("attributes") or data
     code = str(attrs.get("code") or data.get("code") or "").strip().lower()
     city = str(attrs.get("city") or "").strip()
-    state = str(attrs.get("state") or (cnpj_info or {}).get("uf") or "").strip().upper()[:2]
     return {
         "id": code,
         "store_code": code.upper(),
         "name": attrs.get("name") or code.upper(),
-        "city": city or str((cnpj_info or {}).get("municipio") or "").strip(),
-        "state": state,
         "address": (
             str(cnpj_info.get("address") or "").strip()
             if cnpj_info and cnpj_info.get("address")
@@ -244,9 +254,14 @@ async def _refresh_store_catalog_disk(
         now = time.time()
         _store_details_cache["data"] = rows
         _store_details_cache["expires_at"] = now + 3600
+        statuses = _statuses_from_store_rows(rows)
+        if statuses:
+            _hi_bank_statuses_cache["data"] = statuses
+            _hi_bank_statuses_cache["expires_at"] = now + _HI_BANK_STATUSES_TTL_SEC
         return rows
     finally:
         _store_details_cache["refreshing"] = False
+        _hi_bank_statuses_cache["refreshing"] = False
 
 
 def _schedule_store_catalog_refresh(
@@ -345,8 +360,10 @@ def register_reports(upstream_get: UpstreamGet) -> APIRouter:
     @router.get("/hi-bank/profile")
     async def hi_bank_profile(store_code: str = Query(...)) -> dict[str, Any]:
         sid = store_code.strip().upper()
-        hi_bank_attrs = await _fetch_hi_bank_account(upstream_get, sid)
-        store_raw = await upstream_get(f"/api/v1/stores/{sid}")
+        hi_bank_attrs, store_raw = await asyncio.gather(
+            _fetch_hi_bank_account(upstream_get, sid),
+            upstream_get(f"/api/v1/stores/{sid}"),
+        )
         data = store_raw.get("data") or store_raw
         attrs = data.get("attributes") or data
         cnpj_info = await _lookup_store_cnpj(attrs)
@@ -365,23 +382,109 @@ def register_reports(upstream_get: UpstreamGet) -> APIRouter:
         }
 
     @router.get("/hi-bank/statuses")
-    async def hi_bank_statuses() -> dict[str, Any]:
+    async def hi_bank_statuses(
+        background_tasks: BackgroundTasks,
+        force: int = Query(0),
+    ) -> dict[str, Any]:
+        """
+        Status Hi-Bank por loja — evita N+1 no upstream.
+        Preferência: memória → catálogo em disco (store-details) → refresh background.
+        """
+        now = time.time()
+        if (
+            not force
+            and _hi_bank_statuses_cache.get("data") is not None
+            and float(_hi_bank_statuses_cache.get("expires_at") or 0) > now
+        ):
+            return {
+                "statuses": _hi_bank_statuses_cache["data"],
+                "refreshing": bool(_hi_bank_statuses_cache.get("refreshing")),
+                "cached": True,
+                "source": "memory",
+            }
+
+        # Disco / memória de store-details (já inclui hi_bank_active).
+        mem_rows = _store_details_cache.get("data")
+        if isinstance(mem_rows, list) and mem_rows and not force:
+            statuses = _statuses_from_store_rows(mem_rows)
+            if statuses:
+                _hi_bank_statuses_cache["data"] = statuses
+                _hi_bank_statuses_cache["expires_at"] = now + _HI_BANK_STATUSES_TTL_SEC
+                return {
+                    "statuses": statuses,
+                    "refreshing": bool(_store_details_cache.get("refreshing")),
+                    "cached": True,
+                    "source": "store_details_memory",
+                }
+
+        file_row = stores_cache.read_catalog_file()
+        file_stores = file_row.get("stores") if file_row else None
+        if isinstance(file_stores, list) and file_stores and not force:
+            statuses = _statuses_from_store_rows(file_stores)
+            if statuses:
+                _hi_bank_statuses_cache["data"] = statuses
+                _hi_bank_statuses_cache["expires_at"] = now + _HI_BANK_STATUSES_TTL_SEC
+                from panel.catalog import build_catalog
+
+                catalog = await build_catalog(upstream_get)
+                refreshing = bool(_store_details_cache.get("refreshing"))
+                if not stores_cache.catalog_is_fresh(file_row) and not refreshing:
+                    _schedule_store_catalog_refresh(
+                        background_tasks, upstream_get, catalog.get("stores") or []
+                    )
+                    refreshing = True
+                return {
+                    "statuses": statuses,
+                    "refreshing": refreshing,
+                    "cached": True,
+                    "source": "store_details_disk",
+                }
+
         from panel.catalog import build_catalog
 
         catalog = await build_catalog(upstream_get)
+        stores_meta = catalog.get("stores") or []
+
+        # Sem catálogo detalhado: agenda refresh e, só se force, faz N+1 limitado.
+        refreshing = bool(_store_details_cache.get("refreshing"))
+        if not refreshing:
+            _schedule_store_catalog_refresh(background_tasks, upstream_get, stores_meta)
+            refreshing = True
+
+        if not force:
+            stale = _hi_bank_statuses_cache.get("data")
+            return {
+                "statuses": stale if isinstance(stale, dict) else {},
+                "refreshing": True,
+                "cached": bool(stale),
+                "source": "pending_refresh",
+            }
+
         statuses: dict[str, bool] = {}
-        for meta in catalog.get("stores") or []:
+        sem = asyncio.Semaphore(8)
+
+        async def _one(meta: dict[str, Any]) -> None:
             sid = str(meta.get("id") or "").lower()
             if not sid:
-                continue
-            try:
-                raw = await upstream_get(f"/api/v1/stores/{sid.upper()}")
-                attrs = (raw.get("data") or {}).get("attributes") or {}
-                hibank = attrs.get("hibank-status")
-                if hibank is not None:
-                    statuses[sid] = str(hibank).lower() in {"active", "ok", "true", "1"}
-            except Exception:
-                continue
-        return {"statuses": statuses, "refreshing": False}
+                return
+            async with sem:
+                try:
+                    raw = await upstream_get(f"/api/v1/stores/{sid.upper()}")
+                    attrs = (raw.get("data") or {}).get("attributes") or {}
+                    hibank = attrs.get("hibank-status")
+                    if hibank is not None:
+                        statuses[sid] = str(hibank).lower() in {"active", "ok", "true", "1"}
+                except Exception:
+                    return
+
+        await asyncio.gather(*[_one(meta) for meta in stores_meta])
+        _hi_bank_statuses_cache["data"] = statuses
+        _hi_bank_statuses_cache["expires_at"] = now + _HI_BANK_STATUSES_TTL_SEC
+        return {
+            "statuses": statuses,
+            "refreshing": refreshing,
+            "cached": False,
+            "source": "upstream_fanout",
+        }
 
     return router

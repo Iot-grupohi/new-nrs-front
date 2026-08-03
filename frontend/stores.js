@@ -11,11 +11,19 @@
     isAgentUnavailableError,
     loadCatalog,
     stopHeartbeatMonitor,
+    isRtdbOnlyPanel,
+    isPowpayHealthPanel,
+    isBackendPulsePanel,
+    hydrateStoresPayloadFromCache,
+    countPayloadPending,
+    saveStoresPayloadCache,
     isStoreCardSuspended,
     machineMetaTitle,
     normalizeMachineStatus,
     verifyStoreGatewayLed,
     formatGatewayCacheAge,
+    isAgentsDisabled,
+    isMqttGatewayEnabled,
   } = window.Lav60;
   const panelFetch = window.Lav60Auth?.panelFetch;
   let offlineDurationTimer = null;
@@ -32,6 +40,7 @@
   let currentPageMode = null;
   let channelPickerGeneration = 0;
   let channelModalReady = false;
+  let gatewayDashboardMounted = false;
 
   const LOJAS_LAYOUT_KEY = 'lav60:lojas-layout';
   const LOJAS_LAYOUTS = ['compact', 'detailed', 'list'];
@@ -174,8 +183,9 @@
   const STATE_LABELS = {
     ok: 'Operacional',
     partial: 'Parcial',
+    agent_online: 'Agente online',
     offline: 'Sem equipamentos',
-    unreachable: 'Offline',
+    unreachable: 'Agente offline',
     suspended: 'Suspensa',
     unknown: 'Aguardando',
   };
@@ -183,6 +193,7 @@
   const STATE_LABELS_SHORT = {
     ok: 'OK',
     partial: 'Parc.',
+    agent_online: 'Online',
     offline: 'Sem eq.',
     unreachable: 'Off',
     suspended: 'Susp.',
@@ -196,7 +207,8 @@
   }
 
   function computeLojasStats(stores = allStores) {
-    const ready = (stores || []).filter((s) => !s.loading);
+    const list = stores || [];
+    const ready = list.filter((s) => !s.loading);
     let online = 0;
     let offline = 0;
     let suspended = 0;
@@ -209,29 +221,69 @@
       online,
       offline,
       suspended,
-      total: ready.length,
-      pending: (stores || []).length - ready.length,
+      total: list.length,
+      pending: list.length - ready.length,
     };
+  }
+
+  /** KPIs prontos quando não há lojas pendentes ou enquanto exibimos cache válido da sessão. */
+  function areStoreMetricsReady(stores, payload = {}) {
+    const total = stores?.total ?? 0;
+    if (!total) return false;
+    if (payload.sessionCache) return true;
+    if (
+      payload.fromCache &&
+      total > 0 &&
+      (stores.online != null || stores.offline != null || stores.partial != null)
+    ) {
+      return true;
+    }
+    if (payload.refreshing) return false;
+    if ((stores.pending ?? 0) > 0) return false;
+    return Boolean(payload.timestamp);
+  }
+
+  function dashMetric(ready, value) {
+    return ready ? String(value ?? 0) : '—';
   }
 
   function updateLojasStatsPanel(stores = allStores) {
     if (currentPageMode !== 'lojas') return;
     const stats = computeLojasStats(stores);
+    const metricsReady = areStoreMetricsReady(
+      { total: stats.total, pending: stats.pending },
+      lastPayload || {}
+    );
     const onlineEl = $('storesStatOnline');
     const offlineEl = $('storesStatOffline');
     const suspendedEl = $('storesStatSuspended');
     const suspendedWrap = $('storesStatSuspendedWrap');
     const totalEl = $('storesStatTotal');
-    if (onlineEl) onlineEl.textContent = stats.total ? String(stats.online) : '—';
-    if (offlineEl) offlineEl.textContent = stats.total ? String(stats.offline) : '—';
-    if (suspendedEl) suspendedEl.textContent = stats.suspended ? String(stats.suspended) : '0';
+    if (onlineEl) onlineEl.textContent = dashMetric(metricsReady, stats.online);
+    if (offlineEl) offlineEl.textContent = dashMetric(metricsReady, stats.offline);
+    if (suspendedEl) {
+      suspendedEl.textContent = metricsReady && stats.suspended ? String(stats.suspended) : '—';
+    }
     if (suspendedWrap) {
-      suspendedWrap.classList.toggle('hidden', stats.suspended <= 0);
+      suspendedWrap.classList.toggle('hidden', !metricsReady || stats.suspended <= 0);
     }
     if (totalEl) totalEl.textContent = stats.total ? String(stats.total) : '—';
 
+    const pendingEl = $('storesStatPending');
+    const pendingWrap = $('storesStatPendingWrap');
+    if (pendingEl) pendingEl.textContent = stats.pending ? String(stats.pending) : '0';
+    if (pendingWrap) {
+      pendingWrap.classList.toggle('hidden', stats.pending <= 0);
+    }
+
     const subtitle = $('lojasSubtitle');
     if (subtitle && stats.total) {
+      if (!metricsReady) {
+        subtitle.textContent = stats.pending > 0
+          ? `${stats.total} loja(s) · Aguardando: ${stats.pending}`
+          : `${stats.total} loja(s) · sincronizando…`;
+        return;
+      }
       const parts = [`${stats.online} online`, `${stats.offline} offline`];
       if (stats.suspended > 0) parts.push(`${stats.suspended} suspensa(s)`);
       subtitle.textContent = `${parts.join(' · ')} · ${stats.total} loja(s)`;
@@ -321,7 +373,13 @@
     );
   }
 
-  /** Agente respondendo: pulso recente + HTTP ok (sem falha de probe). */
+  /** Pulso recente do agente (RTDB ou POST). */
+  function isStorePulseOnline(store) {
+    if (isStoreSuspended(store) || store.loading) return false;
+    return store.heartbeatAlive === true;
+  }
+
+  /** Agente respondendo: pulso + HTTP ok (sem falha de probe). */
   function isStoreAgentReachable(store) {
     if (isStoreSuspended(store) || store.loading) return false;
     if (store.agentProbeFailed || store.agentUnavailable) return false;
@@ -330,7 +388,7 @@
   }
 
   function isStoreOnline(store) {
-    return isStoreAgentReachable(store);
+    return isStorePulseOnline(store);
   }
 
   /** Saúde dos equipamentos (independente do heartbeat). */
@@ -348,16 +406,20 @@
   function resolveStoreDisplayState(store) {
     if (store.loading) return 'unknown';
     if (isStoreSuspended(store)) return 'suspended';
-    if (!isStoreAgentReachable(store)) {
-      return store.agentUnavailable ||
-        store.agentProbeFailed ||
-        store.state === 'unreachable'
-        ? 'unreachable'
-        : 'offline';
+    if (!isStorePulseOnline(store)) {
+      return 'unreachable';
     }
     const equip = resolveStoreEquipmentState(store);
     if (equip === 'unknown') return 'ok';
+    if (equip === 'offline') return 'agent_online';
     return equip;
+  }
+
+  /** Pill do card: agente online com rede off usa verde (pulso), não vermelho de loja offline. */
+  function resolveStoreStatusPill(store) {
+    const state = resolveStoreDisplayState(store);
+    if (state === 'agent_online') return { state, pill: 'ok' };
+    return { state, pill: state };
   }
 
   function matchesFilter(store) {
@@ -435,16 +497,14 @@
   function offlineStoreReason(store) {
     const noAgent = store.agentUnavailable || isAgentUnavailableError(store.error);
     if (noAgent) return store.error || noAgentMessage(store.id);
-    return store.error || 'Loja indisponível';
+    return 'Agente offline';
   }
 
-  function renderOfflineHealthLabel(store) {
-    const reason = escapeHtml(offlineStoreReason(store));
-    const dur = formatOfflineDuration(store.offlineSince);
-    const durHtml = dur
-      ? ` · Offline há <strong class="store-card__offline-since">${escapeHtml(dur)}</strong>`
-      : '';
-    return `<span class="store-card__health-label--offline">${reason}${durHtml}</span>`;
+  function renderHeartbeatSourceBadge(store) {
+    if (isAgentsDisabled(catalogConfig)) return '';
+    if (!isStorePulseOnline(store)) return '';
+    if (store.heartbeatSource !== 'rtdb') return '';
+    return `<span class="store-card__heartbeat-src store-card__heartbeat-src--rtdb" title="Pulso recebido via Firebase Realtime Database">RTDB</span>`;
   }
 
   function buildStoreMetrics(store, { accessible, online, total, pct, suspended, operable }) {
@@ -453,7 +513,7 @@
     }
 
     const heartbeatUp = store.heartbeatAlive === true;
-    const agentUp = isStoreAgentReachable(store);
+    const agentUp = isStorePulseOnline(store);
     const segments = [];
     let tone = 'neutral';
     let offlineReason = '';
@@ -476,6 +536,9 @@
           since: store.onlineSince,
         });
       }
+      if (store.heartbeatSource === 'rtdb') {
+        segments.push({ kind: 'rtdb', text: 'Pulso RTDB' });
+      }
       tone = pct >= 90 ? 'ok' : pct >= 70 ? 'warn' : 'danger';
     } else if (agentUp && suspended) {
       if (total > 0) segments.push({ kind: 'equip', text: `${online}/${total}` });
@@ -489,6 +552,9 @@
           live: true,
           since: store.onlineSince,
         });
+      }
+      if (store.heartbeatSource === 'rtdb') {
+        segments.push({ kind: 'rtdb', text: 'Pulso RTDB' });
       }
       tone = 'suspended';
     } else if (suspended) {
@@ -549,11 +615,17 @@
   }
 
   function metricsHealthLabelFromParts(metrics, store, { online, total }) {
-    if (metrics.offlineReason && metrics.tone === 'offline') {
-      const reason = escapeHtml(metrics.offlineReason);
+    if (metrics.tone === 'offline') {
       const offlineSeg = metrics.segments.find((s) => s.kind === 'offline');
-      const durHtml = offlineSeg ? ` · ${renderMetricsSegmentHtml(offlineSeg)}` : '';
-      return `<span class="store-card__health-label--offline">${reason}${durHtml}</span>`;
+      const parts = [];
+      if (total > 0) {
+        parts.push(`<strong>${online}</strong> de ${total} equipamentos offline`);
+      }
+      if (offlineSeg) parts.push(renderMetricsSegmentHtml(offlineSeg));
+      if (!parts.length && metrics.offlineReason) {
+        parts.push(escapeHtml(metrics.offlineReason));
+      }
+      return `<span class="store-card__health-label--offline">${parts.join(' · ')}</span>`;
     }
     if (metrics.tone === 'suspended' && !metrics.segments.length) {
       return renderSuspendedHealthLabel(store);
@@ -564,11 +636,21 @@
     const onlineSeg = metrics.segments.find((s) => s.kind === 'online');
     const parts = [];
     if (equip && total) {
-      parts.push(`<strong>${online}</strong> de ${total} online`);
+      if (online <= 0 && isStorePulseOnline(store)) {
+        parts.push(`<strong>0</strong> de ${total} equipamentos offline`);
+      } else {
+        parts.push(`<strong>${online}</strong> de ${total} online`);
+      }
     }
     if (updated) parts.push(updated.text);
     if (onlineSeg) parts.push(renderMetricsSegmentHtml(onlineSeg));
-    if (!parts.length) return renderSuspendedHealthLabel(store);
+    if (!parts.length) {
+      if (isStoreSuspended(store)) return renderSuspendedHealthLabel(store);
+      if (isStorePulseOnline(store)) {
+        return `<span class="store-card__health-label--pending">Aguardando dados dos equipamentos (rede local)…</span>`;
+      }
+      return `<span class="store-card__health-label--offline">${escapeHtml(offlineStoreReason(store))}</span>`;
+    }
     return `<span>${parts.join(' · ')}</span>`;
   }
 
@@ -583,7 +665,7 @@
 
   function renderStoreCardBody(store, { accessible, online, total, pct }) {
     const suspended = isStoreSuspended(store);
-    const agentUp = isStoreAgentReachable(store);
+    const agentUp = isStorePulseOnline(store);
     const operable = agentUp && !store.loading;
     const metrics = buildStoreMetrics(store, {
       accessible,
@@ -741,6 +823,7 @@
           <div class="store-card__list-main">
             <span class="store-card__list-code">${escapeHtml(code)}</span>
             <span class="store-card__status pill pill--${pillState} pill--xs">${stateLabel}</span>
+            ${renderHeartbeatSourceBadge(store)}
             <span class="store-card__list-ratio" title="${online} de ${total} online">${ratio}</span>
             ${dotsHtml}
           </div>
@@ -757,18 +840,19 @@
     const pct = healthPercent(summary);
     const suspended = isStoreSuspended(store);
     const heartbeatUp = store.heartbeatAlive === true;
-    const agentUp = isStoreAgentReachable(store);
+    const agentUp = isStorePulseOnline(store);
     const accessible = store.accessible === true && !store.loading;
     const operable = agentUp && !store.loading;
-    const canPickChannel = !store.loading;
+    const canPickChannel = !store.loading && isMqttGatewayEnabled(catalogConfig);
     const isOfflineAlert = !store.loading && !agentUp && !suspended;
-    const state = store.loading ? 'unknown' : resolveStoreDisplayState(store);
-    const pillState = suspended ? 'suspended' : state;
+    const statusPill = resolveStoreStatusPill(store);
+    const state = store.loading ? 'unknown' : statusPill.state;
+    const pillState = suspended ? 'suspended' : statusPill.pill;
     const stateLabel = store.loading
       ? '…'
       : isLojasListMode() || isLojasCompactMode()
-        ? STATE_LABELS_SHORT[pillState] || STATE_LABELS_SHORT[state] || 'Off'
-        : STATE_LABELS[pillState] || STATE_LABELS[state] || 'Offline';
+        ? STATE_LABELS_SHORT[state] || 'Off'
+        : STATE_LABELS[state] || 'Offline';
 
     const card = document.createElement('article');
     card.className = [
@@ -838,7 +922,10 @@
           <div class="store-card__identity">
             ${buildStoreHeading(store, { compact: isLojasCompactMode() })}
           </div>
-          <span class="store-card__status pill pill--${pillState}${isLojasCompactMode() ? ' pill--xs' : ''}">${stateLabel}</span>
+          <div class="store-card__status-group">
+            <span class="store-card__status pill pill--${pillState}${isLojasCompactMode() ? ' pill--xs' : ''}">${stateLabel}</span>
+            ${renderHeartbeatSourceBadge(store)}
+          </div>
         </div>
         ${bodyHtml}`;
     }
@@ -873,9 +960,15 @@
     updateLojasStatsPanel(allStores);
 
     if (!allStores.length) {
+      const catalogCount = (catalogConfig?.stores || []).length;
+      const emptyMsg = isMqttGatewayEnabled(catalogConfig)
+        ? catalogCount > 0
+          ? 'Catálogo carregado — clique na loja e escolha GET01 ou GET02'
+          : 'Nenhuma loja no catálogo Lav60'
+        : 'Nenhuma loja no catálogo';
       grid.innerHTML = `
         <div class="stores-empty-state">
-          <p>Nenhuma loja conectada — aguardando heartbeat dos agentes</p>
+          <p>${emptyMsg}</p>
         </div>`;
       $('storesCount')?.classList.add('hidden');
       return;
@@ -923,9 +1016,12 @@
     const badge = $('dashboardLiveBadge');
     const sync = $('dashboardSyncTime');
     if (badge) {
-      if (payload.refreshing && payload.progress?.total) {
+      if (payload.refreshing && !payload.sessionCache) {
         badge.textContent = 'Sincronizando';
         badge.className = 'dashboard-live-badge dashboard-live-badge--pending';
+      } else if (payload.refreshing && (payload.sessionCache || payload.fromCache)) {
+        badge.textContent = 'Cache local';
+        badge.className = 'dashboard-live-badge dashboard-live-badge--cache';
       } else if (payload.fromCache && payload.live === false) {
         badge.textContent = 'Cache local';
         badge.className = 'dashboard-live-badge dashboard-live-badge--cache';
@@ -944,7 +1040,7 @@
     }
   }
 
-  function updateHealthCard(devices) {
+  function updateHealthCard(devices, metricsReady = true) {
     const card = $('dashboardHealthCard');
     const badge = $('dashboardHealthBadge');
     const healthEl = $('kpiNetworkHealth');
@@ -952,17 +1048,18 @@
     const subEl = $('kpiNetworkHealthSub');
     const healthPct = devices.health_pct ?? 0;
     const tone = healthTone(healthPct);
+    const showMetrics = metricsReady && devices.total;
 
     if (healthEl) {
-      healthEl.textContent = devices.total ? `${healthPct}%` : '—';
+      healthEl.textContent = showMetrics ? `${healthPct}%` : '—';
     }
     if (healthBar) {
-      healthBar.style.width = devices.total ? `${healthPct}%` : '0%';
+      healthBar.style.width = showMetrics ? `${healthPct}%` : '0%';
     }
     if (subEl) {
-      subEl.textContent = devices.total
+      subEl.textContent = showMetrics
         ? `${devices.online ?? 0} de ${devices.total} equipamentos operacionais`
-        : 'Equipamentos operacionais na rede';
+        : 'Aguardando sincronização das lojas…';
     }
     if (card) {
       card.classList.remove(
@@ -971,18 +1068,20 @@
         'dashboard-health-card--warn',
         'dashboard-health-card--danger'
       );
-      if (devices.total) card.classList.add(`dashboard-health-card--${tone}`);
+      if (showMetrics) card.classList.add(`dashboard-health-card--${tone}`);
       else card.classList.add('dashboard-health-card--idle');
     }
     if (badge) {
-      badge.textContent = devices.total ? healthLabel(healthPct) : '—';
+      badge.textContent = showMetrics ? healthLabel(healthPct) : '—';
     }
   }
 
-  function updateDashboardSummaryTiles(stores, devices) {
+  function updateDashboardSummaryTiles(stores, devices, payload = {}) {
     const storesTotal = stores.total ?? 0;
     const storesOnline = stores.online ?? 0;
     const storesOffline = stores.offline ?? 0;
+    const storesPending = stores.pending ?? 0;
+    const metricsReady = areStoreMetricsReady(stores, payload);
     const devicesTotal = devices.total ?? 0;
     const devicesOnline = devices.online ?? 0;
     const alerts =
@@ -995,39 +1094,63 @@
     const tileStoresOnline = $('dashboardTileStoresOnline');
     const tileStoresOnlineMeta = $('dashboardTileStoresOnlineMeta');
     if (tileStoresOnline) {
-      tileStoresOnline.textContent = storesTotal ? String(storesOnline) : '—';
+      tileStoresOnline.textContent = dashMetric(metricsReady, storesOnline);
     }
     if (tileStoresOnlineMeta) {
-      tileStoresOnlineMeta.textContent = storesTotal
-        ? `${storesOnline}/${storesTotal} unidades`
-        : '—';
+      if (!storesTotal) {
+        tileStoresOnlineMeta.textContent = '—';
+      } else if (!metricsReady) {
+        tileStoresOnlineMeta.textContent = storesPending > 0
+          ? `${storesTotal} lojas · Aguardando: ${storesPending}`
+          : `${storesTotal} lojas · sincronizando…`;
+      } else {
+        tileStoresOnlineMeta.textContent = `${storesOnline}/${storesTotal} unidades`;
+      }
     }
 
     const tileStoresOffline = $('dashboardTileStoresOffline');
+    const tileStoresOfflineMeta = $('dashboardTileStoresOfflineMeta');
     if (tileStoresOffline) {
-      tileStoresOffline.textContent = storesTotal ? String(storesOffline) : '—';
+      tileStoresOffline.textContent = dashMetric(metricsReady, storesOffline);
+    }
+    if (tileStoresOfflineMeta) {
+      if (!metricsReady) {
+        tileStoresOfflineMeta.textContent = storesPending > 0
+          ? `Aguardando: ${storesPending}`
+          : 'Sincronizando…';
+      } else {
+        tileStoresOfflineMeta.textContent = 'Sem conexão';
+      }
     }
 
     const tileDevicesOnline = $('dashboardTileDevicesOnline');
     const tileDevicesOnlineMeta = $('dashboardTileDevicesOnlineMeta');
     if (tileDevicesOnline) {
-      tileDevicesOnline.textContent = devicesTotal ? `${devicesOnline}/${devicesTotal}` : '—';
+      tileDevicesOnline.textContent = metricsReady && devicesTotal
+        ? `${devicesOnline}/${devicesTotal}`
+        : '—';
     }
     if (tileDevicesOnlineMeta) {
-      tileDevicesOnlineMeta.textContent = devicesTotal
+      tileDevicesOnlineMeta.textContent = metricsReady && devicesTotal
         ? `${devices.available ?? 0} disponíveis agora`
-        : '—';
+        : metricsReady
+          ? '—'
+          : 'Aguardando lojas…';
     }
 
     const tileAlerts = $('dashboardTileAlerts');
     const tileAlertsMeta = $('dashboardTileAlertsMeta');
     if (tileAlerts) {
-      tileAlerts.textContent = storesTotal || devicesTotal ? String(alerts) : '—';
+      tileAlerts.textContent = metricsReady && (storesTotal || devicesTotal)
+        ? String(alerts)
+        : '—';
     }
     if (tileAlertsMeta) {
-      tileAlertsMeta.textContent = alerts
-        ? 'Offline, parciais e suspensas'
-        : 'Nenhum ponto crítico';
+      tileAlertsMeta.textContent = !metricsReady
+        ? 'Sincronizando monitoramento…'
+        : alerts
+          ? 'Offline, parciais e suspensas'
+          : 'Nenhum ponto crítico';
     }
   }
 
@@ -1041,9 +1164,10 @@
     if (currentPageMode === 'lojas' && lojasSubtitle) {
       if (payload.fromCache && payload.live === false) {
         const count = payload.stores?.length || dashboard.stores?.total || 0;
-        const source =
-          payload.source === 'firebase' || payload.fromFirebase ? 'cache Firebase' : 'cache';
-        lojasSubtitle.textContent = `${count} loja(s) · ${source} · sincronizando…`;
+        const pending = stores.pending ?? 0;
+        lojasSubtitle.textContent = pending > 0
+          ? `${count} loja(s) · Aguardando: ${pending}`
+          : `${count} loja(s) · sincronizando…`;
         return;
       }
       if (payload.refreshing && payload.progress?.total) {
@@ -1061,7 +1185,10 @@
 
     if (payload.fromCache && payload.live === false) {
       const count = payload.stores?.length || dashboard.stores?.total || 0;
-      subtitle.textContent = `${count} loja(s) · sincronizando…`;
+      const pending = stores.pending ?? 0;
+      subtitle.textContent = pending > 0
+        ? `${count} loja(s) · Aguardando: ${pending}`
+        : `${count} loja(s) · sincronizando…`;
       return;
     }
 
@@ -1072,11 +1199,20 @@
 
     if (payload.timestamp) {
       const storesSuspended = stores.suspended ?? 0;
+      const storesPending = stores.pending ?? 0;
+      const metricsReady = areStoreMetricsReady(stores, payload);
       const suspended = devices.suspended ?? 0;
       const occupied = devices.occupied ?? 0;
       const available = devices.available ?? 0;
       const offlineNetwork = devices.offline_network ?? 0;
       const totalStores = stores.total ?? 0;
+
+      if (!metricsReady) {
+        subtitle.textContent = storesPending > 0
+          ? `${totalStores} loja(s) · Aguardando: ${storesPending}`
+          : `${totalStores} loja(s) · sincronizando…`;
+        return;
+      }
       if (storesSuspended > 0 || suspended > 0 || occupied > 0 || available > 0 || offlineNetwork > 0) {
         const parts = [];
         if (storesSuspended > 0) parts.push(`${storesSuspended} loja(s) suspensa(s)`);
@@ -1098,37 +1234,54 @@
     const stores = dashboard.stores || {};
     const devices = dashboard.devices || {};
     lastDashboardEvents = dashboard.events || null;
+    const metricsReady = areStoreMetricsReady(stores, payload);
 
     const hasKpis = Boolean($('kpiStoresOnline'));
     if (hasKpis) {
-      $('kpiStoresOnline').textContent = stores.online ?? '—';
-      $('kpiStoresOffline').textContent = stores.offline ?? '—';
-      $('kpiDevicesSuspended').textContent = devices.suspended ?? '—';
-      $('kpiDevicesOccupied').textContent = devices.occupied ?? '—';
-      $('kpiDevicesAvailable').textContent = devices.available ?? '—';
-      $('kpiDevicesOffline').textContent = devices.offline_network ?? '—';
+      $('kpiStoresOnline').textContent = dashMetric(metricsReady, stores.online);
+      $('kpiStoresOffline').textContent = dashMetric(metricsReady, stores.offline);
+      $('kpiDevicesSuspended').textContent = dashMetric(metricsReady, devices.suspended);
+      $('kpiDevicesOccupied').textContent = dashMetric(metricsReady, devices.occupied);
+      $('kpiDevicesAvailable').textContent = dashMetric(metricsReady, devices.available);
+      $('kpiDevicesOffline').textContent = dashMetric(metricsReady, devices.offline_network);
 
-      updateHealthCard(devices);
-      updateDashboardSummaryTiles(stores, devices);
+      updateHealthCard(devices, metricsReady);
+      updateDashboardSummaryTiles(stores, devices, payload);
 
       const onlineTotalEl = $('kpiDevicesOnlineTotal');
       if (onlineTotalEl) {
-        onlineTotalEl.textContent = devices.total
+        onlineTotalEl.textContent = metricsReady && devices.total
           ? `${devices.online ?? 0}/${devices.total}`
           : '—';
       }
       const onlineSubEl = $('kpiDevicesOnlineSub');
       if (onlineSubEl) {
-        onlineSubEl.textContent = devices.total
+        onlineSubEl.textContent = metricsReady && devices.total
           ? `${devices.available ?? 0} disponíveis · ${devices.occupied ?? 0} ocupadas`
           : 'Aguardando dados das lojas';
       }
 
       const partialEl = $('kpiStoresPartial');
-      if (partialEl) partialEl.textContent = stores.partial ?? '—';
+      if (partialEl) partialEl.textContent = dashMetric(metricsReady, stores.partial);
 
       const suspendedEl = $('kpiStoresSuspended');
-      if (suspendedEl) suspendedEl.textContent = stores.suspended ?? '—';
+      if (suspendedEl) suspendedEl.textContent = dashMetric(metricsReady, stores.suspended);
+
+      const pendingEl = $('kpiStoresPending');
+      const pendingCard = $('kpiStoresPendingCard');
+      const storesPending = stores.pending ?? 0;
+      if (pendingEl) {
+        pendingEl.textContent = stores.total ? String(storesPending) : '—';
+      }
+      if (pendingCard) {
+        pendingCard.classList.toggle('hidden', metricsReady && storesPending <= 0);
+        pendingCard.setAttribute(
+          'title',
+          storesPending > 0
+            ? `${storesPending} loja(s) aguardando pulso do agente`
+            : 'Todas as lojas já foram classificadas'
+        );
+      }
     }
 
     updateDashboardHeader(payload);
@@ -1157,11 +1310,19 @@
   }
 
   function storePageHref(storeId) {
-    return `store.html?store=${encodeURIComponent(storeId)}`;
+    const sid = encodeURIComponent(storeId);
+    if (document.getElementById('appView')) {
+      return `index.html?store=${sid}#/store`;
+    }
+    return `store.html?store=${sid}`;
   }
 
   function gatewayPageHref(storeId) {
-    return `gateway.html?store=${encodeURIComponent(storeId)}`;
+    const sid = encodeURIComponent(storeId);
+    if (document.getElementById('appView')) {
+      return `index.html?store=${sid}#/agent-get02`;
+    }
+    return `gateway.html?store=${sid}`;
   }
 
   function findStoreById(storeId) {
@@ -1243,36 +1404,44 @@
         ? `Redundância disponível${gatewayState.checkedAt ? ` · ${formatGatewayCacheAge(gatewayState.checkedAt)}` : ''}${gatewayState.fromCache ? ' · em cache' : ''}`
         : gatewayState?.error || 'Redundância indisponível';
 
-    options.innerHTML = [
-      buildChannelOptionHtml('agent', {
-        title: 'Agente local',
-        detail: agent.detail,
-        statusLabel: agent.label,
-        statusClass: agent.ready ? 'on' : 'off',
-        disabled: !agent.ready,
-        loading: false,
-        ready: agent.ready,
-      }),
+    const parts = [];
+    if (!isAgentsDisabled(catalogConfig)) {
+      parts.push(
+        buildChannelOptionHtml('agent', {
+          title: 'GET01 — Cloudflare',
+          detail: agent.detail,
+          statusLabel: agent.label,
+          statusClass: agent.ready ? 'on' : 'off',
+          disabled: !agent.ready,
+          loading: false,
+          ready: agent.ready,
+        })
+      );
+    }
+    parts.push(
       buildChannelOptionHtml('gateway', {
-        title: 'Gateway (redundância)',
+        title: 'GET02 — MQTT',
         detail: gatewayDetail,
         statusLabel: gatewayLoading ? 'Verificando' : gatewayOnline ? 'Online' : 'Offline',
         statusClass: gatewayLoading ? 'warn' : gatewayOnline ? 'on' : 'off',
         disabled: gatewayLoading || !gatewayOnline,
         loading: gatewayLoading,
         ready: gatewayOnline && !gatewayLoading,
-      }),
-    ].join('');
+      })
+    );
+    options.innerHTML = parts.join('');
   }
 
   function renderStoreChannelSubtitle(store, gatewayState) {
     const agent = agentChannelSummary(store);
-    if (agent.ready) {
-      $('storeChannelSubtitle').textContent = 'Agente local disponível — redundância verificada';
+    if (!isAgentsDisabled(catalogConfig) && agent.ready) {
+      $('storeChannelSubtitle').textContent = 'GET01 disponível — GET02 verificado';
     } else if (gatewayState.online) {
-      $('storeChannelSubtitle').textContent = 'Agente indisponível — use a redundância';
+      $('storeChannelSubtitle').textContent = isAgentsDisabled(catalogConfig)
+        ? 'Operação via GET02 — MQTT'
+        : 'GET01 indisponível — use GET02 — MQTT';
     } else {
-      $('storeChannelSubtitle').textContent = 'Nenhum canal operacional no momento';
+      $('storeChannelSubtitle').textContent = 'GET02 — MQTT indisponível no momento';
     }
   }
 
@@ -1369,6 +1538,10 @@
   }
 
   function promptStoreChannel(store) {
+    if (!isMqttGatewayEnabled(catalogConfig)) {
+      window.alert('GET02 — MQTT não configurado neste painel.');
+      return;
+    }
     initStoreChannelModal();
     const modal = $('storeChannelModal');
     if (modal) modal.dataset.storeId = store.id;
@@ -2150,7 +2323,9 @@
   }
 
   function handleKpiStoreLinkClick(e) {
-    const storeLink = e.target.closest('a.kpi-event-item__store[href*="store.html"], a.kpi-event-group__store[href*="store.html"]');
+    const storeLink = e.target.closest(
+      'a.kpi-event-item__store[href*="store.html"], a.kpi-event-item__store[href*="#/store"], a.kpi-event-group__store[href*="store.html"], a.kpi-event-group__store[href*="#/store"]'
+    );
     if (!storeLink) return false;
     e.preventDefault();
     try {
@@ -2266,32 +2441,72 @@
     }, { signal });
   }
 
+  function payloadMetricsReady(payload) {
+    return areStoreMetricsReady(payload?.dashboard?.stores || {}, payload || {});
+  }
+
+  function shouldSkipPayloadUpdate(data) {
+    if (!data || !lastPayload) return false;
+    if (data.live && !data.sessionCache && countPayloadPending(data) > 0 && lastPayload.sessionCache) {
+      return true;
+    }
+    if (payloadMetricsReady(lastPayload) && !payloadMetricsReady(data) && data.refreshing) {
+      return true;
+    }
+    return false;
+  }
+
   function applyPayload(data) {
+    if (shouldSkipPayloadUpdate(data)) return;
     lastPayload = data;
     allStores = data.stores || [];
     renderDashboard(data.dashboard || {}, data);
     filterAndRender();
-    if (currentPageMode === 'dashboard') {
-      window.Lav60DashboardStoreMap?.update?.(allStores);
+    syncGatewayDashboardAfterStoresUpdate();
+    if (!data?.refreshing && data?.timestamp && typeof saveStoresPayloadCache === 'function') {
+      saveStoresPayloadCache(data);
+    }
+  }
+
+  function paintStoresFromSessionCache() {
+    const cached = hydrateStoresPayloadFromCache();
+    if (!cached) return false;
+    applyPayload(cached);
+    return true;
+  }
+
+  async function refreshStoresInBackground(options = {}) {
+    try {
+      if (options.force) {
+        window.Lav60?.invalidatePanelStoresCache?.();
+        stopHeartbeatMonitor();
+      }
+      if (!catalogConfig || options.force) {
+        catalogConfig = await loadCatalog({ force: options.force === true });
+      }
+      const token = await ensureDefaultAgentToken();
+      await loadAllStores(token, {
+        force: options.force === true,
+        skipSessionPaint: allStores.length > 0 && !options.force,
+        onUpdate: (partial) => applyPayload(partial),
+      });
+      storesBootstrapped = true;
+    } catch (e) {
+      if (!allStores.length) {
+        const grid = $('storesGrid');
+        if (grid) {
+          grid.innerHTML = `<div class="stores-empty-state"><p>${escapeHtml(e.message)}</p></div>`;
+        }
+        showToast(e.message, false);
+      }
     }
   }
 
   async function loadStores(options = {}) {
     if (refreshInFlight && !options.force) return;
     refreshInFlight = true;
-
     try {
-      if (!catalogConfig) catalogConfig = await loadCatalog();
-      const token = await ensureDefaultAgentToken();
-
-      if (options.force) {
-        stopHeartbeatMonitor();
-      }
-
-      await loadAllStores(token, {
-        force: options.force === true,
-        onUpdate: (partial) => applyPayload(partial),
-      });
+      await refreshStoresInBackground(options);
     } finally {
       refreshInFlight = false;
     }
@@ -2350,31 +2565,43 @@
   function destroy() {
     pageAbort?.abort();
     pageAbort = null;
+    if (offlineDurationTimer) {
+      clearInterval(offlineDurationTimer);
+      offlineDurationTimer = null;
+    }
     closeAgentKpiModal();
     window.Lav60GatewayOverview?.destroy();
-    window.Lav60DashboardStoreMap?.destroy?.();
+    gatewayDashboardMounted = false;
     currentPageMode = null;
+    stopHeartbeatMonitor();
+  }
+
+  function gatewayDashboardStoreList() {
+    const catalogStores = catalogConfig?.stores;
+    if (Array.isArray(catalogStores) && catalogStores.length) return catalogStores;
+    return allStores.length ? allStores : [];
+  }
+
+  function syncGatewayDashboardAfterStoresUpdate() {
+    if (currentPageMode !== 'dashboard' || !$('gatewayOverview')) return;
+    window.Lav60GatewayOverview?.render?.();
   }
 
   function initGatewayDashboardPanel() {
     if (currentPageMode !== 'dashboard' || !$('gatewayOverview') || !panelFetch) return;
+    if (!isMqttGatewayEnabled(catalogConfig)) return;
+    if (gatewayDashboardMounted) {
+      syncGatewayDashboardAfterStoresUpdate();
+      return;
+    }
+    gatewayDashboardMounted = true;
     window.Lav60GatewayOverview?.mount({
       fetchFn: panelFetch,
-      getStores: () => (allStores.length ? allStores : (catalogConfig?.stores || [])),
+      getStores: gatewayDashboardStoreList,
       onStoreAction: (storeId) => {
         window.location.href = gatewayPageHref(storeId);
       },
-    });
-  }
-
-  function initDashboardStoreMapPanel(signal) {
-    if (currentPageMode !== 'dashboard' || !$('dashboardStoreMap') || !panelFetch) return;
-    void window.Lav60DashboardStoreMap?.init?.({
-      panelFetch,
-      signal,
-      resolveStoreDisplayState,
-      storePageHref,
-      getStores: () => allStores,
+      probeActiveOnMount: false,
     });
   }
 
@@ -2403,16 +2630,35 @@
       loadSitesDashboardSummary();
       initInfraDashboardPanel(signal);
       initSitesDashboardPanel(signal);
-      initDashboardStoreMapPanel(signal);
+    }
+
+    const paintedFromCache = paintStoresFromSessionCache();
+
+    if (mode === 'dashboard' && !paintedFromCache && !storesBootstrapped) {
+      renderDashboard({}, { stores: [], refreshing: true, live: false, sessionCache: false });
+    }
+
+    if (mode === 'dashboard' && !catalogConfig) {
+      void loadCatalog()
+        .then((cat) => {
+          catalogConfig = cat;
+          if (currentPageMode === 'dashboard') initGatewayDashboardPanel();
+        })
+        .catch(() => {});
     }
 
     if (storesBootstrapped && allStores.length) {
       renderDashboard(lastPayload?.dashboard || {}, lastPayload || {});
       filterAndRender();
-      if (mode === 'dashboard') {
-        initGatewayDashboardPanel();
-        initDashboardStoreMapPanel(pageAbort?.signal);
-      }
+      if (mode === 'dashboard') initGatewayDashboardPanel();
+      return;
+    }
+
+    if (paintedFromCache) {
+      if (mode === 'dashboard') initGatewayDashboardPanel();
+      void refreshStoresInBackground().then(() => {
+        if (mode === 'dashboard') initGatewayDashboardPanel();
+      });
       return;
     }
 
@@ -2421,11 +2667,7 @@
         const [, cat] = await Promise.all([ensureDefaultAgentToken(), loadCatalog()]);
         catalogConfig = cat;
         await loadStores();
-        storesBootstrapped = true;
-        if (mode === 'dashboard') {
-        initGatewayDashboardPanel();
-        initDashboardStoreMapPanel(pageAbort?.signal);
-      }
+        if (mode === 'dashboard') initGatewayDashboardPanel();
       } catch (e) {
         const grid = $('storesGrid');
         if (grid) {

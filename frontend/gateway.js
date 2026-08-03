@@ -9,20 +9,23 @@
     findMachineMeta,
     mergeMachinesCatalog,
     enrichDoserMeta,
-    getCachedStoreEntry,
-    fetchStoreStatusFromHeartbeat,
     canOperateMachineStatus,
-    isDeviceVisibleInFrontend,
+    deviceUnifiedStatus,
     isDeviceRegisteredInCatalog,
     verifyStoreGatewayLed,
     formatStoreGatewayError,
     syncConfigDevices,
+    devicesFromMachines,
+    isAgentsDisabled,
     agentOperationFailureMessage,
     agentStatusPayloadIndicatesRelease,
     machineListEntryIndicatesRelease,
     dryerReleaseVerifyDelayMs,
     agentPostConfirmsFirstRelease,
     agentPostExplicitlyReleased,
+    getStoreGatewayCacheEntry,
+    setStoreGatewayCacheEntry,
+    isStoreCardSuspended,
   } = window.Lav60;
   const { guardPage, mountUserMenu, panelFetch } = window.Lav60Auth;
 
@@ -37,6 +40,7 @@
 
   const {
     createDeviceCard,
+    canOperateMachine,
     deviceStatusHint,
     buildDoserCardContent,
     btn,
@@ -61,6 +65,7 @@
   let catalog = null;
   let machinesCatalog = [];
   let currentStore = '';
+  let get02PanelDisabled = false;
   let storeGatewayReady = false;
   let storeGatewayError = null;
   let storeGatewayCheckedAt = null;
@@ -73,11 +78,13 @@
   let dryerLocks = {};
   let washerLocks = {};
   const probingDevices = new Set();
+  const activeProbeGroups = new Set();
   let probeGeneration = 0;
   let probeQueueRunner = null;
+  let get02HubList = null;
 
   const GATEWAY_CACHE_KEY = 'lav60:gateway:v1';
-  const GATEWAY_CACHE_VERSION = 4;
+  const GATEWAY_CACHE_VERSION = 5;
   const GATEWAY_TTL_MS = 5 * 60 * 1000;
   const DEVICES_TTL_MS = 10 * 60 * 1000;
 
@@ -121,21 +128,6 @@
     }
   }
 
-  function getStoreGatewayEntry(storeId) {
-    const sid = normalizeStoreId(storeId);
-    return loadGatewayCacheRoot().stores[sid]?.gateway || null;
-  }
-
-  function setStoreGatewayEntry(storeId, entry) {
-    const sid = normalizeStoreId(storeId);
-    if (!sid) return;
-    const root = loadGatewayCacheRoot();
-    if (!root.stores[sid]) root.stores[sid] = {};
-    const checkedAt = Date.now();
-    root.stores[sid].gateway = { online: Boolean(entry.online), error: entry.error || null, checkedAt };
-    saveGatewayCacheRoot(root);
-  }
-
   function getStoreDevicesEntry(storeId) {
     const sid = normalizeStoreId(storeId);
     return loadGatewayCacheRoot().stores[sid]?.devices || null;
@@ -170,6 +162,60 @@
 
   function refreshGatewayOverview() {
     window.Lav60GatewayOverview?.render();
+  }
+
+  function isStoreInGet02Scope(meta) {
+    if (!meta) return false;
+    if (typeof isStoreCardSuspended === 'function' && isStoreCardSuspended(meta)) return false;
+    return String(meta.lav60_status || '').toLowerCase() !== 'suspended';
+  }
+
+  function isGet02StoreOnline(meta) {
+    if (!isStoreInGet02Scope(meta)) return false;
+    const sid = normalizeStoreId(meta.id);
+    if (!sid) return false;
+    const overviewStatus = window.Lav60GatewayOverview?.statusForStore?.(sid);
+    if (overviewStatus) {
+      if (overviewStatus.checking) return false;
+      return overviewStatus.online === true;
+    }
+    const cached = getStoreGatewayCacheEntry(sid);
+    return cached?.online === true;
+  }
+
+  function onlineStoresForGet02() {
+    const fromOverview = window.Lav60GatewayOverview?.getOnlineStoreMetas?.();
+    if (Array.isArray(fromOverview)) return fromOverview;
+    return (catalog?.stores || []).filter((meta) => isGet02StoreOnline(meta));
+  }
+
+  function mountGet02HubList() {
+    if (!window.Lav60AgentHubStores?.mountHubList) return;
+    get02HubList = Lav60AgentHubStores.mountHubList({
+      listEl: $('get02StoreList'),
+      searchEl: $('get02StoreSearch'),
+      metaEl: $('get02StoreHubMeta'),
+      countEl: $('get02StoreHubCount'),
+      getItems: onlineStoresForGet02,
+      getSubtext: (meta) => {
+        const sid = normalizeStoreId(meta.id);
+        const status = window.Lav60GatewayOverview?.statusForStore?.(sid);
+        if (status?.checkedAt) return `Online · ${formatCacheAge(status.checkedAt)}`;
+        return 'Gateway online';
+      },
+      onSelect: (sid) => {
+        void applyStore(sid);
+      },
+      emptyText: 'Nenhuma loja com gateway GET02 online.',
+    });
+  }
+
+  function refreshGet02HubList() {
+    if (get02HubList) {
+      get02HubList.refresh();
+      return;
+    }
+    mountGet02HubList();
   }
 
   function syncGatewayOverviewStore(storeId, entry) {
@@ -241,7 +287,11 @@
       return;
     }
     const code = currentStore.toUpperCase();
-    if (state === 'checking') {
+    if (state === 'waiting') {
+      el.textContent = `Gateway: aguardando (${code})`;
+      el.classList.add('gateway-meta--warn');
+      if (hint) hint.textContent = 'Use ↻ em cada equipamento para verificar o status MQTT';
+    } else if (state === 'checking') {
       el.textContent = `Gateway: verificando módulo (${code})…`;
       el.classList.add('gateway-meta--warn');
       if (hint) hint.textContent = 'Enviando POST /led/on ao gateway central…';
@@ -271,15 +321,61 @@
   function updateStoreStatusButtons() {
     const verifyBtn = $('btnVerifyGatewayModule');
     const devicesBtn = $('btnRefreshGatewayDevices');
-    const probing = probingDevices.size > 0 || Boolean(probeQueueRunner);
+    const batchProbing = Boolean(probeQueueRunner);
+    const anyProbing = probingDevices.size > 0 || batchProbing;
+    const canProbe = Boolean(currentStore && !storeGatewayChecking);
     if (verifyBtn) {
       verifyBtn.disabled = !currentStore || storeGatewayChecking;
       verifyBtn.textContent = storeGatewayChecking ? 'Verificando…' : 'Verificar módulo';
     }
     if (devicesBtn) {
-      devicesBtn.disabled = !currentStore || !storeGatewayReady || storeGatewayChecking || probing;
-      devicesBtn.textContent = probing ? 'Verificando…' : 'Atualizar equipamentos';
+      devicesBtn.disabled = !canProbe || batchProbing;
+      devicesBtn.textContent = batchProbing ? 'Verificando…' : 'Atualizar equipamentos';
     }
+    document.querySelectorAll('[data-refresh-group]').forEach((btn) => {
+      const group = btn.dataset.refreshGroup;
+      const groupBusy = batchProbing && activeProbeGroups.has(group);
+      btn.disabled = !canProbe || groupBusy;
+      btn.textContent = groupBusy ? 'Verificando…' : 'Atualizar';
+    });
+  }
+
+  function deviceRefreshKey(deviceType, machine) {
+    const id = machine == null || machine === '' ? '_' : String(machine);
+    return `${deviceType}:${id}`;
+  }
+
+  function parseDeviceRefreshKey(raw) {
+    const text = String(raw || '');
+    const colon = text.indexOf(':');
+    if (colon < 1) return null;
+    const deviceType = text.slice(0, colon).toLowerCase();
+    const machineRaw = text.slice(colon + 1);
+    const machine = machineRaw === '_' ? null : machineRaw;
+    return { deviceType, machine };
+  }
+
+  function canRefreshDevice(deviceType, machine) {
+    if (!currentStore || storeGatewayChecking) return false;
+    if (isDeviceProbing(deviceType, machine)) return false;
+    return true;
+  }
+
+  function deviceCardRefreshOptions(deviceType, machine) {
+    return {
+      refreshKey: deviceRefreshKey(deviceType, machine),
+      canRefresh: canRefreshDevice(deviceType, machine),
+      probing: isDeviceProbing(deviceType, machine),
+      requireProbeOnline: true,
+      pendingLabel: 'Aguardando',
+    };
+  }
+
+  async function refreshGatewayDevice(deviceType, machine) {
+    const dtype = String(deviceType || '').toLowerCase();
+    if (!dtype) return;
+    if (!canRefreshDevice(dtype, machine)) return;
+    await probeDeviceOnline(dtype, machine, { silent: false, ignoreGeneration: true });
   }
 
   async function verifyStoreGateway(storeId, { force = false } = {}) {
@@ -288,30 +384,47 @@
     storeGatewayError = null;
     hideStoreGatewayAlert();
 
-    const cached = getStoreGatewayEntry(storeId);
+    const cached = getStoreGatewayCacheEntry(storeId);
     if (!force && cached && isCacheFresh(cached.checkedAt, GATEWAY_TTL_MS)) {
       if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
       storeGatewayCheckedAt = cached.checkedAt;
       storeGatewayFromCache = true;
-      if (cached.online) {
+      const gatewayOperable = cached.online === true || cached.apiOnline === true;
+      if (gatewayOperable) {
         storeGatewayReady = true;
-        storeGatewayError = null;
-        updateStoreGatewayMeta('online');
-        hideStoreGatewayAlert();
+        storeGatewayError = cached.online === true ? null : cached.error || null;
+        if (cached.online === true) {
+          updateStoreGatewayMeta('online');
+          hideStoreGatewayAlert();
+        } else {
+          showStoreGatewayAlert(
+            storeGatewayError || 'Módulo da loja não respondeu — operação via gateway central'
+          );
+          updateStoreGatewayMeta('online', storeGatewayError || 'API online, módulo sem resposta');
+        }
         setDevicesPanelBlocked(false);
-        gatewayDebug('ESP8266 em cache (online)', { store: storeId, age: formatCacheAge(cached.checkedAt) });
-        syncGatewayOverviewStore(storeId, cached);
-        startBackgroundDeviceProbes({ force });
+        gatewayDebug('Gateway em cache (operável)', { store: storeId, age: formatCacheAge(cached.checkedAt) });
+        syncGatewayOverviewStore(storeId, {
+          online: cached.online === true,
+          apiOnline: cached.apiOnline === true,
+          error: storeGatewayError,
+          checkedAt: cached.checkedAt,
+        });
+        applyMachinesToGatewayConfig();
+        syncGatewayDeviceLists(pingStatus);
         renderDevices();
         return true;
       }
-      storeGatewayCheckedAt = cached.checkedAt;
-      storeGatewayFromCache = true;
       storeGatewayError = cached.error || formatStoreGatewayError(storeId, '');
       showStoreGatewayAlert(storeGatewayError);
       updateStoreGatewayMeta('offline');
       setDevicesPanelBlocked(true);
-      syncGatewayOverviewStore(storeId, cached);
+      syncGatewayOverviewStore(storeId, {
+        online: false,
+        apiOnline: cached.apiOnline === true,
+        error: storeGatewayError,
+        checkedAt: cached.checkedAt,
+      });
       refreshGatewayOverview();
       renderDevices();
       return false;
@@ -319,7 +432,6 @@
 
     showStoreGatewayChecking(true);
     updateStoreGatewayMeta('checking');
-    setDevicesPanelBlocked(true);
     renderDevices();
 
     try {
@@ -328,31 +440,51 @@
       const result = await verifyStoreGatewayLed(storeId, panelFetch, { force });
       if (gen !== storeCheckGeneration || normalizeStoreId(storeId) !== currentStore) return false;
 
-      if (result.online) {
-        setStoreGatewayEntry(storeId, { online: true, error: null });
+      const gatewayOperable = result.online === true || result.apiOnline === true;
+      if (gatewayOperable) {
+        setStoreGatewayCacheEntry(storeId, {
+          online: result.online === true,
+          apiOnline: result.apiOnline === true,
+          error: result.error || null,
+        });
         storeGatewayReady = true;
-        storeGatewayError = null;
+        storeGatewayError = result.online === true ? null : result.error || null;
         storeGatewayCheckedAt = result.checkedAt || Date.now();
         storeGatewayFromCache = Boolean(result.fromCache);
-        updateStoreGatewayMeta('online');
-        hideStoreGatewayAlert();
+        if (result.online === true) {
+          updateStoreGatewayMeta('online');
+          hideStoreGatewayAlert();
+        } else {
+          showStoreGatewayAlert(
+            storeGatewayError || 'Módulo da loja não respondeu — operação via gateway central'
+          );
+          updateStoreGatewayMeta('online', storeGatewayError || 'API online, módulo sem resposta');
+        }
         setDevicesPanelBlocked(false);
-        gatewayDebug('ESP8266 respondeu (verify)', { store: storeId, fromCache: result.fromCache });
+        gatewayDebug('Gateway operável (verify)', {
+          store: storeId,
+          espOnline: result.online,
+          apiOnline: result.apiOnline,
+          fromCache: result.fromCache,
+        });
 
         syncGatewayOverviewStore(storeId, {
-          online: true,
-          error: null,
+          online: result.online === true,
+          apiOnline: result.apiOnline === true,
+          error: storeGatewayError,
           checkedAt: result.checkedAt || Date.now(),
         });
-        startBackgroundDeviceProbes({ force });
+        applyMachinesToGatewayConfig();
+        syncGatewayDeviceLists(pingStatus);
         refreshGatewayOverview();
+        renderDevices();
         return true;
       }
 
       storeGatewayError = result.error || formatStoreGatewayError(storeId, '');
       storeGatewayCheckedAt = result.checkedAt || Date.now();
       storeGatewayFromCache = Boolean(result.fromCache);
-      setStoreGatewayEntry(storeId, { online: false, error: storeGatewayError });
+      setStoreGatewayCacheEntry(storeId, { online: false, apiOnline: false, error: storeGatewayError });
       syncGatewayOverviewStore(storeId, {
         online: false,
         error: storeGatewayError,
@@ -369,7 +501,7 @@
       storeGatewayError = formatStoreGatewayError(storeId, err.message);
       storeGatewayCheckedAt = Date.now();
       storeGatewayFromCache = false;
-      setStoreGatewayEntry(storeId, { online: false, error: storeGatewayError });
+      setStoreGatewayCacheEntry(storeId, { online: false, apiOnline: false, error: storeGatewayError });
       syncGatewayOverviewStore(storeId, {
         online: false,
         error: storeGatewayError,
@@ -398,7 +530,7 @@
   }
 
   async function refreshGatewayDevices() {
-    if (!currentStore || !storeGatewayReady || storeGatewayChecking) return;
+    if (!currentStore || storeGatewayChecking) return;
     try {
       await startBackgroundDeviceProbes({ force: true });
       if (normalizeStoreId(currentStore) && !probeQueueRunner && probingDevices.size === 0) {
@@ -406,6 +538,28 @@
       }
     } catch {
       showToast('Falha ao verificar equipamentos', false);
+    }
+  }
+
+  const GROUP_REFRESH_LABELS = {
+    washer: 'Lavadoras',
+    dryer: 'Secadoras',
+    doser: 'Dosadoras',
+    ac: 'Ar condicionado',
+  };
+
+  async function refreshGatewayDeviceGroup(deviceType) {
+    const dtype = String(deviceType || '').toLowerCase();
+    if (!GROUP_REFRESH_LABELS[dtype]) return;
+    if (!currentStore || storeGatewayChecking) return;
+    if (probingDevices.size > 0 || probeQueueRunner) return;
+    try {
+      await startBackgroundDeviceProbes({ force: true, deviceTypes: [dtype] });
+      if (normalizeStoreId(currentStore) && !probeQueueRunner && probingDevices.size === 0) {
+        showToast(`Status · ${GROUP_REFRESH_LABELS[dtype]} atualizado`);
+      }
+    } catch {
+      showToast(`Falha ao verificar ${GROUP_REFRESH_LABELS[dtype].toLowerCase()}`, false);
     }
   }
 
@@ -419,6 +573,20 @@
     });
     $('btnRefreshGatewayDevices')?.addEventListener('click', () => {
       void refreshGatewayDevices();
+    });
+    $('devicesPanel')?.addEventListener('click', (e) => {
+      const deviceBtn = e.target.closest('[data-refresh-device]');
+      if (deviceBtn && !deviceBtn.disabled) {
+        const parsed = parseDeviceRefreshKey(deviceBtn.dataset.refreshDevice);
+        if (parsed) {
+          e.preventDefault();
+          void refreshGatewayDevice(parsed.deviceType, parsed.machine);
+        }
+        return;
+      }
+      const btn = e.target.closest('[data-refresh-group]');
+      if (!btn || btn.disabled) return;
+      void refreshGatewayDeviceGroup(btn.dataset.refreshGroup);
     });
   }
 
@@ -436,8 +604,45 @@
     if (!res.ok) throw new Error('Configuração do gateway indisponível');
     gatewayConfig = await res.json();
     gatewayConfig.washer_dosage_options = WASHER_DOSAGE_OPTIONS;
+    gatewayConfig.dryer_minutes = [15, 30, 45];
+    gatewayConfig.ac_temperatures = ['18', '22', 'off'];
+    gatewayConfig.ac_id = gatewayConfig.ac_id || '110';
     $('tokenAlert').classList.toggle('hidden', Boolean(gatewayConfig.token_configured));
     return gatewayConfig;
+  }
+
+  function applyMachinesToGatewayConfig() {
+    if (!gatewayConfig || !machinesCatalog.length) return false;
+    const dev = devicesFromMachines(machinesCatalog, pingStatus || {});
+    gatewayConfig.washers = dev.washers || [];
+    gatewayConfig.dryers = dev.dryers || [];
+    gatewayConfig.dosers = dev.dosers || [];
+    if (dev.ac) gatewayConfig.ac_id = dev.ac;
+    return gatewayConfig.washers.length + gatewayConfig.dryers.length + gatewayConfig.dosers.length > 0;
+  }
+
+  async function fetchPortalMachinesCatalog(storeId) {
+    const sid = normalizeStoreId(storeId);
+    if (!sid) return false;
+    const urls = [
+      `/api/gateway/machines/${encodeURIComponent(sid)}`,
+      `/api/gateway/${encodeURIComponent(sid)}/machines`,
+      `/api/stores/${encodeURIComponent(sid)}/machines`,
+    ];
+    for (const url of urls) {
+      try {
+        const res = await panelFetch(url);
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (Array.isArray(data.machines) && data.machines.length) {
+          machinesCatalog = mergeMachinesCatalog(data.machines, machinesCatalog);
+          return true;
+        }
+      } catch {
+        /* tenta próxima rota */
+      }
+    }
+    return false;
   }
 
   function readGatewayError(data, status) {
@@ -447,7 +652,9 @@
 
   async function gatewayRequest(method, subpath, body, options = {}) {
     if (!currentStore) throw new Error('Selecione uma loja');
-    if (!storeGatewayReady) {
+    const normalizedPath = subpath.replace(/^\//, '');
+    const isStatusRead = method === 'GET' && normalizedPath.startsWith('status/');
+    if (!storeGatewayReady && !options.allowWithoutGateway && !isStatusRead) {
       throw new Error(storeGatewayError || 'Gateway da loja não está online');
     }
     const url = `/api/gateway/${encodeURIComponent(currentStore)}/${subpath.replace(/^\//, '')}`;
@@ -551,27 +758,12 @@
     scheduleDeviceLockTick();
   }
 
-  async function fetchStoreAgentConfig(sid) {
-    const res = await panelFetch(`/api/stores/${encodeURIComponent(sid)}/agent/config`);
-    if (!res.ok) return null;
-    return res.json();
+  async function fetchStoreAgentConfig(_sid) {
+    return null;
   }
 
-  function applyStoreAgentSettings(data) {
-    if (!data || !gatewayConfig) return;
-    if (data.devices) {
-      gatewayConfig._agentDevices = data.devices;
-      if (data.devices.ac) gatewayConfig.ac_id = data.devices.ac;
-    }
-    if (Array.isArray(data.ac_temperatures) && data.ac_temperatures.length) {
-      gatewayConfig.ac_temperatures = data.ac_temperatures;
-    }
-    if (Array.isArray(data.dryer_minutes) && data.dryer_minutes.length) {
-      gatewayConfig.dryer_minutes = data.dryer_minutes;
-    }
-    if (data.last_network_check && typeof data.last_network_check === 'object') {
-      gatewayConfig._agentNetwork = data.last_network_check;
-    }
+  function applyStoreAgentSettings(_data) {
+    /* agente local desativado — listas vêm do catálogo Lav60; online via status/{tipo}/{id} */
   }
 
   function gatewayNetworkHasProbeData(net) {
@@ -652,36 +844,18 @@
       }
       return;
     }
-    const meta =
-      (catalog?.stores || []).find((s) => normalizeStoreId(s.id) === sid) || { id: sid, name: sid.toUpperCase() };
 
-    let agentData = null;
-    try {
-      agentData = await fetchStoreAgentConfig(sid);
-      if (agentData) applyStoreAgentSettings(agentData);
-    } catch {
-      /* config do agente opcional */
+    machinesCatalog = [];
+    if (gatewayConfig) {
+      delete gatewayConfig._agentDevices;
+      delete gatewayConfig._agentNetwork;
+      gatewayConfig.washers = [];
+      gatewayConfig.dryers = [];
+      gatewayConfig.dosers = [];
     }
 
-    try {
-      const cached = catalog ? await getCachedStoreEntry(meta, catalog) : null;
-      if (cached?.status?.machines?.length) {
-        machinesCatalog = mergeMachinesCatalog(cached.status.machines, agentData?.machines);
-        return;
-      }
-      if (catalog) {
-        const { status } = await fetchStoreStatusFromHeartbeat(meta, catalog);
-        machinesCatalog = mergeMachinesCatalog(status?.machines, agentData?.machines);
-      }
-      if (!machinesCatalog.length && agentData?.machines?.length) {
-        machinesCatalog = mergeMachinesCatalog(agentData.machines);
-      }
-      if (machinesCatalog.length || gatewayConfig?._agentDevices) return;
-    } catch {
-      /* cache/heartbeat indisponível — cards seguem sem metadados extras */
-    }
-    if (!agentData?.machines?.length) machinesCatalog = [];
-    if (!gatewayConfig?._agentDevices && gatewayConfig) delete gatewayConfig._agentDevices;
+    await fetchPortalMachinesCatalog(sid);
+    applyMachinesToGatewayConfig();
   }
 
   function getMachinesCatalog() {
@@ -759,9 +933,10 @@
   }
 
   function visibleDeviceIds(deviceType, ids) {
-    if (!getMachinesCatalog().length) return ids || [];
-    const network = gatewayNetworkContext();
-    return (ids || []).filter((id) => isDeviceVisibleInFrontend(deviceType, id, network));
+    const catalog = getMachinesCatalog();
+    if (!catalog.length) return ids || [];
+    // GET02: exibir todo equipamento cadastrado na API Lav60; online/offline fica no card (↻).
+    return (ids || []).filter((id) => isDeviceRegisteredInCatalog(catalog, deviceType, id));
   }
 
   function deviceOnline(deviceType, id) {
@@ -927,7 +1102,7 @@
     const unlockBtn = card.querySelector('.device-card__unlock');
     const releaseBtn = card.querySelector('button[data-dryer-release]');
     const choiceButtons = card.querySelectorAll('.device-card__choice');
-    const operable = online === true && canOperateMachineStatus(meta?.status);
+    const operable = online === true && canOperateMachine(meta, true);
 
     if (remaining) {
       card.classList.add('device-card--busy');
@@ -935,17 +1110,24 @@
       if (releaseBtn) releaseBtn.disabled = true;
       choiceButtons.forEach((b) => { b.disabled = true; });
       unlockBtn?.classList.remove('device-card__unlock--hidden');
-      return;
+      return true;
     }
 
     card.classList.remove('device-card--busy');
-    if (statusEl) statusEl.textContent = operable ? '' : deviceStatusHint({ online: online === true, operable, statusInfo: { label: meta?.status_label || 'Indisponível' } });
+    if (statusEl) {
+      statusEl.textContent = operable
+        ? ''
+        : online === null
+          ? 'Aguardando'
+          : deviceUnifiedStatus(online, meta).label;
+    }
     if (releaseBtn) {
       const hasChoice = Array.from(choiceButtons).some((b) => b.classList.contains('device-card__choice--active'));
       releaseBtn.disabled = !operable || !hasChoice;
     }
     choiceButtons.forEach((b) => { b.disabled = !operable; });
     unlockBtn?.classList.add('device-card__unlock--hidden');
+    return false;
   }
 
   function applyDryerLockUI(card, dryerId) {
@@ -998,7 +1180,7 @@
   }
 
   async function probeDeviceOnline(deviceType, machine, options = {}) {
-    const { silent = false, generation = probeGeneration } = options;
+    const { silent = false, generation = probeGeneration, ignoreGeneration = false } = options;
     if (!currentStore) return;
     const path = deviceEndpointPath(deviceType, machine);
     if (!path) return;
@@ -1007,15 +1189,16 @@
     const label = devicePingLabel(deviceType, machine);
     probingDevices.add(key);
     updateDeviceStatusPill();
+    renderDevices();
 
     let resolved = null;
 
     try {
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        if (generation !== probeGeneration) return;
+        if (!ignoreGeneration && generation !== probeGeneration) return;
 
         const result = await gatewayRequest('GET', path, undefined, { allowHttpError: true });
-        if (generation !== probeGeneration) return;
+        if (!ignoreGeneration && generation !== probeGeneration) return;
 
         const online = extractOnlineFromProbeResult(result);
         if (online === true || online === false) {
@@ -1046,43 +1229,62 @@
       if (!silent && resolved === true) showToast(`${label} — online`);
       else if (!silent && resolved === false) showToast(`${label} — offline`, false);
     } catch (err) {
-      if (generation !== probeGeneration) return;
+      if (!ignoreGeneration && generation !== probeGeneration) return;
       if (!silent) {
         showToast(`Ping ${label}: ${friendlyUserMessage(err.message)}`, false);
         appendLog(`Ping ${label}`, false, err.payload || err.message);
       }
     } finally {
       probingDevices.delete(key);
-      if (generation !== probeGeneration) return;
-      const state =
-        deviceType === 'ac'
-          ? pingStatus?.ac ?? resolved
-          : pingStatus?.[`${deviceType}s`]?.[machine] ?? resolved;
+      if (!ignoreGeneration && generation !== probeGeneration) return;
       updateDeviceStatusPill();
+      if (currentStore && pingStatus) {
+        syncGatewayDeviceLists(pingStatus);
+        setStoreDevicesEntry(currentStore, pingStatus);
+      }
+      renderDevices();
+      updateStoreStatusButtons();
     }
   }
 
-  function collectDeviceProbeJobs() {
+  function collectDeviceProbeJobs(deviceTypes = null) {
+    const allowed = Array.isArray(deviceTypes) && deviceTypes.length
+      ? new Set(deviceTypes.map((t) => String(t || '').toLowerCase()))
+      : null;
+    const include = (type) => !allowed || allowed.has(type);
     const jobs = [];
-    (gatewayConfig?.washers || []).forEach((id) => jobs.push({ deviceType: 'washer', machine: id }));
-    (gatewayConfig?.dryers || []).forEach((id) => jobs.push({ deviceType: 'dryer', machine: id }));
-    (gatewayConfig?.dosers || []).forEach((id) => jobs.push({ deviceType: 'doser', machine: id }));
-    jobs.push({ deviceType: 'ac', machine: null });
+    if (include('washer')) {
+      (gatewayConfig?.washers || []).forEach((id) => jobs.push({ deviceType: 'washer', machine: id }));
+    }
+    if (include('dryer')) {
+      (gatewayConfig?.dryers || []).forEach((id) => jobs.push({ deviceType: 'dryer', machine: id }));
+    }
+    if (include('doser')) {
+      (gatewayConfig?.dosers || []).forEach((id) => jobs.push({ deviceType: 'doser', machine: id }));
+    }
+    if (include('ac')) {
+      jobs.push({ deviceType: 'ac', machine: null });
+    }
     return jobs;
   }
 
-  async function runProbeQueue(generation) {
+  async function runProbeQueue(generation, jobs) {
     if (probeQueueRunner) {
       await probeQueueRunner.catch(() => {});
     }
 
-    const jobs = collectDeviceProbeJobs();
+    const queue = Array.isArray(jobs) ? jobs : collectDeviceProbeJobs();
+    const groups = new Set(queue.map((job) => job.deviceType));
     probeQueueRunner = (async () => {
-      for (const { deviceType, machine } of jobs) {
+      const batchSize = 4;
+      for (let i = 0; i < queue.length; i += batchSize) {
         if (generation !== probeGeneration) return;
-        await probeDeviceOnline(deviceType, machine, { silent: true, generation });
-        if (generation !== probeGeneration) return;
-        await sleep(250);
+        const batch = queue.slice(i, i + batchSize);
+        await Promise.all(
+          batch.map(({ deviceType, machine }) =>
+            probeDeviceOnline(deviceType, machine, { silent: true, generation })
+          )
+        );
       }
     })();
 
@@ -1096,6 +1298,7 @@
     } catch {
       /* fila cancelada ao trocar loja */
     } finally {
+      groups.forEach((g) => activeProbeGroups.delete(g));
       if (probeQueueRunner && generation === probeGeneration) {
         probeQueueRunner = null;
       }
@@ -1105,12 +1308,15 @@
     }
   }
 
-  function startBackgroundDeviceProbes({ force = false } = {}) {
-    if (!currentStore || !gatewayConfig || !storeGatewayReady) return Promise.resolve();
+  function startBackgroundDeviceProbes({ force = false, deviceTypes = null } = {}) {
+    if (!currentStore || !gatewayConfig) return Promise.resolve();
+    const jobs = collectDeviceProbeJobs(deviceTypes);
+    if (!jobs.length) return Promise.resolve();
 
+    const scoped = Array.isArray(deviceTypes) && deviceTypes.length > 0;
     const cached = getStoreDevicesEntry(currentStore);
     const cacheStale = isDeviceCacheStale(cached?.pingStatus);
-    if (!force && !cacheStale && cached?.pingStatus && isCacheFresh(cached.checkedAt, DEVICES_TTL_MS)) {
+    if (!force && !scoped && !cacheStale && cached?.pingStatus && isCacheFresh(cached.checkedAt, DEVICES_TTL_MS)) {
       pingStatus = clonePingStatus(cached.pingStatus);
       renderDevices();
       gatewayDebug('Equipamentos em cache', {
@@ -1122,11 +1328,12 @@
 
     probeGeneration += 1;
     const generation = probeGeneration;
-    probingDevices.clear();
-    resetPingStatus();
+    if (!scoped) probingDevices.clear();
+    jobs.forEach((job) => activeProbeGroups.add(job.deviceType));
+    rebuildPingStatusFromConfig();
     renderDevices();
     updateStoreStatusButtons();
-    return runProbeQueue(generation);
+    return runProbeQueue(generation, jobs);
   }
 
   async function verifyGatewayDeviceRelease(deviceType, deviceId, options = {}) {
@@ -1161,11 +1368,6 @@
       }
       const fail = agentOperationFailureMessage(result.data);
       if (fail) throw new Error(fail);
-
-      const storeResult = await gatewayRequest('GET', 'status', undefined, { allowHttpError: true });
-      if (machineListEntryIndicatesRelease(storeResult.data?.machines, dtype, id)) {
-        return { ...storeResult.data, release_verified: true };
-      }
     }
 
     if (options.postData && agentPostExplicitlyReleased(options.postData)) {
@@ -1435,7 +1637,7 @@
           if (hint) statusEl.textContent = hint;
         },
         meta,
-        { probing: isDeviceProbing('washer', id) }
+        deviceCardRefreshOptions('washer', id)
       );
       card.dataset.washerId = id;
       grid.appendChild(card);
@@ -1485,11 +1687,11 @@
           if (hint) statusEl.textContent = hint;
         },
         meta,
-        { probing: isDeviceProbing('dryer', id) }
+        deviceCardRefreshOptions('dryer', id)
       );
       card.dataset.dryerId = id;
       grid.appendChild(card);
-      if (online === true) syncDryerCardControls(card, meta, online);
+      if (online !== null) syncDryerCardControls(card, meta, online);
     });
   }
 
@@ -1507,7 +1709,7 @@
         online,
         (actions, _card, ctx) => buildDoserCardContent(actions, id, ctx, runAction, doserCardApi),
         meta,
-        { probing: isDeviceProbing('doser', id) }
+        deviceCardRefreshOptions('doser', id)
       );
       card.classList.add('device-card--doser');
       card.dataset.doserId = id;
@@ -1519,7 +1721,8 @@
     const grid = $('acGrid');
     grid.innerHTML = '';
     if (!gatewayConfig) return;
-    const temps = gatewayConfig.ac_temperatures || ['18', '22', 'off'];
+    const temps = ['18', '22', 'off'];
+    gatewayConfig.ac_temperatures = temps;
     const online = deviceOnline('ac', null);
     const meta = getMachineMeta('110', 'ac') || { machine_type_label: 'Ar-condicionado' };
 
@@ -1566,7 +1769,7 @@
         syncReleaseButtonWithPicker(releaseBtn, picker, ctx.operable);
       },
       meta,
-      { probing: isDeviceProbing('ac', null) }
+      deviceCardRefreshOptions('ac', null)
     );
     grid.appendChild(card);
   }
@@ -1584,9 +1787,27 @@
     $('devicesPanel')?.classList.toggle('hidden', !currentStore);
   }
 
+  function syncStorePageClass() {
+    document.body.classList.toggle('page-store', Boolean(currentStore));
+  }
+
+  function syncHubPanelVisibility() {
+    const showHub = !currentStore && !get02PanelDisabled;
+    $('agentPageHub')?.classList.toggle('hidden', !showHub);
+    $('agentStoreMode')?.classList.toggle('hidden', !currentStore);
+    syncStorePageClass();
+  }
+
   function updateStoreStatusBarVisibility() {
     $('storeStatusBar')?.classList.toggle('hidden', !currentStore);
-    $('gatewayOverview')?.classList.toggle('hidden', Boolean(currentStore));
+    syncHubPanelVisibility();
+  }
+
+  function updateGet02DisabledAlert(catalogData, gatewayCfg) {
+    get02PanelDisabled =
+      catalogData?.mqtt_gateway_enabled === false || !gatewayCfg?.token_configured;
+    $('get02DisabledAlert')?.classList.toggle('hidden', !get02PanelDisabled);
+    syncHubPanelVisibility();
   }
 
   async function applyStore(next) {
@@ -1598,6 +1819,7 @@
     storeGatewayCheckedAt = null;
     storeGatewayFromCache = false;
     probingDevices.clear();
+    activeProbeGroups.clear();
 
     if (!next) {
       currentStore = '';
@@ -1622,22 +1844,31 @@
     window.history.replaceState({}, '', url);
     await loadMachinesForStore(next);
     syncGatewayDeviceLists();
-    rebuildPingStatusFromConfig();
+    resetPingStatus();
     initDeviceLocks();
     updateDevicesPanelVisibility();
     updateStoreStatusBarVisibility();
-    refreshGatewayOverview();
+    setDevicesPanelBlocked(false);
+    storeGatewayReady = true;
+    storeGatewayError = null;
+    hideStoreGatewayAlert();
+    showStoreGatewayChecking(false);
+    updateStoreGatewayMeta('waiting');
     renderDevices();
-    gatewayDebug('Loja selecionada — verificando gateway', { store: currentStore });
-    await verifyStoreGateway(next);
+    updateStoreStatusButtons();
+    gatewayDebug('Loja selecionada — aguardando verificação MQTT por equipamento', { store: currentStore });
   }
 
   async function init() {
-    const ok = await guardPage({ returnPath: `gateway.html${window.location.search}` });
-    if (!ok) return;
+    // No SPA, autenticação já tratada pelo router.js boot().
+    if (!document.getElementById('appView')) {
+      const ok = await guardPage({ returnPath: `gateway.html${window.location.search}` });
+      if (!ok) return;
+    }
+    window.Lav60AgentNav?.render?.('get02');
     bindConfirmEvents();
     bindStoreStatusBarEvents();
-    await mountUserMenu($('headerUserMenu'));
+    if ($('headerUserMenu')) await mountUserMenu($('headerUserMenu'));
 
     if (window.Lav60Audit) {
       await Lav60Audit.refreshStatus();
@@ -1646,6 +1877,7 @@
     try {
       await loadGatewayConfig();
       catalog = await loadCatalog();
+      updateGet02DisabledAlert(catalog, gatewayConfig);
       resetPingStatus();
       setDevicesPanelBlocked(true);
       updateDevicesPanelVisibility();
@@ -1656,9 +1888,18 @@
       window.Lav60GatewayOverview?.mount({
         fetchFn: panelFetch,
         getStores: () => catalog?.stores || [],
+        onStoreAction: (sid) => {
+          void applyStore(sid);
+        },
+        onStoresUpdated: () => refreshGet02HubList(),
+        probeActiveOnMount: false,
       });
+      mountGet02HubList();
       if (initial) {
+        void Lav60GatewayOverview?.probeStore?.(initial, { force: false });
         void applyStore(initial);
+      } else {
+        Lav60GatewayOverview?.refreshFromCache?.({ fetchServer: false });
       }
     } catch (err) {
       showToast(err.message, false);
@@ -1667,8 +1908,25 @@
     checkApiHealth().catch(() => {});
   }
 
-  init().catch((err) => {
-    document.body.classList.remove('auth-pending');
-    showToast(err.message || 'Erro ao iniciar', false);
-  });
+  function destroy() {
+    get02HubList = null;
+    document.body.classList.remove('page-store');
+  }
+
+  // No SPA: exposto para o router chamar via Lav60AgentGet02Page.init()
+  // Em standalone: auto-executa imediatamente
+  if (document.getElementById('appView')) {
+    window.Lav60AgentGet02Page = {
+      init: () => init().catch((err) => {
+        document.body.classList.remove('auth-pending');
+        showToast(err.message || 'Erro ao iniciar', false);
+      }),
+      destroy,
+    };
+  } else {
+    init().catch((err) => {
+      document.body.classList.remove('auth-pending');
+      showToast(err.message || 'Erro ao iniciar', false);
+    });
+  }
 })();

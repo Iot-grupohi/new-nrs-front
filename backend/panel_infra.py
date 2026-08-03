@@ -13,18 +13,21 @@ from typing import Any
 import httpx
 
 from panel.lav60_env import DATA_DIR, env_value, read_json_file
+from panel.runtime_paths import bundle_root
 
 DO_API_BASE = "https://api.digitalocean.com/v2"
 METRICS_INTERVAL_SEC = 300
-DB_POLL_INTERVAL_SEC = 60
+DB_POLL_INTERVAL_SEC = 300
 REGISTRY_PATH = DATA_DIR / "infra_registry.json"
-DEPLOY_REGISTRY_PATH = Path(__file__).resolve().parent.parent / "deploy" / "infra_registry.json"
+DEPLOY_REGISTRY_PATH = bundle_root() / "deploy" / "infra_registry.json"
 _DB_HISTORY_PATH = DATA_DIR / "db_metrics_history.json"
 _VPS_STORE_PATH = DATA_DIR / "vps_metrics_store.json"
 _DB_STORE_PATH = DATA_DIR / "db_metrics_store.json"
 _CATALOG_STORE_PATH = DATA_DIR / "infra_catalog_store.json"
 _INFRA_STORE_REFRESH_SEC = 300
-_INFRA_POLL_WINDOWS = (3600, 21600, 86400)
+# Background poll: janela canônica 24h (outras janelas sob demanda / cache).
+_INFRA_POLL_WINDOWS = (86400,)
+_POLL_CONCURRENCY = 4
 _metrics_cache: dict[str, dict[str, Any]] = {}
 CACHE_TTL_SEC = 120
 DB_CACHE_TTL_SEC = 300
@@ -265,8 +268,9 @@ async def _do_get(path: str, token: str, params: dict[str, Any] | None = None) -
         raise RuntimeError("DIGITALOCEAN_TOKEN não configurado")
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     url = f"{DO_API_BASE}{path}"
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        res = await client.get(url, headers=headers, params=params or {})
+    from panel import http_client
+
+    res = await http_client.client().get(url, headers=headers, params=params or {}, timeout=30.0)
     try:
         body = res.json() if res.content else {}
     except Exception:
@@ -285,8 +289,9 @@ async def _do_put(path: str, token: str, body: dict[str, Any]) -> Any:
         "Content-Type": "application/json",
     }
     url = f"{DO_API_BASE}{path}"
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        res = await client.put(url, headers=headers, json=body)
+    from panel import http_client
+
+    res = await http_client.client().put(url, headers=headers, json=body, timeout=30.0)
     try:
         payload = res.json() if res.content else {}
     except Exception:
@@ -297,16 +302,18 @@ async def _do_put(path: str, token: str, body: dict[str, Any]) -> Any:
 
 
 async def detect_public_ip() -> str | None:
-    async with httpx.AsyncClient(timeout=6.0) as client:
-        for url in ("https://api.ipify.org", "https://ifconfig.me/ip"):
-            try:
-                res = await client.get(url, headers={"Accept": "text/plain"})
-                if res.status_code < 400:
-                    ip = res.text.strip()
-                    if ip:
-                        return ip
-            except httpx.RequestError:
-                continue
+    from panel import http_client
+
+    client = http_client.client()
+    for url in ("https://api.ipify.org", "https://ifconfig.me/ip"):
+        try:
+            res = await client.get(url, headers={"Accept": "text/plain"}, timeout=6.0)
+            if res.status_code < 400:
+                ip = res.text.strip()
+                if ip:
+                    return ip
+        except httpx.RequestError:
+            continue
     return None
 
 
@@ -358,20 +365,6 @@ def _timeout_metrics_message(public_ip: str | None = None) -> str:
 
 
 def _do_get_sync(path: str, token: str, params: dict[str, Any] | None = None) -> Any:
-    if not token:
-        raise RuntimeError("DIGITALOCEAN_TOKEN não configurado")
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    url = f"{DO_API_BASE}{path}"
-    with httpx.Client(timeout=30.0) as client:
-        res = client.get(url, headers=headers, params=params or {})
-    try:
-        body = res.json() if res.content else {}
-    except Exception:
-        body = {"message": res.text}
-    if res.status_code >= 400:
-        raise RuntimeError(_do_error_message(res.status_code, body))
-    return body
-
     if not token:
         raise RuntimeError("DIGITALOCEAN_TOKEN não configurado")
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -997,9 +990,13 @@ async def _refresh_db_snapshot_bg(db_id: str, cluster: dict[str, Any] | None = N
 async def poll_all_database_metrics() -> None:
     if not db_token():
         return
-    for db_id in load_registry()["db_ids"]:
-        await _refresh_db_snapshot_bg(db_id)
-        await asyncio.sleep(0.25)
+    sem = asyncio.Semaphore(_POLL_CONCURRENCY)
+
+    async def _one(db_id: str) -> None:
+        async with sem:
+            await _refresh_db_snapshot_bg(db_id)
+
+    await asyncio.gather(*[_one(db_id) for db_id in load_registry()["db_ids"]])
 
 
 async def _fetch_vps_entry_live(host_id: str, window: int) -> dict[str, Any]:
@@ -1038,10 +1035,18 @@ async def _refresh_vps_entry_bg(host_id: str, window: int) -> None:
 async def poll_all_vps_metrics() -> None:
     if not do_token():
         return
-    for host_id in load_registry()["host_ids"]:
-        for window in _INFRA_POLL_WINDOWS:
+    sem = asyncio.Semaphore(_POLL_CONCURRENCY)
+    jobs: list[tuple[str, int]] = [
+        (host_id, window)
+        for host_id in load_registry()["host_ids"]
+        for window in _INFRA_POLL_WINDOWS
+    ]
+
+    async def _one(host_id: str, window: int) -> None:
+        async with sem:
             await _refresh_vps_entry_bg(host_id, window)
-            await asyncio.sleep(0.15)
+
+    await asyncio.gather(*[_one(h, w) for h, w in jobs])
 
 
 async def _fetch_database_entry_live(db_id: str, window: int) -> dict[str, Any]:
@@ -1092,10 +1097,18 @@ async def _refresh_db_entry_bg(db_id: str, window: int) -> None:
 async def poll_all_database_entries() -> None:
     if not db_token():
         return
-    for db_id in load_registry()["db_ids"]:
-        for window in _INFRA_POLL_WINDOWS:
+    sem = asyncio.Semaphore(_POLL_CONCURRENCY)
+    jobs: list[tuple[str, int]] = [
+        (db_id, window)
+        for db_id in load_registry()["db_ids"]
+        for window in _INFRA_POLL_WINDOWS
+    ]
+
+    async def _one(db_id: str, window: int) -> None:
+        async with sem:
             await _refresh_db_entry_bg(db_id, window)
-            await asyncio.sleep(0.15)
+
+    await asyncio.gather(*[_one(d, w) for d, w in jobs])
 
 
 async def _refresh_infra_catalog_store() -> None:

@@ -57,13 +57,12 @@
   }
 
   async function reloadCatalog() {
-    const loaded = await catalog()?.loadCustomEntries?.();
+    catalog()?.invalidateCustomCache?.();
+    const loaded = await catalog()?.loadCustomEntries?.(true);
     canEditKnowledge = Boolean(loaded?.canEdit);
     persistenceInfo = loaded?.persistence || null;
     updateEditControls();
-    updatePersistenceMeta();
-    if (activeCategoryId) renderCategory(activeCategoryId);
-    else renderHub();
+    updateHeader();
   }
 
   function populateEditorCategories(selectedId = '') {
@@ -330,78 +329,20 @@
     }
   }
 
-  function viewState() {
-    if (activeCategoryId) return 'category';
-    if (searchQuery.trim()) return 'search';
-    return 'hub';
-  }
-
   function updateHeader() {
-    const header = $('supportHeader');
     const backLabel = $('supportHeaderBackLabel');
-    const eyebrow = $('supportHeaderEyebrow');
-    const title = $('supportHeaderTitle');
-    const subtitle = $('supportHeaderSubtitle');
     const stats = $('supportHeaderStats');
-    const iconWrap = $('supportHeaderIconWrap');
-    const icon = $('supportHeaderIcon');
-    const toolsAside = document.querySelector('.support-layout__tools');
-    const state = viewState();
+    if (backLabel) backLabel.textContent = 'Painel LAV60';
 
-    header?.classList.remove('support-header--category', 'support-header--search');
-    toolsAside?.classList.toggle('support-layout__tools--compact', state !== 'hub');
-
-    if (state === 'hub') {
-      if (backLabel) backLabel.textContent = 'Painel LAV60';
-      if (eyebrow) eyebrow.textContent = 'Central operacional';
-      if (title) title.textContent = 'Suporte / Runbooks';
-      if (subtitle) subtitle.textContent = 'Procedimentos operacionais e atendimento ao cliente';
-      if (icon) {
-        icon.src = '/fac/img/Icons/Helpdesk.svg';
-        icon.alt = '';
-      }
-      iconWrap?.style.removeProperty('--support-accent');
-      const cats = filteredCategories();
-      const procCount = cats.reduce((sum, cat) => sum + (cat.procedures?.length || 0), 0);
-      if (stats) stats.textContent = `${cats.length} categorias · ${procCount} procedimentos`;
-      return;
+    const cats = catalog()?.CATEGORIES || [];
+    const procCount = typeof catalog()?.listAllProcedureRecords === 'function'
+      ? catalog().listAllProcedureRecords().length
+      : cats.reduce((sum, cat) => sum + (cat.procedures?.length || 0), 0);
+    if (stats) {
+      stats.textContent = procCount
+        ? `${procCount} procedimentos indexados`
+        : 'Base de conhecimento';
     }
-
-    if (state === 'search') {
-      header?.classList.add('support-header--search');
-      const hits = catalog()?.search(searchQuery.trim()) || [];
-      if (backLabel) backLabel.textContent = 'Base de conhecimento';
-      if (eyebrow) eyebrow.textContent = 'Resultados da busca';
-      if (title) title.textContent = `“${searchQuery.trim()}”`;
-      if (subtitle) subtitle.textContent = hits.length
-        ? `${hits.length} procedimento(s) encontrado(s)`
-        : 'Nenhum procedimento encontrado';
-      if (icon) {
-        icon.src = '/fac/img/Icons/Helpdesk.svg';
-        icon.alt = '';
-      }
-      iconWrap?.style.setProperty('--support-accent', '#3b82f6');
-      if (stats) stats.textContent = `${hits.length} resultado(s)`;
-      return;
-    }
-
-    const cat = categoryById(activeCategoryId);
-    if (!cat) return;
-
-    const theme = categoryTheme(cat);
-    header?.classList.add('support-header--category');
-    header?.style.setProperty('--support-accent', theme.accent);
-    iconWrap?.style.setProperty('--support-accent', theme.accent);
-
-    if (backLabel) backLabel.textContent = 'Base de conhecimento';
-    if (eyebrow) eyebrow.textContent = theme.label;
-    if (title) title.textContent = cat.title;
-    if (subtitle) subtitle.textContent = cat.summary || 'Procedimentos desta categoria';
-    if (icon) {
-      icon.src = normalizeIconSrc(cat.icon);
-      icon.alt = cat.title;
-    }
-    if (stats) stats.textContent = `${cat.procedures?.length || 0} procedimento(s)`;
   }
 
   function goBack() {
@@ -422,17 +363,7 @@
       return;
     }
 
-    const state = viewState();
-    if (state === 'hub') {
-      window.Lav60Router?.navigate('dashboard');
-      return;
-    }
-    if (state === 'search') {
-      searchQuery = '';
-      const input = $('supportSearch');
-      if (input) input.value = '';
-    }
-    renderHub();
+    window.Lav60Router?.navigate('dashboard');
   }
 
   function $(id) {
@@ -738,9 +669,6 @@
     activeMapRegionId = region.id;
     frame.src = region.embedUrl || region.url;
 
-    const statesEl = $('supportMapStates');
-    if (statesEl) statesEl.textContent = region.states;
-
     const subtitleEl = $('supportMapModalSubtitle');
     if (subtitleEl) subtitleEl.textContent = region.title;
 
@@ -763,11 +691,6 @@
   }
 
   function bindEvents(signal) {
-    $('supportSearch')?.addEventListener('input', (event) => {
-      searchQuery = event.target.value || '';
-      renderHub();
-    }, { signal });
-
     $('supportHeaderBack')?.addEventListener('click', goBack, { signal });
 
     $('supportModalBack')?.addEventListener('click', closeProcedureModal, { signal });
@@ -782,7 +705,6 @@
       selectMapRegion(regionBtn.dataset.supportMapRegion);
     }, { signal });
 
-    $('supportAddBtn')?.addEventListener('click', () => openEditor({ mode: 'create' }), { signal });
     $('supportEditorForm')?.addEventListener('submit', submitEditor, { signal });
     $('supportEditorCategory')?.addEventListener('change', (event) => {
       toggleNewCategoryFields(event.target.value === '__new__');
@@ -815,45 +737,6 @@
       el.addEventListener('click', closeMapModal, { signal });
     });
 
-    $('supportFilters')?.addEventListener('click', (event) => {
-      const chip = event.target.closest('[data-support-filter]');
-      if (!chip) return;
-      activeFilter = chip.dataset.supportFilter || 'all';
-      document.querySelectorAll('[data-support-filter]').forEach((btn) => {
-        btn.classList.toggle('chip--active', btn === chip);
-      });
-      renderHub();
-    }, { signal });
-
-    $('supportContent')?.addEventListener('click', (event) => {
-      const suggest = event.target.closest('[data-support-suggest]');
-      if (suggest) {
-        searchQuery = suggest.dataset.supportSuggest || '';
-        const input = $('supportSearch');
-        if (input) input.value = searchQuery;
-        renderHub();
-        return;
-      }
-
-      const openBtn = event.target.closest('[data-support-open]');
-      if (openBtn) {
-        const [categoryId, procedureId] = String(openBtn.dataset.supportOpen || '').split(':');
-        if (categoryId && procedureId) openProcedure(categoryId, procedureId);
-        return;
-      }
-
-      const categoryBtn = event.target.closest('[data-support-category]');
-      if (categoryBtn) {
-        renderCategory(categoryBtn.dataset.supportCategory);
-        return;
-      }
-
-      const editCategoryBtn = event.target.closest('[data-support-edit-category]');
-      if (editCategoryBtn) {
-        openCategoryEditor(editCategoryBtn.dataset.supportEditCategory);
-      }
-    }, { signal });
-
     document.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
       if (!$('supportEditorModal')?.classList.contains('hidden')) closeEditor();
@@ -864,13 +747,7 @@
   }
 
   async function init() {
-    if (!catalog()) {
-      const root = $('supportContent');
-      if (root) {
-        root.innerHTML = '<div class="stores-empty-state"><p>Catálogo de suporte indisponível.</p></div>';
-      }
-      return;
-    }
+    if (!catalog()) return;
 
     pageAbort?.abort();
     pageAbort = new AbortController();
@@ -878,18 +755,20 @@
     activeCategoryId = null;
     searchQuery = '';
 
-    const input = $('supportSearch');
-    if (input) input.value = '';
-
     const loaded = await catalog().loadCustomEntries();
     canEditKnowledge = Boolean(loaded?.canEdit);
     persistenceInfo = loaded?.persistence || null;
 
+    try {
+      const storesCatalog = await window.Lav60?.loadCatalog?.();
+      if (storesCatalog) window.Lav60SupportStores = storesCatalog;
+    } catch {
+      /* catálogo de lojas opcional para contexto do chat */
+    }
+
     bindEvents(pageAbort.signal);
     updateEditControls();
     updateHeader();
-    updatePersistenceMeta();
-    renderHub();
     await window.Lav60SupportChat?.init?.();
   }
 

@@ -1,0 +1,669 @@
+/* ============================================================================
+   portal-modern.css — Linguagem visual unificada das views do SPA
+
+   Escopo: .page-panel (body class em todas as views do index.html).
+   Não toca em IDs manipulados por JS nem em estrutura de tabelas/listas.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   0. Tokens locais — define --agent-accent para o portal (não definido nos
+      standalone CSS para page-panel). Cada rota sobrescreve com sua cor.
+   -------------------------------------------------------------------------- */
+
+.page-panel {
+  --agent-accent: #818cf8;
+}
+
+.page-panel.page-lojas {
+  --agent-accent: #60a5fa;
+}
+
+.page-panel.page-records {
+  --agent-accent: #a78bfa;
+}
+
+.page-panel.page-support {
+  --agent-accent: #22d3ee;
+}
+
+.page-panel.page-infra-metrics {
+  --agent-accent: #f59e0b;
+}
+
+.page-panel.page-sites-monitor {
+  --agent-accent: #fb7185;
+}
+
+/* --------------------------------------------------------------------------
+   1. Sidebar
+   -------------------------------------------------------------------------- */
+
+.page-panel .sidebar {
+  border-right: 1px solid var(--border-soft);
+  background: var(--surface-sidebar);
+}
+
+.page-panel .sidebar__brand {
+  padding: 1.1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.page-panel .sidebar__logo {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(140deg, #3b82f6, #6366f1);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.28);
+}
+
+.page-panel .sidebar__nav {
+  padding: 0.5rem 0.65rem;
+}
+
+.page-panel .sidebar__link {
+  border-radius: 9px;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1px;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.page-panel .sidebar__link:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.page-panel .sidebar__link--active {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--link-accent);
+}
+
+[data-theme="light"] .page-panel .sidebar__link--active {
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--primary);
+}
+
+/* --------------------------------------------------------------------------
+   2. Page header — hero compartilhado entre todas as views
+   -------------------------------------------------------------------------- */
+
+/* Fio de destaque no topo do header, específico por view. */
+.page-panel .page-header,
+.page-panel .support-header {
+  position: relative;
+}
+
+.page-panel .page-header::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.55), transparent 60%);
+  border-radius: 0;
+}
+
+.page-panel.page-lojas .page-header::before {
+  background: linear-gradient(90deg, rgba(59, 130, 246, 0.55), transparent 60%);
+}
+
+.page-panel.page-records .page-header::before {
+  background: linear-gradient(90deg, rgba(167, 139, 250, 0.65), transparent 60%);
+}
+
+.page-panel.page-support .page-header::before {
+  background: linear-gradient(90deg, rgba(6, 182, 212, 0.55), transparent 60%);
+}
+
+.page-panel .page-header {
+  background:
+    radial-gradient(ellipse 60% 6rem at 0 0, rgba(99, 102, 241, 0.07), transparent 70%),
+    var(--surface-topbar-meta);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.page-panel.page-lojas .page-header {
+  background:
+    radial-gradient(ellipse 60% 6rem at 0 0, rgba(59, 130, 246, 0.07), transparent 70%),
+    var(--surface-topbar-meta);
+}
+
+.page-panel.page-records .page-header {
+  background:
+    radial-gradient(ellipse 60% 6rem at 0 0, rgba(167, 139, 250, 0.09), transparent 70%),
+    var(--surface-topbar-meta);
+}
+
+/* Botão voltar — adiciona margem inferior quando dentro de nav */
+.page-panel .page-header__nav {
+  margin-bottom: 0.6rem;
+}
+
+.page-panel .page-header__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.32rem 0.75rem 0.32rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-mid);
+  background: var(--surface-chip);
+  color: var(--link-accent);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.page-panel .page-header__back:hover {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.42);
+  transform: translateX(-2px);
+}
+
+.page-panel .page-header__title {
+  font-size: clamp(1.2rem, 2.2vw, 1.5rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.page-panel .page-header__subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+[data-theme="light"] .page-panel .page-header {
+  background:
+    radial-gradient(ellipse 60% 6rem at 0 0, rgba(99, 102, 241, 0.05), transparent 70%),
+    #f8fafc;
+}
+
+/* --------------------------------------------------------------------------
+   3. Dashboard — hero e seções
+   -------------------------------------------------------------------------- */
+
+/* Hero (portal-dashboard-hero) — adiciona sombra e fio no topo */
+.page-panel .portal-dashboard-hero {
+  position: relative;
+  border-bottom: 1px solid var(--border-soft);
+  box-shadow: none;
+}
+
+.page-panel .portal-dashboard-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.55), transparent 55%);
+}
+
+.page-panel .portal-dashboard-hero {
+  background:
+    radial-gradient(ellipse 55% 8rem at 0% 0%, rgba(99, 102, 241, 0.09), transparent 70%),
+    var(--surface-topbar-meta);
+}
+
+[data-theme="light"] .page-panel .portal-dashboard-hero {
+  background:
+    radial-gradient(ellipse 55% 8rem at 0% 0%, rgba(99, 102, 241, 0.05), transparent 70%),
+    #f8fafc;
+}
+
+/* Badge de live status — polimento */
+.page-panel .dashboard-live-badge {
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+}
+
+/* Seções — mais leve que o fundo do card */
+.page-panel .portal-dashboard .dashboard-section {
+  padding: 1rem 1.1rem 1.15rem;
+  border-radius: 14px;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="light"] .page-panel .portal-dashboard .dashboard-section {
+  box-shadow: var(--shadow-elevated);
+}
+
+/* Cabeçalho de seção */
+.page-panel .portal-dashboard .dashboard-section__title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.page-panel .portal-dashboard .dashboard-section__meta {
+  font-size: 0.76rem;
+}
+
+/* Painéis dentro das seções — superfície interna ligeiramente recuada */
+.page-panel .main-content--dashboard .dashboard-panel {
+  background: var(--surface-inset);
+  border-color: var(--border-line);
+}
+
+/* Health card — sombra colorida suave por estado */
+.page-panel .dashboard-health-card {
+  box-shadow: var(--shadow-card);
+}
+
+.page-panel .dashboard-health-card--ok {
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.22), var(--shadow-card);
+}
+
+.page-panel .dashboard-health-card--warn {
+  box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.25), var(--shadow-card);
+}
+
+.page-panel .dashboard-health-card--danger {
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.25), var(--shadow-card);
+}
+
+/* Summary tiles — hover elevado */
+.page-panel .dashboard-summary-tile {
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.page-panel .dashboard-summary-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-elevated);
+}
+
+/* Quick-nav links */
+.page-panel .dashboard-quick-nav__link {
+  padding: 0.32rem 0.7rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid var(--border-mid);
+  background: var(--surface-chip);
+  color: var(--link-accent);
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.page-panel .dashboard-quick-nav__link:hover {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.42);
+}
+
+/* --------------------------------------------------------------------------
+   4. Lojas
+   -------------------------------------------------------------------------- */
+
+/* Painel principal */
+.page-lojas .stores-panel {
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+[data-theme="light"] .page-lojas .stores-panel {
+  box-shadow: var(--shadow-elevated);
+}
+
+/* Toolbar da lista de lojas */
+.page-lojas .stores-panel__toolbar {
+  border-bottom: 1px solid var(--border-line);
+  background: var(--gradient-panel-head);
+  border-radius: 14px 14px 0 0;
+}
+
+/* Chips de filtro — tom consistente */
+.page-panel .chip {
+  background: var(--surface-chip);
+  border-color: var(--border-mid);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.page-panel .chip:hover {
+  background: var(--surface-hover);
+  border-color: rgba(59, 130, 246, 0.35);
+  color: var(--text);
+}
+
+.page-panel .chip--active {
+  background: rgba(59, 130, 246, 0.13);
+  border-color: rgba(59, 130, 246, 0.42);
+  color: var(--link-accent);
+}
+
+[data-theme="light"] .page-panel .chip--active {
+  background: rgba(37, 99, 235, 0.09);
+  border-color: rgba(37, 99, 235, 0.38);
+  color: var(--primary);
+}
+
+/* Campo de busca — consistente com agent-console */
+.page-lojas .search-field {
+  position: relative;
+}
+
+.page-lojas .search-field input {
+  padding: 0.52rem 0.75rem 0.52rem 2.15rem;
+  border-radius: 9px;
+  border: 1px solid var(--border-input);
+  background: var(--surface-input);
+  font-size: 0.84rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.page-lojas .search-field input:focus {
+  border-color: rgba(59, 130, 246, 0.55);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+}
+
+/* Ícone de busca */
+.page-lojas .search-field .search-field__icon {
+  position: absolute;
+  top: 50%;
+  left: 0.7rem;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+  font-size: 0.95rem;
+  transition: color 0.15s ease;
+}
+
+.page-lojas .search-field:focus-within .search-field__icon {
+  color: var(--primary);
+}
+
+/* Stats row de contagem */
+.page-panel .stores-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.page-panel .stores-stat strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.page-panel .stores-stat--online strong { color: var(--status-ok); }
+.page-panel .stores-stat--offline strong { color: var(--status-danger); }
+
+/* Cards de loja — hover mais pronunciado */
+.page-panel .store-card {
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.page-panel .store-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+}
+
+[data-theme="light"] .page-panel .store-card:hover {
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.1);
+}
+
+/* --------------------------------------------------------------------------
+   5. Registros
+   -------------------------------------------------------------------------- */
+
+/* Substitui a barra lateral de 3px por ponto colorido — mesma linguagem dos consoles */
+.page-records .records-stat-card {
+  background: var(--surface-card);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-card);
+}
+
+.page-records .records-stat-card::before {
+  content: none;
+}
+
+.page-records .records-stat-card__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.page-records .records-stat-card__label::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #a78bfa;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18);
+  flex-shrink: 0;
+}
+
+/* Painel do histórico */
+.page-records .records-panel {
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-card);
+  background: var(--surface-card);
+}
+
+[data-theme="light"] .page-records .records-panel {
+  box-shadow: var(--shadow-elevated);
+}
+
+/* Toolbar do painel de registros */
+.page-records .records-panel__toolbar {
+  border-left: 2px solid rgba(167, 139, 250, 0.55);
+  background: var(--gradient-panel-head);
+}
+
+/* Ranking de operadores */
+.page-records .records-ranking {
+  background: var(--surface-card);
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-card);
+}
+
+/* Cabeçalho da tabela */
+.page-records .records-table thead {
+  background: var(--surface-inset);
+}
+
+/* Linha com falha */
+.page-records .records-table__row--fail {
+  background: rgba(239, 68, 68, 0.05);
+}
+
+/* Seletores de filtro */
+.page-records .field--compact select {
+  border-color: var(--border-input);
+  background: var(--surface-input);
+  border-radius: 9px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.page-records .field--compact select:focus {
+  outline: none;
+  border-color: rgba(167, 139, 250, 0.55);
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.14);
+}
+
+/* Footer de paginação */
+.page-records .records-panel__footer {
+  border-top: 1px solid var(--border-line);
+  background: var(--surface-inset);
+}
+
+/* --------------------------------------------------------------------------
+   6. Suporte
+   -------------------------------------------------------------------------- */
+
+/* O support-header já tem estilos próprios no support.css; apenas adiciona o fio. */
+.page-support .support-header {
+  position: relative;
+}
+
+.page-support .support-header::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(6, 182, 212, 0.55), transparent 55%);
+  z-index: 2;
+}
+
+/* --------------------------------------------------------------------------
+   7. Infraestrutura e sites
+   -------------------------------------------------------------------------- */
+
+.page-panel.page-infra-metrics .page-header::before {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.55), transparent 60%);
+}
+
+.page-panel.page-infra-metrics .page-header {
+  background:
+    radial-gradient(ellipse 60% 6rem at 0 0, rgba(245, 158, 11, 0.08), transparent 70%),
+    var(--surface-topbar-meta);
+}
+
+.page-panel.page-sites-monitor .page-header::before {
+  background: linear-gradient(90deg, rgba(251, 113, 133, 0.55), transparent 60%);
+}
+
+.page-panel.page-sites-monitor .page-header {
+  background:
+    radial-gradient(ellipse 60% 6rem at 0 0, rgba(251, 113, 133, 0.08), transparent 70%),
+    var(--surface-topbar-meta);
+}
+
+.page-panel .portal-panel-card {
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+[data-theme="light"] .page-panel .portal-panel-card {
+  box-shadow: var(--shadow-elevated);
+}
+
+.page-panel .portal-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.page-panel .portal-kpi-row .sites-monitor-kpi {
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--surface-inset);
+  box-shadow: var(--shadow-card);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.page-panel .portal-kpi-row .sites-monitor-kpi:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-elevated);
+}
+
+.page-infra-metrics .infra-kpi-section .infra-kpi-grid {
+  gap: 0.75rem;
+}
+
+.page-infra-metrics .infra-metrics-panel {
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  padding: 1rem;
+}
+
+/* --------------------------------------------------------------------------
+   8. Mobile — topbar do portal
+   -------------------------------------------------------------------------- */
+
+.page-panel .portal-topbar {
+  background: var(--surface-topbar);
+  border-bottom: 1px solid var(--border-soft);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* --------------------------------------------------------------------------
+   8. Agentes dentro do SPA — ajustes de layout
+   -------------------------------------------------------------------------- */
+
+/* No SPA, o shell do agente (.app-shell, .topbar) não existe; apenas o <main> é injetado. */
+.page-panel.page-agent-console .app-view > .main-content.agent-page {
+  /* Usa o mesmo max-width das páginas de agente standalone */
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 1.35rem 1.5rem 2rem;
+}
+
+/* No SPA, o fio de acento do hero vem dos tokens de rota */
+.page-panel.page-agent-get01 {
+  --agent-accent: #38bdf8;
+}
+
+.page-panel.page-agent-get02 {
+  --agent-accent: #34d399;
+}
+
+/* A sidebar lateral do agent-page fica sticky relativo ao viewport (sem topbar standalone) */
+.page-panel.page-agent-console .agent-page__aside {
+  --topbar-offset: 0px;
+}
+
+/* Responsivo: no mobile, o portal-topbar é visível; o JS ajusta --topbar-offset */
+
+.page-panel.page-agent-console .app-view > .store-banner {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto 0.75rem;
+  padding: 0.8rem 1rem;
+}
+
+.page-panel.page-agent-console .agent-store-page__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.15rem;
+}
+
+.page-panel.page-agent-console .agent-store-page__get02 {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* --------------------------------------------------------------------------
+   10. Responsivo
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .page-records .records-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   11. Acessibilidade
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .page-panel .dashboard-summary-tile,
+  .page-panel .store-card,
+  .page-panel .page-header__back {
+    transition-duration: 0.01ms !important;
+  }
+}

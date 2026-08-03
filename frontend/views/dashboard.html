@@ -1,10 +1,10 @@
-<header class="page-header page-header--dashboard page-header--split">
-  <div class="page-header__head">
-    <p class="dashboard-eyebrow">Operação em tempo real</p>
-    <h1 class="page-header__title">Dashboard</h1>
-    <p class="page-header__subtitle" id="dashboardSubtitle">Visão geral do monitoramento</p>
+<header class="portal-dashboard-hero page-header page-header--dashboard page-header--split">
+  <div class="portal-dashboard-hero__main page-header__head">
+    <p class="agent-page__eyebrow portal-dashboard-hero__eyebrow">Painel central</p>
+    <h1 class="portal-dashboard-hero__title page-header__title">Dashboard</h1>
+    <p class="page-header__subtitle portal-dashboard-hero__subtitle" id="dashboardSubtitle">Visão geral do monitoramento em tempo real</p>
   </div>
-  <div class="dashboard-header__aside">
+  <div class="portal-dashboard-hero__aside dashboard-header__aside">
     <div class="dashboard-header__status">
       <span class="dashboard-live-badge dashboard-live-badge--pending" id="dashboardLiveBadge">Conectando</span>
       <span class="dashboard-sync-time" id="dashboardSyncTime">—</span>
@@ -17,7 +17,7 @@
   </div>
 </header>
 
-<main class="main-content main-content--dashboard">
+<main class="main-content main-content--dashboard portal-dashboard">
   <section class="dashboard-hero" aria-label="Resumo da rede">
     <article class="dashboard-health-card dashboard-health-card--idle" id="dashboardHealthCard">
       <div class="dashboard-health-card__head">
@@ -62,31 +62,6 @@
     </div>
   </section>
 
-  <section class="dashboard-section dashboard-section--map" aria-label="Mapa das lojas" id="dashboardStoreMap">
-    <header class="dashboard-section__head dashboard-section__head--split">
-      <div>
-        <h2 class="dashboard-section__title">Mapa das lojas</h2>
-        <p class="dashboard-section__meta" id="dashboardStoreMapMeta">Carregando localização…</p>
-      </div>
-      <div class="filter-chips dashboard-store-map__filters" role="tablist" aria-label="Filtrar mapa">
-        <button type="button" class="chip chip--active" data-dashboard-map-filter="all">Todas</button>
-        <button type="button" class="chip" data-dashboard-map-filter="online">Online</button>
-        <button type="button" class="chip" data-dashboard-map-filter="offline">Offline</button>
-        <button type="button" class="chip" data-dashboard-map-filter="partial">Parciais</button>
-        <button type="button" class="chip" data-dashboard-map-filter="suspended">Suspensas</button>
-      </div>
-    </header>
-    <div class="dashboard-store-map">
-      <div class="dashboard-store-map__legend" aria-hidden="true">
-        <span><i style="background:#22c55e"></i>Online</span>
-        <span><i style="background:#f97316"></i>Offline</span>
-        <span><i style="background:#eab308"></i>Parcial</span>
-        <span><i style="background:#64748b"></i>Suspensa</span>
-      </div>
-      <div class="dashboard-store-map__canvas" id="dashboardStoreMapCanvas" role="application" aria-label="Mapa interativo das lojas"></div>
-    </div>
-  </section>
-
   <section class="dashboard-section" aria-label="Agentes e equipamentos">
     <header class="dashboard-section__head">
       <h2 class="dashboard-section__title">Agentes e equipamentos</h2>
@@ -112,6 +87,10 @@
             <article class="stat-card stat-card--danger stat-card--clickable stat-card--compact" data-kpi="stores-suspended" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
               <span class="stat-card__label">Suspensas</span>
               <strong class="stat-card__value" id="kpiStoresSuspended">—</strong>
+            </article>
+            <article class="stat-card stat-card--suspended stat-card--compact" id="kpiStoresPendingCard" aria-live="polite">
+              <span class="stat-card__label">Aguardando</span>
+              <strong class="stat-card__value" id="kpiStoresPending">—</strong>
             </article>
           </div>
         </div>

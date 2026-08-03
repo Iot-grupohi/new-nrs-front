@@ -4,14 +4,51 @@
   const OFFLINE_SINCE_KEY = 'lav60_offline_since';
   const ONLINE_SINCE_KEY = 'lav60_online_since';
   const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
+  const TtlCache = () => window.Lav60Cache || null;
+  const STORES_PAYLOAD_CACHE_KEY = 'lav60:panel:stores-payload';
+  const HEARTBEAT_SNAPSHOT_CACHE_KEY = 'lav60:panel:heartbeat-snapshot';
+  const CATALOG_CACHE_KEY = 'lav60:panel:catalog';
+  const STORES_PAYLOAD_CACHE_TTL_MS = 30 * 60 * 1000;
+  const STORES_FRESH_TTL_MS = 2 * 60 * 1000;
+  const HEARTBEAT_SNAPSHOT_CACHE_TTL_MS = 5 * 60 * 1000;
+  const CATALOG_CACHE_TTL_MS = 10 * 60 * 1000;
+  const HEARTBEATS_LIVE_TTL_MS = 5 * 1000;
+  const HEARTBEAT_POLL_MS = 8 * 1000;
+  const HEARTBEAT_TICK_MS = 3 * 1000;
+  const STATUS_BULK_CACHE_TTL_MS = 60 * 1000;
+
+  /** Agentes locais Powpay/heartbeat (GET01). */
+  const PANEL_AGENTS_DISABLED = false;
+  const PANEL_MQTT_GATEWAY_ENABLED = true;
+
+  function isAgentsDisabled(catalog) {
+    return PANEL_AGENTS_DISABLED || catalog?.agents_disabled === true;
+  }
+
+  function isMqttGatewayEnabled(catalog) {
+    if (!PANEL_MQTT_GATEWAY_ENABLED) return false;
+    if (catalog?.mqtt_gateway_enabled === false) return false;
+    return true;
+  }
 
   let cachedAgentToken = null;
   let cachedAgentTokenConfigured = false;
   let panelBootstrapCache = null;
   let storesLoadGeneration = 0;
+  let catalogMemory = null;
+  let catalogMemoryAt = 0;
+  let catalogInflight = null;
 
   async function fetchPanelBootstrap() {
     if (panelBootstrapCache) return panelBootstrapCache;
+    const cache = TtlCache();
+    const key = 'lav60:panel:bootstrap';
+    const ttlMs = 30 * 60 * 1000;
+    const cached = cache?.getFresh?.(key, ttlMs);
+    if (cached) {
+      panelBootstrapCache = cached;
+      return panelBootstrapCache;
+    }
     try {
       const res = await fetch('/api/panel/bootstrap', {
         headers: { Accept: 'application/json' },
@@ -22,6 +59,7 @@
         return panelBootstrapCache;
       }
       panelBootstrapCache = await res.json();
+      cache?.put?.(key, panelBootstrapCache, { persist: true });
       return panelBootstrapCache;
     } catch {
       panelBootstrapCache = {};
@@ -29,12 +67,16 @@
     }
   }
 
-  /** Token do agente a partir do .env do servidor (CLOUDFLARE_API_TOKEN). */
+  /**
+   * Bootstrap do servidor: o token do agente NÃO é mais enviado ao browser.
+   * O proxy /api/stores/.../gateway injeta CLOUDFLARE_API_TOKEN no servidor.
+   * Retorna string vazia; use isAgentTokenConfiguredOnServer() para UI.
+   */
   async function ensureDefaultAgentToken() {
     if (cachedAgentToken !== null) return cachedAgentToken;
     const boot = await fetchPanelBootstrap();
-    cachedAgentToken = String(boot?.default_agent_token || '').trim();
     cachedAgentTokenConfigured = Boolean(boot?.agent_token_configured);
+    cachedAgentToken = '';
     return cachedAgentToken;
   }
 
@@ -223,9 +265,13 @@
     return host.includes('lav60.com') || host.endsWith('.lav60.com');
   }
 
-  /** Validação HTTP ao agente Powpay — só no painel central (VPS). Dev local usa heartbeat. */
-  function shouldRunLiveAgentProbe() {
-    return isCentralPanelHost();
+  /** Validação HTTP ao agente — painel central (VPS) e dev local no modo túnel /health. */
+  function shouldRunLiveAgentProbe(catalog) {
+    const cat = catalog || heartbeatCatalog || catalogMemory;
+    if (isRtdbOnlyPanel(cat)) return false;
+    if (isCentralPanelHost()) return true;
+    if (isPanelOnLocalMachine() && isPowpayHealthPanel(cat)) return true;
+    return false;
   }
 
   const MAX_AGENT_PROBES_PER_CYCLE = 12;
@@ -294,7 +340,8 @@
       recordAgentProbe(card.id, { ok: true });
       const status = statusFromAgentConfig(row.config, id);
       if (status?.summary?.total) {
-        applyLiveCardSnapshot(card, meta, hb, catalog, status);
+        agentProbeStatusCache.set(id, status);
+        applyLiveCardSnapshot(card, meta, hb, catalog, status, { accessible: true });
       }
       return;
     }
@@ -329,6 +376,7 @@
   }
 
   async function fetchStoreStatusCache(storeId, catalog) {
+    if (isAgentsDisabled(catalog)) return null;
     const timeoutMs = Math.min(8000, getHeartbeatTimeoutMs(catalog) || 8000);
     try {
       const res = await fetchWithTimeout(
@@ -343,19 +391,51 @@
     }
   }
 
-  async function fetchStoresStatusCacheBulk(catalog) {
-    const timeoutMs = Math.min(12000, (getHeartbeatTimeoutMs(catalog) || 8000) + 4000);
-    try {
-      const res = await fetchWithTimeout(
-        panelStoresStatusCacheBulkUrl(),
-        { credentials: 'same-origin' },
-        timeoutMs
-      );
-      if (!res.ok) return null;
-      return res.json();
-    } catch {
-      return null;
+  async function fetchStoresStatusCacheBulk(catalog, options = {}) {
+    const force = options.force === true;
+    const fields = options.fields || 'dashboard';
+    const cache = TtlCache();
+    const key = `${cache?.KEYS?.statusBulk || 'lav60:panel:status-bulk'}:${fields}`;
+    const ttlMs = cache?.getTtl?.('statusBulk') || STATUS_BULK_CACHE_TTL_MS;
+
+    if (!force && cache?.getFresh) {
+      const hit = cache.getFresh(key, ttlMs);
+      if (hit) return hit;
     }
+
+    const timeoutMs = Math.min(12000, (getHeartbeatTimeoutMs(catalog) || 8000) + 4000);
+    const etagKey = `${cache?.KEYS?.statusBulkEtag || 'lav60:panel:status-bulk:etag'}:${fields}`;
+    const fallback = cache?.peek?.(key)?.data || null;
+    const bulkUrl = `${panelStoresStatusCacheBulkUrl()}?fields=${encodeURIComponent(fields)}`;
+    const fetcher = async () => {
+      try {
+        if (cache?.fetchConditional) {
+          const result = await cache.fetchConditional(bulkUrl, {
+            etagKey,
+            fallback,
+            force,
+            fetchImpl: (url, init) => fetchWithTimeout(url, init, timeoutMs),
+          });
+          return result.data;
+        }
+        const res = await fetchWithTimeout(
+          bulkUrl,
+          { credentials: 'same-origin' },
+          timeoutMs
+        );
+        if (!res.ok) return null;
+        return res.json();
+      } catch {
+        return fallback;
+      }
+    };
+
+    if (cache?.dedupe) {
+      const data = await cache.dedupe(`${key}:fetch`, fetcher);
+      if (data && cache.put) cache.put(key, data, { persist: true });
+      return data;
+    }
+    return fetcher();
   }
 
   function statusFromStatusCacheDoc(meta, doc, catalogId) {
@@ -434,10 +514,196 @@
   }
 
   function recentAgentProbeFailure(storeId, maxAgeMs = AGENT_PROBE_FAIL_TTL_MS) {
-    const row = agentProbeState.get(normalizeStoreId(storeId));
+    const id = normalizeStoreId(storeId);
+    const hb = heartbeatState.get(id);
+    if (
+      hb &&
+      isRtdbOnlyPanel(heartbeatCatalog) &&
+      resolveHeartbeatSource(hb.source, hb.payload?.heartbeat_source) === 'rtdb' &&
+      rtdbPulseFresh(hb, heartbeatCatalog)
+    ) {
+      return null;
+    }
+    const row = agentProbeState.get(id);
     if (!row || row.ok !== false || row.transient) return null;
     if (Date.now() - row.at > maxAgeMs) return null;
     return row;
+  }
+
+  function shouldRunRtdbHealthProbe(catalog) {
+    // Status do agente vem só do pulso RTDB — health HTTP não altera online/offline.
+    return false;
+  }
+
+  function powpayHealthProbeUrl(storeId) {
+    return `${window.location.origin}/powpay/${normalizeStoreId(storeId)}/health`;
+  }
+
+  async function probePowpayHealth(storeId) {
+    const id = normalizeStoreId(storeId);
+    if (!id) return { ok: false, status: 0, transient: true, definite_offline: false };
+    if (!shouldRunRtdbHealthProbe(heartbeatCatalog) && !isPowpayHealthPanel(heartbeatCatalog)) {
+      return { ok: null, status: 0, transient: true, definite_offline: false, skipped: true };
+    }
+    let outcome;
+    try {
+      const res = await fetchWithTimeout(
+        powpayHealthProbeUrl(id),
+        { credentials: 'same-origin', headers: { Accept: 'application/json' } },
+        10000
+      );
+      // 404/530 no túnel Powpay não provam agente offline (RTDB pode estar vivo).
+      const definite_offline = [401, 403].includes(res.status);
+      const transient =
+        !definite_offline &&
+        (res.status === 0 || res.status === 404 || res.status === 530 || res.status >= 502);
+      outcome = {
+        ok: res.ok && res.status >= 200 && res.status < 400,
+        status: res.status,
+        transient,
+        definite_offline,
+      };
+    } catch {
+      outcome = { ok: false, status: 0, transient: true, definite_offline: false };
+    }
+    applyRtdbHealthProbeResult(id, outcome);
+    return outcome;
+  }
+
+  function rtdbHealthProbeDue(storeId) {
+    const row = rtdbHealthByStore.get(normalizeStoreId(storeId));
+    if (!row?.checkedAt) return true;
+    return Date.now() - row.checkedAt >= RTDB_HEALTH_PROBE_MIN_MS;
+  }
+
+  function noteRtdbHeartbeatSeen(storeId, hb) {
+    const id = normalizeStoreId(storeId);
+    if (!id || !hb) return;
+    const pulseMs = heartbeatAgentPulseMs(hb) || Date.now();
+    const prev = rtdbHealthByStore.get(id) || {};
+    rtdbHealthByStore.set(id, {
+      ...prev,
+      rtdbPulseMs: pulseMs,
+      rtdbSeenAt: Date.now(),
+    });
+    if (rtdbPulseFresh(hb, heartbeatCatalog)) {
+      agentProbeState.delete(id);
+    }
+  }
+
+  function applyRtdbHealthProbeResult(storeId, result) {
+    const id = normalizeStoreId(storeId);
+    const prev = rtdbHealthByStore.get(id) || { failStreak: 0 };
+    const now = Date.now();
+    const hb = heartbeatState.get(id);
+    const pulseFresh = Boolean(hb && rtdbPulseFresh(hb, heartbeatCatalog));
+    let ok = result?.ok === true;
+    let failStreak = ok ? 0 : (prev.failStreak || 0) + 1;
+    let definite = Boolean(result?.definite_offline);
+
+    if (!ok && result?.transient && !definite && failStreak < 2 && prev.ok === true) {
+      ok = true;
+      failStreak = prev.failStreak || 0;
+    }
+
+    if ((pulseFresh || isRtdbOnlyPanel(heartbeatCatalog)) && !ok) {
+      rtdbHealthByStore.set(id, {
+        ...prev,
+        ok: prev.ok === true ? true : null,
+        checkedAt: now,
+        status: result?.status || 0,
+        transient: Boolean(result?.transient),
+        definite: false,
+        failStreak: Math.min(failStreak, 1),
+        tunnelReachable: false,
+        rtdbPulseMs: heartbeatAgentPulseMs(hb) || prev.rtdbPulseMs || 0,
+        rtdbSeenAt: now,
+      });
+      return;
+    }
+
+    rtdbHealthByStore.set(id, {
+      ok: ok ? true : definite || failStreak >= 2 ? false : prev.ok ?? null,
+      checkedAt: now,
+      status: result?.status || 0,
+      transient: Boolean(result?.transient),
+      definite,
+      failStreak,
+      tunnelReachable: ok,
+      rtdbPulseMs: prev.rtdbPulseMs || (hb ? heartbeatAgentPulseMs(hb) : 0) || 0,
+      rtdbSeenAt: prev.rtdbSeenAt || now,
+    });
+  }
+
+  function applyRtdbHealthToCard(card, result, catalog) {
+    const id = normalizeStoreId(card.id);
+    const meta = catalogStoreMeta(catalog, id);
+    const hb = heartbeatState.get(id);
+    const row = rtdbHealthByStore.get(id);
+
+    if (row?.ok === true) {
+      recordAgentProbe(id, { ok: true });
+      card.agentProbeFailed = false;
+      card.agentUnavailable = false;
+      card.error = null;
+      if ((card.summary?.total ?? 0) > 0 || cardHasDeviceDots(card)) {
+        card.accessible = true;
+        card.state = storeHealthState(card.summary, null);
+      }
+      return;
+    }
+
+    if (row?.ok === false && (row.definite || (row.failStreak || 0) >= 2)) {
+      if (hb && rtdbPulseFresh(hb, catalog)) {
+        card.tunnelUnreachable = true;
+        return;
+      }
+      applyAgentProbeFailure(
+        card,
+        meta,
+        hb,
+        catalog,
+        friendlyUserMessage(`Health HTTP ${result?.status || 'fail'}`)
+      );
+    }
+  }
+
+  function selectRtdbHealthProbeTargets(cards, catalog) {
+    return (cards || [])
+      .filter((card) => {
+        if (!card || card.loading || isStoreCardSuspended(card, catalog)) return false;
+        const id = normalizeStoreId(card.id);
+        const hb = heartbeatState.get(id);
+        if (!hb || resolveHeartbeatSource(hb.source, hb.payload?.heartbeat_source) !== 'rtdb') {
+          return false;
+        }
+        if (!rtdbPulseFresh(hb, catalog)) return false;
+        return rtdbHealthProbeDue(id);
+      })
+      .slice(0, MAX_AGENT_PROBES_PER_CYCLE);
+  }
+
+  async function validateRtdbStoresWithHealthProbe(cards, catalog) {
+    if (!shouldRunRtdbHealthProbe(catalog)) return;
+    const targets = selectRtdbHealthProbeTargets(cards, catalog);
+    if (!targets.length) return;
+
+    for (const card of targets) {
+      const result = await probePowpayHealth(card.id);
+      applyRtdbHealthToCard(card, result, catalog);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+  }
+
+  async function pollRtdbHealthProbes() {
+    if (!shouldRunRtdbHealthProbe(heartbeatCatalog)) return;
+    if (!heartbeatCatalog || !heartbeatMonitorStarted) return;
+
+    const cards = (heartbeatCatalog.stores || []).map((meta) =>
+      buildCardFromHeartbeat(meta, heartbeatCatalog)
+    );
+    await validateRtdbStoresWithHealthProbe(cards, heartbeatCatalog);
+    emitHeartbeatUpdate({ healthProbe: true });
   }
 
   function isAgentDefiniteOfflineError(error) {
@@ -479,12 +745,15 @@
 
   function cardNeedsAgentValidation(card, catalog) {
     if (!card || card.loading || isStoreCardSuspended(card, catalog)) return false;
-    if (card.fromLiveProbe && !card.agentPulseStale && !card.staleSnapshot) return false;
+    if (card.fromLiveProbe && !card.agentPulseStale && !card.staleSnapshot && cardHasDeviceDots(card)) {
+      return false;
+    }
 
     const id = normalizeStoreId(card.id);
     const hb = heartbeatState.get(id);
     const hbAlive = Boolean(hb && isStoreHeartbeatAlive(hb, catalog));
 
+    if (hbAlive && !cardHasDeviceDots(card)) return true;
     if (card.accessible || card.agentPulseStale || card.staleSnapshot) return true;
     if (hbAlive && ((card.summary?.total ?? 0) > 0 || heartbeatHasAgentPayload(hb))) return true;
     return false;
@@ -522,15 +791,19 @@
     if (doc.agent_offline_since_ms != null) {
       card.agent_offline_since_ms = doc.agent_offline_since_ms;
     }
+    const source = resolveHeartbeatSource(card.heartbeatSource, doc.heartbeat_source);
+    if (source) card.heartbeatSource = source;
     return card;
   }
 
   function enrichCardsFromStatusCache(cards, catalog, bulk) {
+    if (isRtdbOnlyPanel(catalog)) return;
     const storesMap = bulk?.stores;
     if (!bulk?.available || !storesMap || typeof storesMap !== 'object') return;
 
     for (const card of cards) {
-      if (card.accessible && !card.agentPulseStale && card.fromLiveProbe) continue;
+      const lacksDots = !cardHasDeviceDots(card);
+      if (card.accessible && !card.agentPulseStale && card.fromLiveProbe && !lacksDots) continue;
       const doc = storesMap[normalizeStoreId(card.id)];
       if (!doc) continue;
       applyStatusCacheAvailabilityMeta(card, doc);
@@ -543,13 +816,22 @@
         agentPulseStale: pulseStale,
         staleSnapshot: pulseStale || !doc.alive,
         fromHeartbeat: false,
-        accessible: pulseStale ? false : undefined,
+        accessible: pulseStale ? false : true,
       });
       applyStatusCacheAvailabilityMeta(card, doc);
     }
     cards.forEach((card, index) => {
       cards[index] = reapplyStoreCardPolicy(card, catalog);
     });
+  }
+
+  function enrichPayloadFromStatusCache(cards, catalog) {
+    if (isRtdbOnlyPanel(catalog)) return cards;
+    if (!lastStatusBulkMap || !Object.keys(lastStatusBulkMap).length) return cards;
+    const bulk = { available: true, stores: lastStatusBulkMap };
+    enrichCardsFromStatusCache(cards, catalog, bulk);
+    enrichOfflineCardsFromCache(cards, catalog, bulk);
+    return cards;
   }
 
   function panelAgentGatewayUrl(storeId, path) {
@@ -632,11 +914,47 @@
     }
   }
 
+  function heartbeatEntryToState(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+    const payload =
+      entry.payload && typeof entry.payload === 'object' ? entry.payload : entry;
+    let receivedAt = 0;
+    if (typeof entry.received_at === 'number' && Number.isFinite(entry.received_at)) {
+      receivedAt =
+        entry.received_at > 1e12 ? entry.received_at : Math.round(entry.received_at * 1000);
+    } else if (typeof entry.receivedAt === 'number' && Number.isFinite(entry.receivedAt)) {
+      receivedAt = entry.receivedAt;
+    }
+    const source = resolveHeartbeatSource(
+      entry.heartbeat_source,
+      payload?.heartbeat_source,
+      entry.source
+    );
+    const state = {
+      receivedAt,
+      payload,
+      source,
+      backendAlive: entry.alive === true,
+    };
+    const pulseMs = heartbeatAgentPulseMs(state);
+    if (pulseMs > 0) state.receivedAt = Math.max(receivedAt || 0, pulseMs);
+    return state;
+  }
+
   function isHeartbeatEntryAlive(entry, catalog) {
     if (!entry) return false;
-    const timeoutMs = getHeartbeatTimeoutMs(catalog);
+    const cat = catalog || heartbeatCatalog;
+    if (isBackendPulsePanel(cat) || isRtdbOnlyPanel(cat)) {
+      const hb = heartbeatEntryToState(entry);
+      return Boolean(hb && isStoreHeartbeatAlive(hb, cat));
+    }
+    const timeoutMs = getHeartbeatTimeoutMs(cat);
     const receivedAt =
-      typeof entry.received_at === 'number' ? entry.received_at * 1000 : entry.receivedAt || 0;
+      typeof entry.received_at === 'number'
+        ? entry.received_at > 1e12
+          ? entry.received_at
+          : entry.received_at * 1000
+        : entry.receivedAt || 0;
     return Boolean(receivedAt && Date.now() - receivedAt <= timeoutMs);
   }
 
@@ -837,6 +1155,108 @@
   }
 
   /** Modelo comercial lavadora/secadora: giant ou titan. */
+  function looksLikeUuid(value) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || '').trim());
+  }
+
+  function looksLikeIpAddress(value) {
+    return /^(?:\d{1,3}\.){3}\d{1,3}$/.test(String(value || '').trim());
+  }
+
+  /** Remove entradas duplicadas quando o catálogo já tem ID (432) e IP (192.168.x). */
+  function dedupeMachinesByAddress(machines) {
+    const list = normalizeMachinesList(machines);
+    const hasNumericByType = {};
+    list.forEach((m) => {
+      const t = machineRecordType(m);
+      const id = normalizeStoreId(m.id);
+      if (id && !looksLikeIpAddress(id)) hasNumericByType[t] = true;
+    });
+    return list.filter((m) => {
+      const t = machineRecordType(m);
+      const id = normalizeStoreId(m.id);
+      if (looksLikeIpAddress(id) && hasNumericByType[t]) return false;
+      return true;
+    });
+  }
+
+  function remapNetworkBlockToCatalogIds(block, machines, mtype) {
+    const next = { ...(block || {}) };
+    dedupeMachinesByAddress(machines).forEach((meta) => {
+      if (machineRecordType(meta) !== mtype) return;
+      const mid = normalizeStoreId(meta.id);
+      if (looksLikeIpAddress(mid)) return;
+      const addr = String(meta.address || meta.ip || '').trim();
+      if (!addr || !looksLikeIpAddress(addr)) return;
+      if (!Object.prototype.hasOwnProperty.call(next, addr)) return;
+      if (!Object.prototype.hasOwnProperty.call(next, mid)) {
+        next[mid] = next[addr];
+      }
+      if (mid !== addr) delete next[addr];
+    });
+    return next;
+  }
+
+  function preferCatalogDeviceIds(idSet, machines, dtype) {
+    const catalog = dedupeMachinesByAddress(machines).filter(
+      (m) => machineRecordType(m) === dtype
+    );
+    const numericIds = [
+      ...new Set(
+        catalog
+          .filter((m) => !looksLikeIpAddress(normalizeStoreId(m.id)))
+          .map((m) => normalizeStoreId(m.id))
+          .filter(Boolean)
+      ),
+    ];
+    if (numericIds.length) return numericIds.sort();
+    return [...idSet].sort();
+  }
+
+  const MACHINE_TYPE_LABELS = {
+    washer: 'Lavadora',
+    dryer: 'Secadora',
+    doser: 'Dosadora',
+    ac: 'Ar-condicionado',
+  };
+
+  function machineOperationalId(record) {
+    if (!record || typeof record !== 'object') return '';
+    const code = String(record.code || '').trim();
+    const rawId = String(record.id || '').trim();
+    if (code && !looksLikeUuid(code)) return normalizeStoreId(code);
+    if (rawId && !looksLikeUuid(rawId) && !looksLikeIpAddress(rawId)) {
+      return normalizeStoreId(rawId);
+    }
+    const candidates = [record.name, record.label, record.display_name];
+    for (const raw of candidates) {
+      const val = String(raw || '').trim();
+      if (!val || looksLikeUuid(val) || looksLikeIpAddress(val)) continue;
+      return normalizeStoreId(val);
+    }
+    const addr = String(record.address || record.ip || '').trim();
+    if (addr && !looksLikeUuid(addr)) return normalizeStoreId(addr);
+    return normalizeStoreId(rawId);
+  }
+
+  function machineDisplayTitle(id, meta) {
+    const dtype = machineRecordType(meta);
+    const typeLabel =
+      meta?.machine_type_label || MACHINE_TYPE_LABELS[dtype] || (dtype ? dtype : '');
+    const name = String(meta?.display_name || meta?.label || meta?.name || meta?.code || '').trim();
+    if (name && !looksLikeUuid(name)) {
+      if (/^\d+$/.test(name) && typeLabel) return `${typeLabel} ${name}`;
+      return name;
+    }
+    const normId = String(id || meta?.id || '').trim();
+    if (normId && !looksLikeUuid(normId)) {
+      if (/^\d+$/.test(normId) && typeLabel) return `${typeLabel} ${normId}`;
+      return normId;
+    }
+    if (typeLabel && normId) return `${typeLabel} ${normId.slice(0, 8)}…`;
+    return normId || '—';
+  }
+
   function machineModelLabel(meta) {
     if (!meta) return '';
     const dtype = machineRecordType(meta);
@@ -897,8 +1317,11 @@
   }
 
   function normalizeMachineRecord(record) {
-    if (!record?.id) return null;
+    if (!record?.id && !record?.name && !record?.code) return null;
     const dtype = machineRecordType(record);
+    const operationalId = machineOperationalId(record);
+    if (!operationalId) return null;
+    const catalogId = looksLikeUuid(record.id) ? String(record.id).trim() : record.catalog_id || null;
     const capacityRaw = machineCapacityRaw(record);
     const capacity = normalizeMachineCapacity(capacityRaw);
     const model_label =
@@ -913,10 +1336,16 @@
       record.liter_capacity ?? record['liter-capacity'] ?? record.literCapacity ?? null;
     const waiting =
       record.waiting_minutes ?? record['waiting-minutes'] ?? record.waitingMinutes ?? null;
+    const friendlyName = String(record.display_name || record.label || record.name || record.code || '').trim();
     return {
       ...record,
-      id: String(record.id).trim(),
+      id: operationalId,
+      catalog_id: catalogId,
+      code: record.code || record.name || operationalId,
+      name: friendlyName && !looksLikeUuid(friendlyName) ? friendlyName : operationalId,
+      display_name: friendlyName && !looksLikeUuid(friendlyName) ? friendlyName : null,
       type: dtype,
+      machine_type_label: record.machine_type_label || MACHINE_TYPE_LABELS[dtype] || dtype,
       address: record.address || record.ip || '',
       status,
       status_raw: String(statusRaw || '').trim().toLowerCase(),
@@ -969,7 +1398,7 @@
         merged.set(key, next);
       });
     });
-    return [...merged.values()].sort(
+    return dedupeMachinesByAddress([...merged.values()]).sort(
       (a, b) =>
         String(a.type).localeCompare(String(b.type)) ||
         normalizeStoreId(a.id).localeCompare(normalizeStoreId(b.id))
@@ -1048,6 +1477,7 @@
     if (Object.prototype.hasOwnProperty.call(map, mid)) {
       return isNetworkMapOnline(map[mid]);
     }
+    if (Object.keys(map).length > 0) return false;
     return machineStatusImpliesReachable(meta);
   }
 
@@ -1059,8 +1489,12 @@
       dryers: normalizeNetworkMapKeys(status.dryers),
       dosers: normalizeNetworkMapKeys(status.dosers),
     };
-    const machines = normalizeMachinesList(next.machines);
+    const machines = dedupeMachinesByAddress(normalizeMachinesList(next.machines));
+    next.machines = machines;
     if (!machines.length) return next;
+
+    next.washers = remapNetworkBlockToCatalogIds(next.washers, machines, 'washer');
+    next.dryers = remapNetworkBlockToCatalogIds(next.dryers, machines, 'dryer');
 
     ['washers', 'dryers', 'dosers'].forEach((key) => {
       const mtype = DEVICE_GROUP_TYPE[key];
@@ -1068,11 +1502,8 @@
       machines.forEach((meta) => {
         if (machineRecordType(meta) !== mtype) return;
         const id = normalizeStoreId(meta.id);
-        if (Object.prototype.hasOwnProperty.call(block, id) && !isNetworkMapOnline(block[id])) {
-          return;
-        }
-        if (resolveDeviceOnline(block, id, meta)) {
-          block[id] = true;
+        if (!Object.prototype.hasOwnProperty.call(block, id)) {
+          block[id] = false;
         }
       });
       next[key] = block;
@@ -1306,7 +1737,7 @@
 
   function devicesFromMachines(machines, network = {}) {
     const ids = { washers: new Set(), dryers: new Set(), dosers: new Set() };
-    const catalog = machines || [];
+    const catalog = dedupeMachinesByAddress(machines || []);
     const source = network && typeof network === 'object' ? network : {};
     const net = { ...source, machines: source.machines ?? catalog };
     catalog.forEach((m) => {
@@ -1334,8 +1765,8 @@
       });
     });
     return {
-      washers: [...ids.washers].sort(),
-      dryers: [...ids.dryers].sort(),
+      washers: preferCatalogDeviceIds(ids.washers, catalog, 'washer').sort(),
+      dryers: preferCatalogDeviceIds(ids.dryers, catalog, 'dryer').sort(),
       dosers: [...ids.dosers].sort(),
       ac: '110',
     };
@@ -1410,22 +1841,22 @@
 
   /** Equipamento operacional = responde na rede e não está suspenso. */
   function isDeviceOperational(dev) {
-    const online = dev?.online || machineStatusImpliesReachable(dev);
-    if (!online) return false;
+    if (dev?.online !== true) return false;
     return normalizeMachineStatus(dev.status) !== 'suspended';
   }
 
   function isDeviceSuspended(dev) {
+    if (dev?.online !== true) return false;
     return normalizeMachineStatus(dev?.status) === 'suspended';
   }
 
   function isDeviceOccupied(dev) {
+    if (dev?.online !== true) return false;
     return normalizeMachineStatus(dev?.status) === 'occupied';
   }
 
   function isDeviceAvailable(dev) {
-    const online = dev?.online || machineStatusImpliesReachable(dev);
-    if (!online) return false;
+    if (dev?.online !== true) return false;
     return normalizeMachineStatus(dev?.status) === 'available';
   }
 
@@ -1473,6 +1904,14 @@
     const rollup = summaryFromDevices(devices);
     if (rollup.total > 0) {
       status.summary = rollup;
+      if ((rollup.online ?? 0) <= 0) {
+        ['washers', 'dryers', 'dosers'].forEach((key) => {
+          if (status[key] && typeof status[key] === 'object') {
+            status[key] = Object.fromEntries(Object.keys(status[key]).map((id) => [id, false]));
+          }
+        });
+        status.ac = false;
+      }
       return status;
     }
     if (!status.summary) attachSummary(status);
@@ -1563,33 +2002,37 @@
 
   function finalizeStoreCard(card, meta, hb, catalog) {
     if (!card || card.loading) return card;
-    if (!isStoreLav60Suspended(meta, hb, catalog)) return card;
 
-    const hbAlive = hb && isStoreHeartbeatAlive(hb, catalog);
-    const base = {
-      ...card,
-      lav60Status: 'suspended',
-      storeSuspended: true,
-    };
-
-    if (!hbAlive) {
-      return {
-        ...base,
-        state: 'suspended',
-        accessible: false,
-        storeNotice: STORE_SUSPENDED_NOTICE,
+    let result = card;
+    if (isStoreLav60Suspended(meta, hb, catalog)) {
+      const hbAlive = hb && isStoreHeartbeatAlive(hb, catalog);
+      const base = {
+        ...card,
+        lav60Status: 'suspended',
+        storeSuspended: true,
       };
+
+      if (!hbAlive) {
+        result = {
+          ...base,
+          state: 'suspended',
+          accessible: false,
+          storeNotice: STORE_SUSPENDED_NOTICE,
+        };
+      } else {
+        result = {
+          ...base,
+          state: 'suspended',
+          accessible: true,
+          agentUnavailable: false,
+          loading: false,
+          error: null,
+          storeNotice: STORE_SUSPENDED_NOTICE,
+        };
+      }
     }
 
-    return {
-      ...base,
-      state: 'suspended',
-      accessible: true,
-      agentUnavailable: false,
-      loading: false,
-      error: null,
-      storeNotice: STORE_SUSPENDED_NOTICE,
-    };
+    return attachHeartbeatSource(result, hb);
   }
 
   function withStoreCardPolicy(card, meta, hb, catalog) {
@@ -1643,8 +2086,11 @@
       accessible: false,
       state: 'unreachable',
       loading: false,
-      error: null,
+      error: isAgentsDisabled(catalog)
+        ? 'Comunicação com agentes desativada'
+        : null,
       staleSnapshot: true,
+      agentsDisabled: isAgentsDisabled(catalog),
     });
   }
 
@@ -1685,6 +2131,21 @@
     };
   }
 
+  function heartbeatReceivedAtMs(entry) {
+    const raw = entry?.received_at ?? entry?.receivedAt;
+    if (typeof raw !== 'number' || !Number.isFinite(raw)) return 0;
+    if (raw > 1e12) return raw;
+    if (raw > 1e9) return Math.round(raw * 1000);
+    return Math.round(raw * 1000);
+  }
+
+  function isStorePulseOnline(card, catalog) {
+    if (!card || card.loading || isStoreCardSuspended(card, catalog || heartbeatCatalog)) {
+      return false;
+    }
+    return card.heartbeatAlive === true;
+  }
+
   function isCardAgentReachable(card) {
     if (!card || card.loading || isStoreCardSuspended(card, heartbeatCatalog)) return false;
     if (card.agentProbeFailed || card.agentUnavailable) return false;
@@ -1706,10 +2167,10 @@
       panelCatalogSuspendedIds.size
     );
     const heartbeatOnlineStores = ready.filter(
-      (c) => !suspendedIdSet.has(normalizeStoreId(c.id)) && isCardAgentReachable(c)
+      (c) => !suspendedIdSet.has(normalizeStoreId(c.id)) && isStorePulseOnline(c, heartbeatCatalog)
     );
     const heartbeatOfflineStores = ready.filter(
-      (c) => !suspendedIdSet.has(normalizeStoreId(c.id)) && !isCardAgentReachable(c)
+      (c) => !suspendedIdSet.has(normalizeStoreId(c.id)) && !isStorePulseOnline(c, heartbeatCatalog)
     );
     const unreachable = ready.filter(
       (c) => !suspendedIdSet.has(normalizeStoreId(c.id)) && !c.accessible
@@ -1759,7 +2220,7 @@
           reason: card.storeNotice || STORE_SUSPENDED_NOTICE,
           agent_online: card.heartbeatAlive,
         });
-      } else if (isCardAgentReachable(card)) {
+      } else if (isStorePulseOnline(card, heartbeatCatalog)) {
         const healthPct = card.summary?.total
           ? Math.round(((card.summary?.online ?? 0) / card.summary.total) * 100)
           : 0;
@@ -1917,7 +2378,13 @@
   }
 
   const GATEWAY_CACHE_KEY = 'lav60:gateway:v1';
-  const GATEWAY_CACHE_VERSION = 4;
+  const GATEWAY_CACHE_VERSION = 5;
+  let storeStatusFetchAt = 0;
+  let storeStatusFetchInflight = null;
+  let storeStatusLastRows = [];
+  let storeStatusAuthBlockedUntil = 0;
+  const STORE_STATUS_MIN_MS = 90_000;
+  const STORE_STATUS_AUTH_BACKOFF_MS = 60_000;
   const GATEWAY_TTL_MS = 5 * 60 * 1000;
 
   function loadGatewayCacheRoot() {
@@ -1953,6 +2420,7 @@
     const checkedAt = Date.now();
     root.stores[sid].gateway = {
       online: Boolean(entry.online),
+      apiOnline: entry.apiOnline === true,
       error: entry.error || null,
       checkedAt,
     };
@@ -1991,6 +2459,23 @@
     if (!sid) throw new Error('Loja inválida');
     if (typeof fetchFn !== 'function') throw new Error('fetchFn obrigatório');
 
+    const catalog = catalogMemory || heartbeatCatalog;
+    const catalogStores = catalog?.stores;
+    if (Array.isArray(catalogStores) && catalogStores.length) {
+      const inCatalog = catalogStores.some((meta) => normalizeStoreId(meta.id) === sid);
+      if (!inCatalog) {
+        const error = formatStoreGatewayError(sid, 'not found');
+        return {
+          online: false,
+          error,
+          fromCache: false,
+          checkedAt: Date.now(),
+          apiOnline: false,
+          skipped: true,
+        };
+      }
+    }
+
     const cached = getStoreGatewayCacheEntry(sid);
     if (!force && cached && isGatewayCacheFresh(cached.checkedAt)) {
       return {
@@ -1998,6 +2483,7 @@
         error: cached.error || null,
         fromCache: true,
         checkedAt: cached.checkedAt,
+        apiOnline: Boolean(cached.apiOnline ?? cached.online),
       };
     }
 
@@ -2010,26 +2496,61 @@
     if (!res.ok) {
       const detail = data.detail || data.error || data.message || `HTTP ${res.status}`;
       const error = formatStoreGatewayError(sid, detail);
-      setStoreGatewayCacheEntry(sid, { online: false, error });
-      return { online: false, error, fromCache: false, checkedAt: Date.now() };
+      setStoreGatewayCacheEntry(sid, { online: false, error, apiOnline: false });
+      return {
+        online: false,
+        error,
+        fromCache: false,
+        checkedAt: Date.now(),
+        apiOnline: false,
+      };
     }
 
     const online = data.gateway_online === true;
+    const apiOnline = data.gateway_api_online === true;
     const error = online ? null : formatStoreGatewayError(sid, data.gateway_error);
     const checkedAt = data.gateway_checked_at_ms || Date.now();
-    setStoreGatewayCacheEntry(sid, { online, error });
-    return { online, error, fromCache: false, checkedAt };
+    setStoreGatewayCacheEntry(sid, { online, error, apiOnline: apiOnline || online });
+    return { online, error, fromCache: false, checkedAt, apiOnline: apiOnline || online };
   }
 
-  async function fetchStoreStatuses(fetchFn) {
+  async function fetchStoreStatuses(fetchFn, options = {}) {
     if (typeof fetchFn !== 'function') return [];
-    const res = await fetchFn('/api/stores/status', {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return [];
-    return Array.isArray(data.items) ? data.items : [];
+    if (!canAccessPanelApis()) return storeStatusLastRows;
+    const force = options.force === true;
+    const now = Date.now();
+    if (!force && now < storeStatusAuthBlockedUntil) return storeStatusLastRows;
+    if (!force && storeStatusFetchInflight) return storeStatusFetchInflight;
+    if (!force && now - storeStatusFetchAt < STORE_STATUS_MIN_MS) {
+      return storeStatusLastRows;
+    }
+
+    storeStatusFetchInflight = (async () => {
+      try {
+        const res = await fetchFn('/api/stores/status', {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+        });
+        if (res.status === 401) {
+          window.Lav60Auth?.markPanelSessionInvalid?.();
+          storeStatusAuthBlockedUntil = Date.now() + STORE_STATUS_AUTH_BACKOFF_MS;
+          return storeStatusLastRows;
+        }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) return storeStatusLastRows;
+        const rows = Array.isArray(data.items) ? data.items : [];
+        storeStatusLastRows = rows;
+        storeStatusFetchAt = Date.now();
+        storeStatusAuthBlockedUntil = 0;
+        return rows;
+      } catch {
+        return storeStatusLastRows;
+      } finally {
+        storeStatusFetchInflight = null;
+      }
+    })();
+
+    return storeStatusFetchInflight;
   }
 
   function applyStoreStatusRows(rows) {
@@ -2039,22 +2560,32 @@
       if (!sid || row.gateway_checked_at_ms == null) return;
       setStoreGatewayCacheEntry(sid, {
         online: row.gateway_online === true,
+        apiOnline: row.gateway_api_online === true,
         error: row.gateway_error || null,
       });
     });
   }
 
+  function isStorePulseOnlineCard(card, catalog) {
+    if (!card || card.loading || isStoreCardSuspended(card, catalog || heartbeatCatalog)) {
+      return false;
+    }
+    return card.heartbeatAlive === true;
+  }
+
   function syncStoreOfflineSince(cards) {
     const offlineMap = loadOfflineSinceMap();
-    const onlineMap = loadOnlineSinceMap();
-    const now = Date.now();
     let offlineChanged = false;
-    let onlineChanged = false;
+    const cat = heartbeatCatalog;
 
     cards.forEach((card) => {
       if (card.loading) return;
 
-      if (!isCardAgentReachable(card)) {
+      const agentOnline = isRtdbOnlyPanel(cat)
+        ? isStorePulseOnlineCard(card, cat)
+        : isCardAgentReachable(card);
+
+      if (!agentOnline) {
         if (card.agent_offline_since_ms != null) {
           card.offlineSince = card.agent_offline_since_ms;
           if (offlineMap[card.id] !== card.agent_offline_since_ms) {
@@ -2062,41 +2593,24 @@
             offlineChanged = true;
           }
         } else if (!offlineMap[card.id]) {
-          offlineMap[card.id] = now;
+          offlineMap[card.id] = Date.now();
           offlineChanged = true;
           card.offlineSince = offlineMap[card.id];
         } else {
           card.offlineSince = offlineMap[card.id];
         }
-        if (onlineMap[card.id]) {
-          delete onlineMap[card.id];
-          onlineChanged = true;
-        }
-        card.onlineSince = null;
+        card.onlineSince = card.agent_online_since_ms ?? null;
       } else {
         if (offlineMap[card.id]) {
           delete offlineMap[card.id];
           offlineChanged = true;
         }
         card.offlineSince = null;
-        if (card.agent_online_since_ms != null) {
-          card.onlineSince = card.agent_online_since_ms;
-          if (onlineMap[card.id] !== card.agent_online_since_ms) {
-            onlineMap[card.id] = card.agent_online_since_ms;
-            onlineChanged = true;
-          }
-        } else if (!onlineMap[card.id]) {
-          onlineMap[card.id] = now;
-          onlineChanged = true;
-          card.onlineSince = onlineMap[card.id];
-        } else {
-          card.onlineSince = onlineMap[card.id];
-        }
+        card.onlineSince = card.agent_online_since_ms ?? null;
       }
     });
 
     if (offlineChanged) saveOfflineSinceMap(offlineMap);
-    if (onlineChanged) saveOnlineSinceMap(onlineMap);
     return cards;
   }
 
@@ -2120,9 +2634,307 @@
     return formatOfflineDuration(sinceMs);
   }
 
+  function isPowpayHealthPanel(catalog) {
+    if (panelPowpayHealth === true) return true;
+    const cat = catalog || heartbeatCatalog;
+    return cat?.heartbeat_powpay_health === true || cat?.health_probe === true;
+  }
+
+  function isRtdbOnlyPanel(catalog) {
+    if (isPowpayHealthPanel(catalog)) return false;
+    if (panelRtdbOnly === true) return true;
+    const cat = catalog || heartbeatCatalog;
+    return cat?.heartbeat_rtdb_only === true;
+  }
+
+  function isBackendPulsePanel(catalog) {
+    return isPowpayHealthPanel(catalog) || isRtdbOnlyPanel(catalog);
+  }
+
+  function backendPulseSource(catalog) {
+    if (isPowpayHealthPanel(catalog)) return 'health';
+    if (isRtdbOnlyPanel(catalog)) return 'rtdb';
+    return null;
+  }
+
+  function syncPanelPulseFlags(value) {
+    if (!value || typeof value !== 'object') return;
+    if (value.heartbeat_powpay_health != null || value.health_probe != null) {
+      panelPowpayHealth =
+        value.heartbeat_powpay_health === true || value.health_probe === true;
+    }
+    if (value.heartbeat_rtdb_only != null || value.rtdb_only != null) {
+      panelRtdbOnly = (value.heartbeat_rtdb_only ?? value.rtdb_only) === true;
+    }
+    if (heartbeatCatalog && typeof heartbeatCatalog === 'object') {
+      heartbeatCatalog = {
+        ...heartbeatCatalog,
+        heartbeat_powpay_health: panelPowpayHealth,
+        heartbeat_rtdb_only: panelRtdbOnly,
+      };
+    }
+  }
+
+  function syncPanelRtdbOnlyFlag(value) {
+    syncPanelPulseFlags(
+      typeof value === 'boolean' ? { heartbeat_rtdb_only: value } : value
+    );
+  }
+
+  function countPayloadPending(payload) {
+    if (!payload) return 0;
+    const dashPending = payload.dashboard?.stores?.pending;
+    if (typeof dashPending === 'number') return dashPending;
+    return (payload.stores || []).filter((store) => store.loading).length;
+  }
+
+  function shouldPersistStoresPayloadCache(payload) {
+    if (!payload?.stores?.length || !payload.timestamp) return false;
+    if (payload.refreshing) return false;
+    return countPayloadPending(payload) === 0;
+  }
+
+  function storesPayloadTtlMs() {
+    return TtlCache()?.getTtl?.('storesPayload') || STORES_PAYLOAD_CACHE_TTL_MS;
+  }
+
+  function storesFreshTtlMs() {
+    return TtlCache()?.getTtl?.('storesFresh') || STORES_FRESH_TTL_MS;
+  }
+
+  function catalogTtlMs(catalog) {
+    if (catalog?.cache_ttl_seconds) return catalog.cache_ttl_seconds * 1000;
+    return TtlCache()?.getTtl?.('catalog') || CATALOG_CACHE_TTL_MS;
+  }
+
+  function saveStoresPayloadCache(payload) {
+    if (!shouldPersistStoresPayloadCache(payload)) return;
+    const data = {
+      stores: payload.stores,
+      dashboard: payload.dashboard,
+      timestamp: payload.timestamp,
+      heartbeat_rtdb_only: payload.heartbeat_rtdb_only ?? panelRtdbOnly,
+      heartbeat_powpay_health: payload.heartbeat_powpay_health ?? panelPowpayHealth,
+    };
+    const cache = TtlCache();
+    if (cache?.put) {
+      cache.put(STORES_PAYLOAD_CACHE_KEY, data, { persist: true });
+      return;
+    }
+    try {
+      sessionStorage.setItem(
+        STORES_PAYLOAD_CACHE_KEY,
+        JSON.stringify({ data, cachedAt: Date.now() })
+      );
+    } catch {
+      /* quota / private mode */
+    }
+  }
+
+  function peekStoresPayloadCache(maxAgeMs = storesPayloadTtlMs()) {
+    const cache = TtlCache();
+    if (cache?.peek) {
+      const entry = cache.peek(STORES_PAYLOAD_CACHE_KEY);
+      if (!entry?.data?.stores?.length || !entry.cachedAt) return null;
+      if (Date.now() - entry.cachedAt > maxAgeMs) {
+        cache.forget(STORES_PAYLOAD_CACHE_KEY);
+        return null;
+      }
+      if (countPayloadPending(entry.data) > 0) {
+        cache.forget(STORES_PAYLOAD_CACHE_KEY);
+        return null;
+      }
+      return entry;
+    }
+    try {
+      const raw = sessionStorage.getItem(STORES_PAYLOAD_CACHE_KEY);
+      if (!raw) return null;
+      const row = JSON.parse(raw);
+      if (!row?.data?.stores?.length || !row.cachedAt) return null;
+      if (Date.now() - row.cachedAt > maxAgeMs) {
+        sessionStorage.removeItem(STORES_PAYLOAD_CACHE_KEY);
+        return null;
+      }
+      if (countPayloadPending(row.data) > 0) {
+        sessionStorage.removeItem(STORES_PAYLOAD_CACHE_KEY);
+        return null;
+      }
+      return row;
+    } catch {
+      return null;
+    }
+  }
+
+  function loadStoresPayloadCache(maxAgeMs = storesPayloadTtlMs()) {
+    return peekStoresPayloadCache(maxAgeMs)?.data || null;
+  }
+
+  function isStoresPayloadFresh(freshMs = storesFreshTtlMs()) {
+    const entry = peekStoresPayloadCache();
+    if (!entry) return false;
+    return Date.now() - entry.cachedAt <= freshMs;
+  }
+
+  function saveHeartbeatSnapshotCache(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return;
+    const cache = TtlCache();
+    if (cache?.put) {
+      cache.put(HEARTBEAT_SNAPSHOT_CACHE_KEY, snapshot, { persist: true });
+      return;
+    }
+    try {
+      sessionStorage.setItem(
+        HEARTBEAT_SNAPSHOT_CACHE_KEY,
+        JSON.stringify({ data: snapshot, cachedAt: Date.now() })
+      );
+    } catch {
+      /* quota / private mode */
+    }
+  }
+
+  function loadHeartbeatSnapshotCache(maxAgeMs = HEARTBEAT_SNAPSHOT_CACHE_TTL_MS) {
+    const cache = TtlCache();
+    if (cache?.getFresh) {
+      return cache.getFresh(HEARTBEAT_SNAPSHOT_CACHE_KEY, maxAgeMs);
+    }
+    try {
+      const raw = sessionStorage.getItem(HEARTBEAT_SNAPSHOT_CACHE_KEY);
+      if (!raw) return null;
+      const row = JSON.parse(raw);
+      if (!row?.data || !row.cachedAt) return null;
+      if (Date.now() - row.cachedAt > maxAgeMs) return null;
+      return row.data;
+    } catch {
+      return null;
+    }
+  }
+
+  function invalidateCatalogCache() {
+    catalogMemory = null;
+    catalogMemoryAt = 0;
+    catalogInflight = null;
+    TtlCache()?.forget?.(CATALOG_CACHE_KEY);
+  }
+
+  function invalidatePanelStoresCache() {
+    invalidateCatalogCache();
+    TtlCache()?.forget?.(STORES_PAYLOAD_CACHE_KEY);
+    TtlCache()?.forget?.(HEARTBEAT_SNAPSHOT_CACHE_KEY);
+    TtlCache()?.forget?.(TtlCache()?.KEYS?.heartbeatsLive || 'lav60:panel:heartbeats-live');
+    TtlCache()?.forget?.(TtlCache()?.KEYS?.statusBulk || 'lav60:panel:status-bulk');
+  }
+
+  /** Pinta dashboard/lojas imediatamente a partir do cache da sessão (F5). */
+  function hydrateStoresPayloadFromCache() {
+    const snapshot = loadHeartbeatSnapshotCache();
+    if (snapshot) {
+      syncPanelPulseFlags(snapshot);
+      ingestHeartbeatSnapshot(snapshot);
+    }
+
+    const cached = loadStoresPayloadCache();
+    if (!cached) return quickPaintFromHeartbeatSnapshotCache();
+
+    syncPanelPulseFlags(cached);
+    if (isRtdbOnlyPanel(cached) && heartbeatState.size > 0) {
+      const metas = (cached.stores || []).map((store) => ({
+        id: store.id,
+        name: store.name || store.id,
+        lav60_status: store.lav60Status || store.lav60_status,
+      }));
+      return rebuildCardsFromHeartbeatCatalog(
+        {
+          ...cached,
+          stores: metas.length ? metas : cached.stores,
+        },
+        {
+          fromCache: true,
+          live: true,
+          sessionCache: true,
+          refreshing: true,
+        }
+      );
+    }
+
+    return {
+      ...cached,
+      fromCache: true,
+      live: true,
+      sessionCache: true,
+      refreshing: true,
+    };
+  }
+
+  function quickPaintFromHeartbeatSnapshotCache() {
+    const snapshot = loadHeartbeatSnapshotCache();
+    if (!snapshot) return null;
+    syncPanelPulseFlags(snapshot);
+    ingestHeartbeatSnapshot(snapshot);
+    if (!isBackendPulsePanel()) return null;
+    return rebuildCardsFromHeartbeatCatalog(
+      {
+        stores: [],
+        heartbeat_rtdb_only: snapshot.rtdb_only ?? panelRtdbOnly,
+        heartbeat_powpay_health: snapshot.heartbeat_powpay_health,
+      },
+      {
+        fromCache: true,
+        live: true,
+        sessionCache: true,
+        refreshing: true,
+      }
+    );
+  }
+
+  function isBackendPulseEntry(entry, catalog) {
+    const expected = backendPulseSource(catalog || heartbeatCatalog);
+    if (!expected) return true;
+    return (
+      resolveHeartbeatSource(entry?.heartbeat_source, entry?.payload?.heartbeat_source, entry?.source) ===
+      expected
+    );
+  }
+
+  function isRtdbHeartbeatEntry(entry) {
+    return isBackendPulseEntry(entry, { heartbeat_rtdb_only: true });
+  }
+
+  function isBackendPulseStore(storeId, catalog) {
+    const sid = normalizeStoreId(storeId);
+    const hb = heartbeatState.get(sid);
+    if (!hb) return false;
+    const expected = backendPulseSource(catalog || heartbeatCatalog);
+    if (!expected) return false;
+    if (expected === 'health' && isStoreHeartbeatAlive(hb, catalog || heartbeatCatalog)) {
+      const src = resolveHeartbeatSource(hb.source, hb.payload?.heartbeat_source);
+      return src === 'health' || src === 'post';
+    }
+    return resolveHeartbeatSource(hb.source, hb.payload?.heartbeat_source) === expected;
+  }
+
+  function filterBackendPulseCards(cards, catalog) {
+    if (!isBackendPulsePanel(catalog)) return cards || [];
+    const expected = backendPulseSource(catalog);
+    return (cards || []).filter((card) => {
+      if (card.loading) return true;
+      if (card.heartbeatSource === expected) return true;
+      if (isBackendPulseStore(card.id, catalog)) return true;
+      return false;
+    });
+  }
+
+  function isRtdbHeartbeatStore(storeId) {
+    return isBackendPulseStore(storeId, { heartbeat_rtdb_only: true });
+  }
+
+  function filterRtdbOnlyCards(cards, catalog) {
+    return filterBackendPulseCards(cards, catalog);
+  }
+
   function assemblePayload(cards, extra = {}) {
     const cat = heartbeatCatalog;
-    const enriched = (cards || []).map((card) => {
+    const scoped = filterRtdbOnlyCards(cards, cat);
+    const enriched = scoped.map((card) => {
       const withPolicy = reapplyStoreCardPolicy(card, cat);
       return enrichCardHeartbeatAlive(withPolicy, cat);
     });
@@ -2132,6 +2944,8 @@
       stores: enriched,
       dashboard: buildDashboard(enriched),
       timestamp: new Date().toISOString(),
+      heartbeat_rtdb_only: isRtdbOnlyPanel(cat),
+      heartbeat_powpay_health: isPowpayHealthPanel(cat),
       ...extra,
     };
   }
@@ -2154,7 +2968,16 @@
 
   function getHeartbeatTimeoutMs(catalog) {
     if (catalog?.heartbeat_timeout_seconds) return catalog.heartbeat_timeout_seconds * 1000;
-    return 120000;
+    return 45000;
+  }
+
+  /** Intervalo de consulta à rede local do agente GET01 (store.html). */
+  function getNetworkCheckIntervalMs(catalog) {
+    const seconds =
+      catalog?.network_check_interval_seconds ||
+      catalog?.network_check_interval ||
+      15;
+    return Math.max(5000, Number(seconds) * 1000);
   }
 
   /** Tempo sem heartbeat antes do card do dashboard mostrar offline (>= timeout técnico). */
@@ -2163,12 +2986,21 @@
     if (catalog?.offline_display_delay_seconds) {
       return Math.max(catalog.offline_display_delay_seconds * 1000, timeoutMs);
     }
-    return Math.max(timeoutMs * 2, 120000);
+    return timeoutMs;
   }
 
   const heartbeatState = new Map();
   const agentProbeState = new Map();
+  /** Status de rede obtido via probe HTTP ao agente (persiste entre rebuilds de card). */
+  const agentProbeStatusCache = new Map();
   const AGENT_PROBE_FAIL_TTL_MS = 90000;
+  /** Confirmação GET /powpay/{loja}/health após pulso RTDB (Firebase). */
+  const rtdbHealthByStore = new Map();
+  const RTDB_HEALTH_OK_TTL_MS = 90000;
+  const RTDB_HEALTH_PROBE_MIN_MS = 45000;
+  let rtdbHealthTimer = null;
+  let panelRtdbOnly = false;
+  let panelPowpayHealth = false;
   let heartbeatMonitorStarted = false;
   let heartbeatEventSource = null;
   let heartbeatTimeoutTimer = null;
@@ -2184,24 +3016,21 @@
   let panelCatalogSuspendedIds = new Set();
 
   function rememberCatalogSuspension(catalog) {
-    const set = new Set(panelCatalogSuspendedIds);
-    (catalog?.suspended_store_ids || []).forEach((id) => {
+    if (!catalog || typeof catalog !== 'object') return;
+    const fromApi = new Set();
+    (catalog.suspended_store_ids || []).forEach((id) => {
       const sid = normalizeStoreId(id);
-      if (sid) set.add(sid);
+      if (sid) fromApi.add(sid);
     });
-    (catalog?.stores || []).forEach((store) => {
-      if (String(store?.lav60_status || '').toLowerCase() === 'suspended') {
-        const sid = normalizeStoreId(store.id);
-        if (sid) set.add(sid);
-      }
-    });
-    panelCatalogSuspendedIds = set;
+    panelCatalogSuspendedIds = fromApi;
     try {
-      if (set.size) {
+      if (fromApi.size) {
         sessionStorage.setItem(
           'lav60:catalog:suspended-ids',
-          JSON.stringify([...set].sort())
+          JSON.stringify([...fromApi].sort())
         );
+      } else {
+        sessionStorage.removeItem('lav60:catalog:suspended-ids');
       }
     } catch {
       /* private mode */
@@ -2209,20 +3038,7 @@
   }
 
   function restoreCatalogSuspension() {
-    try {
-      const raw = sessionStorage.getItem('lav60:catalog:suspended-ids');
-      if (!raw) return;
-      const ids = JSON.parse(raw);
-      if (!Array.isArray(ids) || !ids.length) return;
-      const set = new Set(panelCatalogSuspendedIds);
-      ids.forEach((id) => {
-        const sid = normalizeStoreId(id);
-        if (sid) set.add(sid);
-      });
-      panelCatalogSuspendedIds = set;
-    } catch {
-      /* ignore */
-    }
+    /* Suspensão vem só do catálogo Lav60 (/api/catalog), não acumula no sessionStorage. */
   }
 
   /** Garante lav60_status suspensa no catálogo após merge com heartbeat. */
@@ -2293,7 +3109,7 @@
         fromCache: true,
         staleSnapshot: pulseStale,
         agentPulseStale: pulseStale,
-        accessible: pulseStale ? false : undefined,
+        accessible: pulseStale ? false : true,
       }
     );
     const agentUrl = doc.agent_url || doc.config_snapshot?.agent_url;
@@ -2307,57 +3123,420 @@
     );
   }
 
+  function heartbeatPostPulseMs(hb) {
+    const raw = hb?.payload?.post_received_at_ms;
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return 0;
+    return raw > 1e12 ? raw : Math.round(raw * 1000);
+  }
+
+  function rtdbPulseFresh(hb, catalog) {
+    if (!hb) return false;
+    const pulseMs = heartbeatAgentPulseMs(hb);
+    if (!pulseMs) return false;
+    return Date.now() - pulseMs <= getHeartbeatTimeoutMs(catalog || heartbeatCatalog);
+  }
+
   function isStoreHeartbeatAlive(hb, catalog) {
     if (!hb) return false;
-    const timeoutMs = getHeartbeatTimeoutMs(catalog);
-    const receivedAt = hb.receivedAt || 0;
-    return Boolean(receivedAt && Date.now() - receivedAt <= timeoutMs);
+    const cat = catalog || heartbeatCatalog;
+    const storeId = normalizeStoreId(hb.payload?.store);
+    const source = resolveHeartbeatSource(hb.source, hb.payload?.heartbeat_source);
+
+    if (isRtdbOnlyPanel(cat)) {
+      if (source === 'rtdb' || source === 'post' || !source) {
+        if (rtdbPulseFresh(hb, cat)) return true;
+        const pulseMs = heartbeatAgentPulseMs(hb) || hb.receivedAt || 0;
+        const timeoutMs = getHeartbeatTimeoutMs(cat);
+        if (pulseMs && Date.now() - pulseMs <= timeoutMs) return true;
+        if (hb.backendAlive === true) return true;
+      }
+      return false;
+    }
+
+    const timeoutMs = getHeartbeatTimeoutMs(cat);
+    const healthPulseMs =
+      source === 'rtdb'
+        ? heartbeatAgentPulseMs(hb)
+        : hb.receivedAt || heartbeatReceivedAtMs(hb) || 0;
+    const postPulseMs =
+      source === 'health' || source === 'post' ? heartbeatPostPulseMs(hb) : 0;
+    const pulseMs = Math.max(healthPulseMs, postPulseMs);
+    return Boolean(pulseMs && Date.now() - pulseMs <= timeoutMs);
+  }
+
+  function resolveHeartbeatSource(...candidates) {
+    for (const value of candidates) {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (normalized === 'rtdb' || normalized === 'post' || normalized === 'health') return normalized;
+    }
+    return null;
+  }
+
+  function attachHeartbeatSource(card, hb) {
+    if (!card) return card;
+    const source = resolveHeartbeatSource(
+      card.heartbeatSource,
+      hb?.source,
+      hb?.payload?.heartbeat_source
+    );
+    if (!source) return card;
+    return card.heartbeatSource === source ? card : { ...card, heartbeatSource: source };
+  }
+
+  function markNetworkDevicesOffline(network) {
+    if (!network || typeof network !== 'object') return network;
+    const out = { ...network };
+    ['washers', 'dryers', 'dosers'].forEach((key) => {
+      const map = out[key];
+      if (map && typeof map === 'object') {
+        out[key] = Object.fromEntries(Object.keys(map).map((id) => [id, false]));
+      }
+    });
+    out.ac = false;
+    return out;
+  }
+
+  function networkSummariesMatch(a, b) {
+    if (!a || !b) return false;
+    return (a.total ?? 0) === (b.total ?? 0) && (a.online ?? 0) === (b.online ?? 0);
+  }
+
+  function applySummaryToExistingStatus(prevStatus, summary, network, payload) {
+    if (!prevStatus || !summary) return null;
+    if ((summary.online ?? 0) > 0) return null;
+    const next = {
+      ...prevStatus,
+      timestamp: network?.timestamp || prevStatus.timestamp || new Date().toISOString(),
+      machines: mergeMachinesCatalog(
+        payload?.machines,
+        prevStatus.machines,
+        prevStatus.machines
+      ),
+    };
+    ['washers', 'dryers', 'dosers'].forEach((key) => {
+      if (next[key] && typeof next[key] === 'object') {
+        next[key] = Object.fromEntries(Object.keys(next[key]).map((id) => [id, false]));
+      }
+    });
+    next.ac = false;
+    return applyFrontendDeviceVisibility(next);
+  }
+
+  function normalizeMergedNetwork(network, machines) {
+    if (!network || typeof network !== 'object') return network;
+    let out = { ...network };
+    if ((out.summary?.online ?? 0) <= 0) {
+      out = markNetworkDevicesOffline(out);
+    }
+    const status = applyFrontendDeviceVisibility(
+      {
+        washers: out.washers || {},
+        dryers: out.dryers || {},
+        dosers: out.dosers || {},
+        ac: Boolean(out.ac),
+        machines: machines || [],
+        timestamp: out.timestamp || null,
+        summary: out.summary || null,
+      },
+      '110'
+    );
+    return {
+      ...out,
+      washers: status.washers || {},
+      dryers: status.dryers || {},
+      dosers: status.dosers || {},
+      ac: status.ac,
+      summary: status.summary || null,
+    };
+  }
+
+  function mergeHeartbeatPayload(prevPayload, nextPayload) {
+    const prev = prevPayload && typeof prevPayload === 'object' ? prevPayload : null;
+    const next = nextPayload && typeof nextPayload === 'object' ? nextPayload : null;
+    if (!next) return prev || {};
+    if (!prev) return next;
+
+    const merged = { ...prev, ...next };
+    if ((!Array.isArray(next.machines) || !next.machines.length) && Array.isArray(prev.machines)) {
+      merged.machines = prev.machines;
+    }
+    const prevNetwork = prev.network;
+    const nextNetwork = next.network;
+
+    if (!nextNetwork || typeof nextNetwork !== 'object') {
+      if (prevNetwork && typeof prevNetwork === 'object') {
+        merged.network = prevNetwork;
+      }
+      return merged;
+    }
+
+    if (networkPayloadHasDevices(nextNetwork)) {
+      merged.network = normalizeMergedNetwork(nextNetwork, merged.machines || prev?.machines);
+      return merged;
+    }
+
+    const nextSum = nextNetwork.summary;
+    if (!nextSum || (nextSum.total ?? 0) <= 0) {
+      merged.network = nextNetwork;
+      return merged;
+    }
+
+    if (prevNetwork && networkHasDeviceMaps(prevNetwork)) {
+      let network = { ...prevNetwork };
+      if ((nextSum.online ?? 0) <= 0) {
+        network = markNetworkDevicesOffline(network);
+      }
+      merged.network = normalizeMergedNetwork(network, merged.machines || prev?.machines);
+      return merged;
+    }
+
+    merged.network = normalizeMergedNetwork(
+      { ...nextNetwork, summary: nextSum },
+      merged.machines || prev?.machines
+    );
+    return merged;
+  }
+
+  function resolveCardStatusFromHeartbeat(meta, hb, catalog) {
+    if (!hb) return null;
+    const id = normalizeStoreId(meta.id);
+    let status = statusFromHeartbeatPayload(meta, hb.payload, id) || hb.lastStatus || null;
+    if (status?.summary?.total > 0) return status;
+    const network = hb.payload?.network;
+    if (!network || typeof network !== 'object') return status;
+    if (networkPayloadHasDevices(network) || (network.summary?.total ?? 0) > 0) {
+      status = statusFromHeartbeatPayload(meta, hb.payload, id) || status;
+    }
+    return status?.summary?.total > 0 ? status : status;
+  }
+
+  function isRtdbStoreOperable(hb, catalog) {
+    return isRtdbOnlyPanel(catalog) && isStoreHeartbeatAlive(hb, catalog);
+  }
+
+  function rebuildCardsFromHeartbeatCatalog(catalog, extra = {}) {
+    const cat = syncCatalogSuspension(rebuildCatalogStores(catalog, null));
+    heartbeatCatalog = cat;
+    const cards = (cat.stores || []).map((meta) => buildCardFromHeartbeat(meta, cat));
+    return assemblePayload(cards, { fromHeartbeat: true, ...extra });
   }
 
   function ingestHeartbeatEntry(storeId, entry) {
     const id = normalizeStoreId(storeId);
     if (!id) return;
     const prev = heartbeatState.get(id);
-    const incomingAt =
-      typeof entry?.received_at === 'number'
-        ? entry.received_at * 1000
-        : entry?.receivedAt || 0;
+    const incomingAt = heartbeatReceivedAtMs(entry);
     const prevAt = prev?.receivedAt || 0;
     if (prev && incomingAt > 0 && prevAt > incomingAt) return;
-    const receivedAt = incomingAt > 0 ? Math.max(incomingAt, prevAt) : prevAt || Date.now();
-    const payload =
+    const rawPayload =
       incomingAt >= prevAt ? entry?.payload || entry : prev?.payload || entry?.payload || entry;
+    const payload =
+      incomingAt >= prevAt ? mergeHeartbeatPayload(prev?.payload, rawPayload) : rawPayload;
+    const source = resolveHeartbeatSource(
+      entry?.heartbeat_source,
+      payload?.heartbeat_source,
+      prev?.source
+    );
+    const pulseMs = source === 'rtdb' ? heartbeatAgentPulseMs({ payload, source }) : 0;
+    const receivedAt =
+      pulseMs > 0
+        ? pulseMs
+        : incomingAt > 0
+          ? Math.max(incomingAt, prevAt)
+          : prevAt || Date.now();
     const status = statusFromHeartbeatPayload(null, payload, id);
+    if (isBackendPulsePanel() && source !== backendPulseSource()) return;
     heartbeatState.set(id, {
       receivedAt,
       payload,
       lastStatus: status || prev?.lastStatus || null,
       alive: Date.now() - receivedAt <= getHeartbeatTimeoutMs(heartbeatCatalog),
+      backendAlive: entry?.alive === true,
+      source,
+    });
+    if (source === 'rtdb') {
+      noteRtdbHeartbeatSeen(id, heartbeatState.get(id));
+    }
+  }
+
+  function purgeHeartbeatStateNotInSnapshot(snapshot) {
+    const items = snapshot?.heartbeats;
+    if (!items || typeof items !== 'object') return;
+    if (snapshot?.rtdb?.last_sync_error) return;
+    const liveIds = new Set(
+      Object.keys(items)
+        .map(normalizeStoreId)
+        .filter(Boolean)
+    );
+    // Snapshot vazio é sinal de hiato transitório no RTDB (token refresh, throttle).
+    // Não remove nada — evita que todo o painel vire "offline" por falha momentânea.
+    if (liveIds.size === 0) return;
+    const expectedSource = isRtdbOnlyPanel() ? 'rtdb' : backendPulseSource();
+    heartbeatState.forEach((hb, id) => {
+      const source = resolveHeartbeatSource(hb.source, hb.payload?.heartbeat_source);
+      if (isRtdbOnlyPanel()) {
+        if (!liveIds.has(id)) {
+          heartbeatState.delete(id);
+          rtdbHealthByStore.delete(id);
+          agentProbeState.delete(id);
+        }
+        return;
+      }
+      if (expectedSource && source === expectedSource && !liveIds.has(id)) {
+        heartbeatState.delete(id);
+        agentProbeState.delete(id);
+      }
     });
   }
 
   function ingestHeartbeatSnapshot(snapshot) {
+    syncPanelPulseFlags(snapshot);
+    purgeHeartbeatStateNotInSnapshot(snapshot);
+    const backendPulse = isBackendPulsePanel();
+    const pulseSource = backendPulseSource();
+    if (backendPulse && pulseSource) {
+      heartbeatState.forEach((hb, id) => {
+        if (resolveHeartbeatSource(hb.source, hb.payload?.heartbeat_source) !== pulseSource) {
+          heartbeatState.delete(id);
+        }
+      });
+    } else if (isRtdbOnlyPanel()) {
+      heartbeatState.forEach((hb, id) => {
+        if (resolveHeartbeatSource(hb.source, hb.payload?.heartbeat_source) !== 'rtdb') {
+          heartbeatState.delete(id);
+        }
+      });
+    }
     const items = snapshot?.heartbeats || snapshot || {};
     Object.entries(items).forEach(([storeId, entry]) => {
+      if (backendPulse && !isBackendPulseEntry(entry)) return;
+      if (isRtdbOnlyPanel() && !isRtdbHeartbeatEntry(entry)) return;
       ingestHeartbeatEntry(storeId, entry);
     });
   }
 
-  function networkPayloadHasDevices(network) {
+  function networkHasDeviceMaps(network) {
     if (!network || typeof network !== 'object') return false;
-    if (network.summary?.total > 0) return true;
     return ['washers', 'dryers', 'dosers'].some(
       (key) => network[key] && Object.keys(network[key]).length > 0
     );
   }
 
+  function networkPayloadHasDevices(network) {
+    return networkHasDeviceMaps(network);
+  }
+
+  function summaryFromNetworkMaps(network, acId = '110') {
+    const status = {
+      washers: network?.washers || {},
+      dryers: network?.dryers || {},
+      dosers: network?.dosers || {},
+      ac: Boolean(network?.ac),
+      machines: network?.machines || [],
+      timestamp: network?.timestamp || null,
+    };
+    return reconcileStatusSummary(applyFrontendDeviceVisibility(status, acId), acId).summary;
+  }
+
+  function heartbeatAgentPulseMs(hb) {
+    if (!hb) return 0;
+    const payload = hb.payload || {};
+    const source = resolveHeartbeatSource(hb.source, payload?.heartbeat_source);
+    const rawHb = payload.heartbeat;
+    if (typeof rawHb === 'number' && Number.isFinite(rawHb)) {
+      return rawHb > 1e12 ? rawHb : Math.round(rawHb * 1000);
+    }
+    if (rawHb && typeof rawHb === 'object') {
+      for (const key of ['timestamp', 'updated_at_ms', 'received_at_ms', 'ts']) {
+        const value = rawHb[key];
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          return value > 1e12 ? value : Math.round(value * 1000);
+        }
+      }
+    }
+    const pcStatus = payload.pc_status;
+    if (pcStatus && typeof pcStatus.timestamp === 'number' && Number.isFinite(pcStatus.timestamp)) {
+      const ts = pcStatus.timestamp;
+      return ts > 1e12 ? ts : Math.round(ts * 1000);
+    }
+    if (source !== 'rtdb') {
+      const network = payload.network;
+      if (network?.timestamp) {
+        const parsed = Date.parse(network.timestamp);
+        if (Number.isFinite(parsed)) return parsed;
+      }
+    }
+    for (const key of ['timestamp', 'updated_at_ms', 'received_at_ms']) {
+      const value = payload[key];
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        return value > 1e12 ? value : Math.round(value * 1000);
+      }
+    }
+    if (hb.receivedAt) return hb.receivedAt;
+    return heartbeatReceivedAtMs({ received_at: payload.received_at }) || 0;
+  }
+
   function statusFromHeartbeatPayload(meta, payload, catalogId) {
     const network = payload?.network;
-    if (!networkPayloadHasDevices(network)) {
-      return null;
+    if (!network || typeof network !== 'object') return null;
+
+    const hasDevices = networkPayloadHasDevices(network);
+    const summary = network.summary;
+    const hasSummary = Boolean(summary && (summary.total ?? 0) > 0);
+    const id = normalizeStoreId(payload.store || catalogId);
+    const prev = heartbeatState.get(id);
+
+    if (!hasDevices && hasSummary) {
+      const machines = mergeMachinesCatalog(
+        payload?.machines,
+        prev?.lastStatus?.machines,
+        prev?.payload?.machines
+      );
+      if (prev?.lastStatus && networkPayloadHasDevices(prev.lastStatus)) {
+        const fromPrev = applySummaryToExistingStatus(
+          prev.lastStatus,
+          summary,
+          network,
+          payload
+        );
+        if (fromPrev) return fromPrev;
+      }
+      if (machines.length) {
+        const summaryOnly = {
+          store: id,
+          timestamp: network.timestamp || payload.timestamp || new Date().toISOString(),
+          summary: { ...summary },
+          machines,
+        };
+        if (!summaryOnly.summary?.total) attachSummary(summaryOnly);
+        return applyFrontendDeviceVisibility(summaryOnly);
+      }
+      if (prev?.lastStatus?.summary?.total) {
+        const fromSummary = applySummaryToExistingStatus(
+          prev.lastStatus,
+          summary,
+          network,
+          payload
+        );
+        if (fromSummary) return fromSummary;
+      }
+      const summaryStatus = {
+        store: id,
+        washers: network.washers || {},
+        dryers: network.dryers || {},
+        dosers: network.dosers || {},
+        ac: Boolean(network.ac),
+        timestamp: network.timestamp || payload.timestamp || new Date().toISOString(),
+        summary: { ...summary },
+        machines,
+      };
+      return applyFrontendDeviceVisibility(summaryStatus);
     }
+
+    if (!hasDevices) return null;
+
     const status = {
-      store: normalizeStoreId(payload.store || catalogId),
+      store: id,
       washers: network.washers || {},
       dryers: network.dryers || {},
       dosers: network.dosers || {},
@@ -2365,8 +3544,6 @@
       timestamp: network.timestamp || payload.timestamp || new Date().toISOString(),
       summary: network.summary || null,
     };
-    const id = normalizeStoreId(payload.store || catalogId);
-    const prev = heartbeatState.get(id);
     status.machines = mergeMachinesCatalog(
       payload?.machines,
       prev?.lastStatus?.machines,
@@ -2388,7 +3565,12 @@
     heartbeatState.set(id, { ...hb, lastStatus: status });
     return withStoreCardPolicy(
       attachAgentUrlToCard(
-        buildStoreCard(meta, status, null, catalog, { fromHeartbeat: true }),
+        buildStoreCard(meta, status, null, catalog, {
+          fromHeartbeat: true,
+          accessible: true,
+          agentPulseStale: false,
+          staleSnapshot: false,
+        }),
         hb
       ),
       meta,
@@ -2457,7 +3639,11 @@
   }
 
   async function validateStoresWithAgentProbe(cards, catalog, token) {
-    if (!shouldRunLiveAgentProbe()) return;
+    if (shouldRunRtdbHealthProbe(catalog)) {
+      await validateRtdbStoresWithHealthProbe(cards, catalog);
+      return;
+    }
+    if (!shouldRunLiveAgentProbe(catalog)) return;
     const targets = selectAgentProbeTargets(cards, catalog);
     if (!targets.length) return;
 
@@ -2474,6 +3660,17 @@
 
   function buildOfflineCardFromHeartbeat(meta, catalog, hb) {
     const id = normalizeStoreId(meta.id);
+    if (isRtdbOnlyPanel(catalog)) {
+      return withStoreCardPolicy(
+        buildStoreCard(meta, null, 'Sem conexão com a loja', catalog, {
+          agentPulseStale: true,
+          staleSnapshot: true,
+        }),
+        meta,
+        hb,
+        catalog
+      );
+    }
     const statusDoc = getStatusCacheDoc(id);
     const cachedMachines = mergeMachinesCatalog(statusDoc?.machines);
     let lastStatus =
@@ -2482,6 +3679,8 @@
       lastStatus = { ...lastStatus, machines: mergeMachinesCatalog(lastStatus.machines, cachedMachines) };
     }
     if (lastStatus?.summary?.total) {
+      const acId = catalog?.ac_id || '110';
+      lastStatus = applyFrontendDeviceVisibility(lastStatus, acId);
       return withStoreCardPolicy(
         attachAgentUrlToCard(
           buildStoreCard(meta, lastStatus, null, catalog, {
@@ -2524,6 +3723,7 @@
     const now = Date.now();
 
     function fromStatusCache() {
+      if (isRtdbOnlyPanel(catalog)) return null;
       return cardFromStatusCacheEntry(meta, getStatusCacheDoc(id), catalog);
     }
 
@@ -2542,7 +3742,7 @@
     }
 
     if (!hb) {
-      const snapshotGraceMs = 12000;
+      const snapshotGraceMs = isPowpayHealthPanel(catalog) ? 90000 : 12000;
       if (now - heartbeatPageStartedAt < snapshotGraceMs) {
         const cached = fromStatusCache();
         if (cached?.accessible) {
@@ -2569,7 +3769,11 @@
       return buildOfflineCardFromHeartbeat(meta, catalog, hb);
     }
 
-    const probeFailure = recentAgentProbeFailure(id);
+    const probeFailure = isRtdbOnlyPanel(catalog)
+      ? null
+      : hb && rtdbPulseFresh(hb, catalog)
+        ? null
+        : recentAgentProbeFailure(id);
     if (probeFailure) {
       return withStoreCardPolicy(
         buildStoreCard(
@@ -2590,19 +3794,78 @@
       );
     }
 
-    const status = statusFromHeartbeatPayload(meta, hb.payload, id) || hb.lastStatus;
+    const status = resolveCardStatusFromHeartbeat(meta, hb, catalog);
     if (status?.summary?.total > 0) {
       return buildOnlineCardFromHeartbeat(meta, catalog, hb, status);
     }
 
-    const cached = fromStatusCache();
-    if (cached) return withStoreCardPolicy(cached, meta, hb, catalog);
-    return withStoreCardPolicy(buildPlaceholderCard(meta, catalog), meta, hb, catalog);
+    const probedStatus = agentProbeStatusCache.get(id);
+    if (probedStatus?.summary?.total) {
+      return buildOnlineCardFromHeartbeat(meta, catalog, hb, probedStatus);
+    }
+
+    if (!isRtdbOnlyPanel(catalog)) {
+      const cached = fromStatusCache();
+      if (cached?.summary?.total) {
+        return withStoreCardPolicy(
+          {
+            ...cached,
+            accessible: true,
+            staleSnapshot: true,
+            agentPulseStale: false,
+            error: null,
+            state: storeHealthState(cached.summary, null),
+          },
+          meta,
+          hb,
+          catalog
+        );
+      }
+    }
+
+    const rtdbOnline = isRtdbStoreOperable(hb, catalog);
+    const hasDeviceSummary = Boolean(status?.summary?.total);
+    return withStoreCardPolicy(
+      attachAgentUrlToCard(
+        buildStoreCard(meta, status, null, catalog, {
+          fromHeartbeat: true,
+          loading: false,
+          accessible: rtdbOnline || hasDeviceSummary,
+          state: hasDeviceSummary
+            ? storeHealthState(status.summary, null)
+            : rtdbOnline
+              ? 'ok'
+              : 'unreachable',
+        }),
+        hb
+      ),
+      meta,
+      hb,
+      catalog
+    );
+  }
+
+  function applyAgentProbeBatchToCards(cards, results, catalog) {
+    if (!results || typeof results !== 'object') return;
+    (cards || []).forEach((card) => {
+      const row = results[normalizeStoreId(card.id)];
+      if (row) applyAgentProbeBatchResult(card, row, catalog);
+    });
   }
 
   function buildPayloadFromHeartbeats(catalog, extra = {}) {
     const list = catalog.stores || [];
-    const cards = list.map((meta) => buildCardFromHeartbeat(meta, catalog));
+    let cards = list.map((meta) => {
+      const card = buildCardFromHeartbeat(meta, catalog);
+      const probed = agentProbeStatusCache.get(normalizeStoreId(meta.id));
+      if (!cardHasDeviceDots(card) && probed?.summary?.total) {
+        const hb = heartbeatState.get(normalizeStoreId(meta.id));
+        return buildOnlineCardFromHeartbeat(meta, catalog, hb, probed);
+      }
+      return card;
+    });
+    cards = enrichPayloadFromStatusCache(cards, catalog);
+    cards = reapplyAllStoreCardPolicies(cards, catalog);
     return assemblePayload(cards, { fromHeartbeat: true, ...extra });
   }
 
@@ -2611,6 +3874,18 @@
     heartbeatCatalog = syncCatalogSuspension(rebuildCatalogStores(heartbeatCatalog, null));
     const payload = buildPayloadFromHeartbeats(heartbeatCatalog, extra);
     heartbeatOnUpdate(payload);
+  }
+
+  function canAccessPanelApis() {
+    const auth = window.Lav60Auth;
+    if (!auth || typeof auth.isPanelSessionOk !== 'function') return false;
+    return auth.isPanelSessionOk();
+  }
+
+  function openHeartbeatEventSource() {
+    const open = window.Lav60PanelApi?.openEventSource;
+    if (typeof open === 'function') return open('/api/heartbeats/stream');
+    return new EventSource('/api/heartbeats/stream');
   }
 
   function stopHeartbeatMonitor() {
@@ -2631,10 +3906,18 @@
       clearInterval(agentProbeTimer);
       agentProbeTimer = null;
     }
+    if (rtdbHealthTimer) {
+      clearInterval(rtdbHealthTimer);
+      rtdbHealthTimer = null;
+    }
   }
 
   async function pollAgentReachability() {
-    if (!shouldRunLiveAgentProbe()) return;
+    if (shouldRunRtdbHealthProbe(heartbeatCatalog)) {
+      await pollRtdbHealthProbes();
+      return;
+    }
+    if (!shouldRunLiveAgentProbe(heartbeatCatalog)) return;
     if (!heartbeatCatalog || !heartbeatMonitorStarted) return;
 
     const cards = (heartbeatCatalog.stores || [])
@@ -2648,43 +3931,41 @@
       heartbeatAuthToken,
       heartbeatCatalog
     );
-    targets.forEach((card) => {
-      const row = results[normalizeStoreId(card.id)];
-      if (!row) return;
-      if (row.reachable) {
-        recordAgentProbe(card.id, { ok: true });
-      } else if (row.definite_offline) {
-        recordAgentProbe(card.id, {
-          ok: false,
-          error: friendlyUserMessage(`HTTP ${row.status || 404}`),
-        });
-      } else if (row.transient_error) {
-        recordAgentProbe(card.id, {
-          ok: null,
-          error: friendlyUserMessage(`HTTP ${row.status || 502}`),
-          transient: true,
-        });
-      }
-    });
+    applyAgentProbeBatchToCards(targets, results, heartbeatCatalog);
     emitHeartbeatUpdate({ agentProbe: true });
   }
 
   function connectHeartbeatStream() {
     if (!heartbeatMonitorStarted) return;
+    if (!canAccessPanelApis()) {
+      stopHeartbeatMonitor();
+      return;
+    }
     if (heartbeatEventSource) {
       heartbeatEventSource.close();
       heartbeatEventSource = null;
     }
-    heartbeatEventSource = new EventSource('/api/heartbeats/stream');
+    heartbeatEventSource = openHeartbeatEventSource();
     heartbeatEventSource.onmessage = (event) => {
       heartbeatStreamReconnectMs = 3000;
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'heartbeat') {
           ingestHeartbeatEntry(msg.store, msg);
+          bustHeartbeatsLiveCache();
           emitHeartbeatUpdate({ live: true });
+        } else if (msg.type === 'heartbeat_removed') {
+          const sid = normalizeStoreId(msg.store);
+          if (sid) {
+            heartbeatState.delete(sid);
+            rtdbHealthByStore.delete(sid);
+            agentProbeState.delete(sid);
+          }
+          bustHeartbeatsLiveCache();
+          emitHeartbeatUpdate({ live: true, removed: sid });
         } else if (msg.type === 'snapshot') {
           ingestHeartbeatSnapshot(msg);
+          bustHeartbeatsLiveCache();
           emitHeartbeatUpdate({ live: true, snapshot: true });
         }
       } catch {
@@ -2696,6 +3977,11 @@
       if (heartbeatEventSource) {
         heartbeatEventSource.close();
         heartbeatEventSource = null;
+      }
+      // Sem sessão (logout/expiração): não reconectar em loop gerando 401.
+      if (!canAccessPanelApis()) {
+        stopHeartbeatMonitor();
+        return;
       }
       const delay = heartbeatStreamReconnectMs;
       heartbeatStreamReconnectMs = Math.min(Math.round(heartbeatStreamReconnectMs * 1.5), 30000);
@@ -2714,7 +4000,10 @@
 
     pollHeartbeatsSnapshot();
     if (heartbeatPollTimer) clearInterval(heartbeatPollTimer);
-    heartbeatPollTimer = setInterval(pollHeartbeatsSnapshot, 20000);
+    const pollMs = isRtdbOnlyPanel(catalog)
+      ? Math.max(10000, (catalog?.heartbeat_interval_seconds || 15) * 1000)
+      : 20000;
+    heartbeatPollTimer = setInterval(pollHeartbeatsSnapshot, pollMs);
 
     connectHeartbeatStream();
 
@@ -2723,28 +4012,124 @@
       emitHeartbeatUpdate({ tick: true });
     }, 5000);
 
-    if (agentProbeTimer) clearInterval(agentProbeTimer);
-    agentProbeTimer = setInterval(() => {
-      void pollAgentReachability();
-    }, 60000);
+    if (shouldRunLiveAgentProbe(catalog)) {
+      if (agentProbeTimer) clearInterval(agentProbeTimer);
+      agentProbeTimer = setInterval(() => {
+        void pollAgentReachability();
+      }, 60000);
+    } else if (shouldRunRtdbHealthProbe(catalog)) {
+      void pollRtdbHealthProbes();
+      if (rtdbHealthTimer) clearInterval(rtdbHealthTimer);
+      rtdbHealthTimer = setInterval(() => {
+        void pollRtdbHealthProbes();
+      }, RTDB_HEALTH_PROBE_MIN_MS);
+    }
+  }
+
+  function bustHeartbeatsLiveCache() {
+    const cache = TtlCache();
+    if (!cache?.forget) return;
+    const base = cache?.KEYS?.heartbeatsLive || 'lav60:panel:heartbeats-live';
+    cache.forget(`${base}:lite`);
+    cache.forget(`${base}:full`);
   }
 
   async function pollHeartbeatsSnapshot() {
     try {
-      const snap = await fetchHeartbeatsSnapshot();
+      const snap = await fetchHeartbeatsSnapshot({ lite: false });
       ingestHeartbeatSnapshot(snap);
-      emitHeartbeatUpdate({ poll: true });
+      if (shouldRunRtdbHealthProbe(heartbeatCatalog)) {
+        await pollRtdbHealthProbes();
+      } else {
+        emitHeartbeatUpdate({ poll: true });
+      }
     } catch {
       /* painel indisponível */
     }
   }
 
-  async function fetchHeartbeatsSnapshot() {
-    const res = await fetch('/api/heartbeats', { credentials: 'same-origin' });
-    if (!res.ok) {
-      throw new Error('Painel de heartbeat indisponível — execute .\\serve.ps1');
+  async function fetchHeartbeatsSnapshot(options = {}) {
+    const force = options.force === true;
+    const catalog = options.catalog || heartbeatCatalog;
+    const rtdb = isRtdbOnlyPanel(catalog);
+    // GET01 (RTDB): snapshot completo com mapas de rede — cards já nascem com totais.
+    const lite = options.lite != null ? Boolean(options.lite) : !rtdb;
+    if (PANEL_AGENTS_DISABLED) {
+      return {
+        heartbeats: {},
+        timeout_seconds: 45,
+        lite: Boolean(lite),
+        agents_disabled: true,
+      };
     }
-    return res.json();
+    const cache = TtlCache();
+    const key = `${cache?.KEYS?.heartbeatsLive || 'lav60:panel:heartbeats-live'}:${lite ? 'lite' : 'full'}`;
+    const ttlMs = cache?.getTtl?.('heartbeats') || HEARTBEATS_LIVE_TTL_MS;
+    const fallback = cache?.getFresh?.(key, HEARTBEAT_SNAPSHOT_CACHE_TTL_MS)
+      || loadHeartbeatSnapshotCache()
+      || null;
+
+    if (!canAccessPanelApis()) {
+      if (fallback) return fallback;
+      return {
+        heartbeats: {},
+        timeout_seconds: 45,
+        lite: Boolean(lite),
+        auth_required: true,
+      };
+    }
+
+    if (!force && cache?.getFresh) {
+      const hit = cache.getFresh(key, ttlMs);
+      if (hit) return hit;
+    }
+
+    const etagKey = `${cache?.KEYS?.heartbeatsEtag || 'lav60:panel:heartbeats:etag'}:${lite ? 'lite' : 'full'}`;
+    const url = lite ? '/api/heartbeats?lite=1' : '/api/heartbeats';
+    const fetcher = async () => {
+      if (cache?.fetchConditional) {
+        try {
+          const result = await cache.fetchConditional(url, {
+            etagKey,
+            fallback,
+            force,
+          });
+          saveHeartbeatSnapshotCache(result.data);
+          cache.put?.(key, result.data, { persist: false });
+          return result.data;
+        } catch (err) {
+          if (err?.status === 401) {
+            window.Lav60Auth?.markPanelSessionInvalid?.();
+            stopHeartbeatMonitor();
+            if (fallback) return fallback;
+          }
+          if (fallback) return fallback;
+          throw err.status ? new Error('Painel de heartbeat indisponível — execute .\\serve.ps1') : err;
+        }
+      }
+      const res = await fetch(url, { credentials: 'same-origin' });
+      if (res.status === 401) {
+        window.Lav60Auth?.markPanelSessionInvalid?.();
+        stopHeartbeatMonitor();
+        if (fallback) return fallback;
+        return {
+          heartbeats: {},
+          timeout_seconds: 45,
+          lite: Boolean(lite),
+          auth_required: true,
+        };
+      }
+      if (!res.ok) {
+        throw new Error('Painel de heartbeat indisponível — execute .\\serve.ps1');
+      }
+      const data = await res.json();
+      saveHeartbeatSnapshotCache(data);
+      if (cache?.put) cache.put(key, data, { persist: false });
+      return data;
+    };
+
+    if (cache?.dedupe) return cache.dedupe(`${key}:fetch`, fetcher);
+    return fetcher();
   }
 
   /**
@@ -2765,25 +4150,29 @@
     let pollTimer = null;
     let streamReconnectMs = 3000;
 
-    function deliver(entry) {
-      if (stopped || !entry) return;
-      const payload = entry.payload || entry;
-      const status = statusFromHeartbeatPayload(null, payload, id);
-      if (!status?.summary?.total) return;
-      onStatus(status, {
+    function deliver(entry, options = {}) {
+      if (stopped) return;
+      const payload = entry?.payload || entry;
+      const status =
+        payload && entry ? statusFromHeartbeatPayload(null, payload, id) : null;
+      const alive =
+        options.alive ??
+        Boolean(entry && isHeartbeatEntryAlive(entry, catalog));
+      onStatus(status?.summary?.total ? status : null, {
         live: true,
-        receivedAt: entry.received_at || entry.receivedAt,
-        payload,
+        receivedAt: entry?.received_at || entry?.receivedAt,
+        payload: payload || null,
+        alive,
+        entry: entry || null,
       });
     }
 
     async function bootstrap() {
       try {
-        const snap = await fetchHeartbeatsSnapshot();
+        const snap = await fetchHeartbeatsSnapshot({ lite: false });
         const entry = snap.heartbeats?.[id];
-        if (entry && isHeartbeatEntryAlive(entry, catalog)) {
-          deliver(entry);
-        }
+        if (entry) deliver(entry);
+        else deliver(null, { alive: false });
       } catch {
         /* painel indisponível */
       }
@@ -2791,11 +4180,15 @@
 
     function connect() {
       if (stopped) return;
+      if (!canAccessPanelApis()) {
+        stopped = true;
+        return;
+      }
       if (eventSource) {
         eventSource.close();
         eventSource = null;
       }
-      eventSource = new EventSource('/api/heartbeats/stream');
+      eventSource = openHeartbeatEventSource();
       eventSource.onmessage = (event) => {
         if (stopped) return;
         streamReconnectMs = 3000;
@@ -2803,9 +4196,12 @@
           const msg = JSON.parse(event.data);
           if (msg.type === 'heartbeat' && normalizeStoreId(msg.store) === id) {
             deliver(msg);
+          } else if (msg.type === 'heartbeat_removed' && normalizeStoreId(msg.store) === id) {
+            deliver(null, { alive: false });
           } else if (msg.type === 'snapshot') {
             const entry = msg.heartbeats?.[id];
             if (entry) deliver(entry);
+            else deliver(null, { alive: false });
           }
         } catch {
           /* ignore malformed SSE */
@@ -2817,6 +4213,10 @@
           eventSource.close();
           eventSource = null;
         }
+        if (!canAccessPanelApis()) {
+          stopped = true;
+          return;
+        }
         const delay = streamReconnectMs;
         streamReconnectMs = Math.min(Math.round(streamReconnectMs * 1.5), 30000);
         setTimeout(connect, delay);
@@ -2824,16 +4224,21 @@
     }
 
     async function pollOnce() {
-      if (stopped) return;
+      if (stopped || !canAccessPanelApis()) return;
       try {
         const snap = await fetchHeartbeatsSnapshot();
         const entry = snap.heartbeats?.[id];
-        if (entry && isHeartbeatEntryAlive(entry, catalog)) {
-          deliver(entry);
-        }
+        if (entry) deliver(entry);
+        else deliver(null, { alive: false });
       } catch {
         /* painel indisponível */
       }
+    }
+
+    if (!canAccessPanelApis()) {
+      return () => {
+        stopped = true;
+      };
     }
 
     if (skipInitialBootstrap) {
@@ -2844,7 +4249,7 @@
     if (!skipInitialPoll) {
       pollOnce();
     }
-    pollTimer = setInterval(pollOnce, 20000);
+    pollTimer = setInterval(pollOnce, HEARTBEAT_POLL_MS);
 
     return () => {
       stopped = true;
@@ -2861,12 +4266,13 @@
 
   async function fetchStoreStatusFromHeartbeat(meta, catalog) {
     const id = normalizeStoreId(meta.id);
-    const snap = await fetchHeartbeatsSnapshot();
+    const snap = await fetchHeartbeatsSnapshot({ lite: false });
     const entry = snap.heartbeats?.[id];
     if (!entry || !isHeartbeatEntryAlive(entry, catalog)) {
       return { status: null, error: 'Sem heartbeat recente do agente' };
     }
-    const status = statusFromHeartbeatPayload(meta, entry.payload || entry, id);
+    const status = resolveCardStatusFromHeartbeat(meta, { payload: entry.payload || entry }, catalog)
+      || statusFromHeartbeatPayload(meta, entry.payload || entry, id);
     if (!status?.summary?.total) {
       return { status: null, error: 'Aguardando leitura de equipamentos' };
     }
@@ -2877,7 +4283,7 @@
     const id = normalizeStoreId(storeId);
     const hb = heartbeatState.get(id);
     if (!hb) return false;
-    return Date.now() - hb.receivedAt <= getHeartbeatTimeoutMs(catalog);
+    return isStoreHeartbeatAlive(hb, catalog || heartbeatCatalog);
   }
 
   function getAgentProbeTimeoutMs(catalog) {
@@ -2925,14 +4331,70 @@
   }
 
   async function loadCatalog(options = {}) {
-    const force = options.force === true ? '?force=1' : '';
-    let res = await fetch(`/api/catalog${force}`, { cache: 'no-store', credentials: 'same-origin' });
-    if (!res.ok) {
-      res = await fetch(`./stores.json?_=${Date.now()}`, { cache: 'no-store', credentials: 'same-origin' });
+    const force = options.force === true;
+    const ttlMs = catalogTtlMs(catalogMemory);
+    const cache = TtlCache();
+
+    if (!force) {
+      if (catalogMemory && Date.now() - catalogMemoryAt <= ttlMs) {
+        syncPanelPulseFlags(catalogMemory);
+        return syncCatalogSuspension(catalogMemory);
+      }
+      const cached = cache?.getFresh?.(CATALOG_CACHE_KEY, ttlMs);
+      if (cached) {
+        catalogMemory = cached;
+        catalogMemoryAt = Date.now();
+        syncPanelPulseFlags(cached);
+        return syncCatalogSuspension(cached);
+      }
     }
-    if (!res.ok) throw new Error('Configuração do painel indisponível');
-    const catalog = await res.json();
-    return syncCatalogSuspension(catalog);
+
+    if (catalogInflight && !force) return catalogInflight;
+
+    catalogInflight = (async () => {
+      const qs = force ? '?force=1' : '';
+      const etagKey = cache?.KEYS?.catalogEtag || 'lav60:panel:catalog:etag';
+      const stale = cache?.peek?.(CATALOG_CACHE_KEY)?.data || catalogMemory;
+      try {
+        if (cache?.fetchConditional) {
+          const result = await cache.fetchConditional(`/api/catalog${qs}`, {
+            etagKey,
+            fallback: stale,
+            force,
+          });
+          const catalog = syncCatalogSuspension(result.data);
+          syncPanelPulseFlags(catalog);
+          catalogMemory = catalog;
+          catalogMemoryAt = Date.now();
+          cache.put?.(CATALOG_CACHE_KEY, catalog, { persist: true });
+          if (catalog?.cache_ttl_seconds) {
+            cache.setTtl?.('catalog', catalog.cache_ttl_seconds * 1000);
+          }
+          return catalog;
+        }
+      } catch {
+        /* fallback abaixo */
+      }
+
+      let res = await fetch(`/api/catalog${qs}`, { cache: 'no-store', credentials: 'same-origin' });
+      if (!res.ok) {
+        res = await fetch(`./stores.json?_=${Date.now()}`, { cache: 'no-store', credentials: 'same-origin' });
+      }
+      if (!res.ok) throw new Error('Configuração do painel indisponível');
+      const catalog = syncCatalogSuspension(await res.json());
+      syncPanelPulseFlags(catalog);
+      catalogMemory = catalog;
+      catalogMemoryAt = Date.now();
+      cache?.put?.(CATALOG_CACHE_KEY, catalog, { persist: true });
+      if (catalog?.cache_ttl_seconds) {
+        cache?.setTtl?.('catalog', catalog.cache_ttl_seconds * 1000);
+      }
+      return catalog;
+    })().finally(() => {
+      catalogInflight = null;
+    });
+
+    return catalogInflight;
   }
 
   function storeMetaFromId(storeId, entry = null) {
@@ -2974,15 +4436,31 @@
 
   function rebuildCatalogStores(catalog, cacheMap = null) {
     const byId = new Map();
-    const allowed = new Set((catalog?.stores || []).map((meta) => normalizeStoreId(meta.id)).filter(Boolean));
-    (catalog?.stores || []).forEach((meta) => {
-      const id = normalizeStoreId(meta.id);
-      if (id) byId.set(id, { ...meta, id, name: meta.name || id.toUpperCase() });
-    });
+    const backendPulse = isBackendPulsePanel(catalog);
+    const pulseSource = backendPulseSource(catalog);
+
+    if (!backendPulse) {
+      const allowed = new Set((catalog?.stores || []).map((meta) => normalizeStoreId(meta.id)).filter(Boolean));
+      (catalog?.stores || []).forEach((meta) => {
+        const id = normalizeStoreId(meta.id);
+        if (id) byId.set(id, { ...meta, id, name: meta.name || id.toUpperCase() });
+      });
+    }
+
     heartbeatState.forEach((hb, id) => {
       const sid = normalizeStoreId(id);
       if (!sid) return;
-      if (allowed.size && !allowed.has(sid)) return;
+      if (
+        backendPulse &&
+        pulseSource &&
+        resolveHeartbeatSource(hb.source, hb.payload?.heartbeat_source) !== pulseSource
+      ) {
+        return;
+      }
+      if (!backendPulse) {
+        const allowed = new Set((catalog?.stores || []).map((meta) => normalizeStoreId(meta.id)).filter(Boolean));
+        if (allowed.size && !allowed.has(sid)) return;
+      }
       const prev = byId.get(sid) || {};
       const suspendedIds = catalogSuspendedIdSet(catalog);
       const fromHb = storeMetaFromId(id, {
@@ -2996,6 +4474,8 @@
     Object.entries(cacheMap || {}).forEach(([id, row]) => {
       const sid = normalizeStoreId(id);
       if (!sid || byId.has(sid)) return;
+      if (backendPulse) return;
+      const allowed = new Set((catalog?.stores || []).map((meta) => normalizeStoreId(meta.id)).filter(Boolean));
       if (allowed.size && !allowed.has(sid)) return;
       const card = row?.card;
       byId.set(sid, {
@@ -3196,6 +4676,7 @@
    * options: { force, onUpdate }
    */
   async function enrichOfflineCardsFromCache(cards, catalog, bulk) {
+    if (isRtdbOnlyPanel(catalog)) return;
     const storesMap = bulk?.stores;
     if (!bulk?.available || !storesMap) return;
     const acId = catalog?.ac_id || '110';
@@ -3227,7 +4708,7 @@
   async function loadAllStores(token, options = {}) {
     const { onUpdate } = options;
     const loadGeneration = ++storesLoadGeneration;
-    let catalog = await loadCatalog({ force: true });
+    let catalog = await loadCatalog({ force: options.force === true });
     heartbeatPageStartedAt = Date.now();
     catalog = syncCatalogSuspension(rebuildCatalogStores(catalog, null));
     heartbeatCatalog = catalog;
@@ -3245,7 +4726,7 @@
     }
 
     const statusBulkPromise = fetchStoresStatusCacheBulk(catalog);
-    const heartbeatPromise = fetchHeartbeatsSnapshot();
+    const heartbeatPromise = fetchHeartbeatsSnapshot({ force: true, lite: false });
 
     statusBulkPromise
       .then((bulk) => {
@@ -3328,6 +4809,9 @@
   }
 
   async function fetchAgentConfig(meta, catalog, token, endpointOverride = null) {
+    if (isAgentsDisabled(catalog)) {
+      throw new Error('Comunicação com agentes locais desativada neste painel.');
+    }
     const ep = endpointOverride || (await discoverAgentEndpoint(meta, catalog, token));
     if (ep.unmatched || (!ep.base && !ep.panelProxy)) {
       throw new Error(noAgentMessage(meta.id));
@@ -3346,7 +4830,10 @@
     }
     const data = await res.json();
     if (Array.isArray(data.machines)) {
-      data.machines = mergeMachinesCatalog(data.machines);
+      data.machines = dedupeMachinesByAddress(mergeMachinesCatalog(data.machines));
+    }
+    if (data.devices && Array.isArray(data.machines) && data.machines.length) {
+      data.devices = devicesFromMachines(data.machines, data.last_network_check || data);
     }
     return { ...data, washer_dosage_options: WASHER_DOSAGE_OPTIONS };
   }
@@ -3550,6 +5037,9 @@
   }
 
   async function agentRequest(meta, catalog, token, method, path, body, endpointOverride = null, options = {}) {
+    if (isAgentsDisabled(catalog)) {
+      throw new Error('Comunicação com agentes locais desativada neste painel.');
+    }
     const ep = endpointOverride || (await discoverAgentEndpoint(meta, catalog, token));
     if (ep.unmatched || (!ep.base && !ep.panelProxy)) {
       throw new Error(noAgentMessage(meta.id));
@@ -3591,10 +5081,14 @@
     } catch {
       data = { detail: res.statusText || 'Erro desconhecido' };
     }
+    data._httpStatus = res.status;
+    data._httpOk = res.ok;
     if (!res.ok) {
+      if (options.allowHttpError) {
+        return data;
+      }
       throw new Error(friendlyUserMessage(data.detail || data.message || data.error || `HTTP ${res.status}`, ''));
     }
-    data._httpStatus = res.status;
 
     const validate = options.validateOperation !== false;
     const kind =
@@ -3655,11 +5149,14 @@
     invalidateAgentDiscovery,
     clearAgentDiscoveryCache,
     normalizeAgentUrl,
-    getPollIntervalMs: (catalog) => getHeartbeatTimeoutMs(catalog),
+    getPollIntervalMs: (catalog) => getNetworkCheckIntervalMs(catalog),
+    getNetworkCheckIntervalMs,
     getHeartbeatTimeoutMs,
     isHeartbeatEntryAlive,
+    networkPayloadHasDevices,
     lav60Debug,
     fetchHeartbeatsSnapshot,
+    probePowpayHealth,
     fetchStoreStatusCache,
     fetchStoresStatusCacheBulk,
     statusFromStatusCacheDoc,
@@ -3673,6 +5170,12 @@
     isStoreAliveInHeartbeats,
     ingestHeartbeatSnapshot,
     statusFromHeartbeatPayload,
+    hydrateStoresPayloadFromCache,
+    countPayloadPending,
+    saveStoresPayloadCache,
+    isStoresPayloadFresh,
+    invalidateCatalogCache,
+    invalidatePanelStoresCache,
     loadCatalog,
     loadAllStores,
     loadStoreCached,
@@ -3684,6 +5187,8 @@
     mergeMachinesCatalog,
     normalizeMachineCapacity,
     machineModelLabel,
+    machineDisplayTitle,
+    looksLikeUuid,
     doserWasherLink,
     enrichDoserMeta,
     normalizeMachineStatus,
@@ -3710,6 +5215,16 @@
     buildStoreCard,
     findStoreInCatalog,
     storeMetaFromId,
+    isAgentsDisabled,
+    isMqttGatewayEnabled,
+    PANEL_AGENTS_DISABLED,
+    PANEL_MQTT_GATEWAY_ENABLED,
+    isPowpayHealthPanel,
+    isRtdbOnlyPanel,
+    isBackendPulsePanel,
+    backendPulseSource,
+    isRtdbHeartbeatStore,
+    filterRtdbOnlyCards,
     rebuildCatalogStores,
     mergeCatalogStores,
     fetchAgentConfig,

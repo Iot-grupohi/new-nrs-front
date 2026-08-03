@@ -16,10 +16,10 @@ def mount_panel(
     app: FastAPI,
     *,
     upstream_get: UpstreamGet,
-    gateway_url: str,
-    gateway_token: str,
-    powpay_domain: str,
-    agent_token: str,
+    gateway_url: str = "",
+    gateway_token: str = "",
+    powpay_domain: str = "powpay.com.br",
+    agent_token: str = "",
 ) -> None:
     configure(
         upstream_get_fn=upstream_get,
@@ -31,7 +31,6 @@ def mount_panel(
 
     app.include_router(auth.router)
     app.include_router(catalog.router)
-    app.include_router(heartbeats.ingest_router)
     app.include_router(heartbeats.router)
     app.include_router(audit.router)
     app.include_router(infra.router)

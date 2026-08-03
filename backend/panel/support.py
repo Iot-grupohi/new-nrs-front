@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 from panel.auth import auth_enabled, get_session_user
-from panel.support_chat import chat_status, run_support_chat
+from panel.support_chat import chat_status, iter_support_chat_stream, run_support_chat
 
 router = APIRouter(prefix="/api/support", tags=["panel-support"])
 
@@ -45,6 +46,46 @@ async def support_chat(request: Request) -> dict[str, Any]:
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(502, str(exc)) from exc
+
+
+@router.post("/chat/stream")
+async def support_chat_stream(request: Request) -> StreamingResponse:
+    user = get_session_user(request)
+    if auth_enabled() and not user:
+        raise HTTPException(401, "Login required")
+
+    if not chat_status().get("available"):
+        raise HTTPException(503, "Assistente IA indisponível. Configure OPENAI_API_KEY no servidor.")
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(400, "JSON inválido") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(400, "JSON inválido")
+
+    message = str(body.get("message") or "").strip()
+    history = body.get("history") if isinstance(body.get("history"), list) else []
+    context = body.get("context") if isinstance(body.get("context"), list) else []
+
+    from panel.support_chat import _prepare_chat_request
+
+    try:
+        _prepare_chat_request(message=message, history=history, context=context)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+    return StreamingResponse(
+        iter_support_chat_stream(message=message, history=history, context=context),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/custom")

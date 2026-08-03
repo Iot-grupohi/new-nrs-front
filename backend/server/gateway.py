@@ -16,6 +16,12 @@ def normalize_gateway_path(path: str) -> str:
     return "/".join(parts)
 
 
+def is_store_status_all_path(path: str) -> bool:
+    """GET /{store}/status (ping MQTT em massa) — desativado no painel."""
+    parts = [p for p in path.strip("/").split("/") if p]
+    return len(parts) == 2 and parts[1].lower() == "status"
+
+
 async def proxy_gateway(
     *,
     gateway_url: str,
@@ -33,6 +39,11 @@ async def proxy_gateway(
         )
 
     normalized = normalize_gateway_path(path)
+    if method.upper() == "GET" and is_store_status_all_path(normalized):
+        raise HTTPException(
+            400,
+            "GET /{store}/status (todos) desativado — use status/washer|dryer|doser/{id} ou status/ac",
+        )
     url = f"{gateway_url.rstrip('/')}/{normalized}" if normalized else gateway_url.rstrip("/")
 
     headers: dict[str, str] = {"Accept": "application/json"}
@@ -91,7 +102,8 @@ def gateway_info(gateway_url: str) -> dict[str, Any]:
         "openapi": f"{base}/openapi.json",
         "examples": {
             "health": "GET /gateway/",
-            "status_all": "GET /gateway/{store}/status",
+            "status_washer": "GET /gateway/{store}/status/washer/{id}",
+            "status_dryer": "GET /gateway/{store}/status/dryer/{id}",
             "washer": "POST /gateway/{store}/washer/{id}",
         },
     }

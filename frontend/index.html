@@ -4,18 +4,29 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LAV60 — Painel</title>
-  <link rel="stylesheet" href="app.css?v=69">
-  <link rel="stylesheet" href="portal-layout.css?v=5">
-  <link rel="stylesheet" href="dashboard-bento.css?v=19">
-  <link rel="stylesheet" href="dashboard-map.css?v=1">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" crossorigin="">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" crossorigin="">
-  <link rel="stylesheet" href="support.css?v=11">
+  <link rel="stylesheet" href="app.css?v=78">
+  <link rel="stylesheet" href="portal-layout.css?v=6">
+  <link rel="stylesheet" href="agent-console.css?v=7">
+  <link rel="stylesheet" href="dashboard-bento.css?v=20">
+  <link rel="stylesheet" href="support.css?v=19">
   <link rel="stylesheet" href="sites-monitor.css?v=8">
+  <link rel="stylesheet" href="portal-modern.css?v=2">
   <script src="theme.js?v=1"></script>
 </head>
 <body class="page-panel page-dashboard auth-pending">
+  <!-- Sprite SVG compartilhado pelos consoles de agente -->
+  <svg class="agent-console__sprite" aria-hidden="true" focusable="false" style="display:none;position:absolute;width:0;height:0;overflow:hidden">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.35-3.35"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8Z"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+    <symbol id="i-hub" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="21" r="2"/><path d="m6.6 6.6 3.7 3.7"/><path d="m17.4 6.6-3.7 3.7"/><path d="M12 14.5V19"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="m8 3-4 4 4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  </svg>
+
   <div class="app-layout">
     <aside class="sidebar" id="portalSidebar" aria-label="Menu principal">
       <div class="sidebar__brand">
@@ -42,6 +53,15 @@
         <a href="index.html#/suporte" class="sidebar__link" data-route="suporte">
           <span class="sidebar__icon" aria-hidden="true">?</span>
           <span class="sidebar__label">Suporte</span>
+        </a>
+        <p class="sidebar__section">Agentes</p>
+        <a href="index.html#/agent-get01" class="sidebar__link sidebar__link--agent" data-route="agent-get01">
+          <span class="sidebar__icon" aria-hidden="true">☁</span>
+          <span class="sidebar__label">GET01 · Cloudflare</span>
+        </a>
+        <a href="index.html#/agent-get02" class="sidebar__link sidebar__link--agent" data-route="agent-get02">
+          <span class="sidebar__icon" aria-hidden="true">⎈</span>
+          <span class="sidebar__label">GET02 · MQTT</span>
         </a>
         <p class="sidebar__section">Monitoramento</p>
         <a href="index.html#/monitor-sites" class="sidebar__link sidebar__link--monitor" data-route="monitor-sites">
@@ -73,7 +93,17 @@
           <span class="portal-topbar__title" id="portalTopbarTitle">Dashboard</span>
         </div>
       </header>
-      <div class="app-view" id="appView" aria-live="polite"></div>
+      <div class="app-view" id="appView" aria-live="polite">
+        <div class="app-view-skeleton" aria-busy="true" aria-label="Carregando painel">
+          <div class="app-view-skeleton__bar"></div>
+          <div class="app-view-skeleton__grid">
+            <div class="app-view-skeleton__tile"></div>
+            <div class="app-view-skeleton__tile"></div>
+            <div class="app-view-skeleton__tile"></div>
+            <div class="app-view-skeleton__tile"></div>
+          </div>
+        </div>
+      </div>
       <footer class="app-footer portal-footer" id="portalFooter">
         <span id="portalFooterLabel">LAV60 · Painel operacional</span>
         <span id="sitesMonitorUpdatedAt" class="portal-footer__hint hidden"></span>
@@ -106,12 +136,39 @@
     </div>
   </div>
 
+  <!-- Modais exclusivos do GET02 (gateway) -->
+  <div id="actionPromptModal" class="confirm-modal confirm-modal--prompt hidden" role="alertdialog" aria-modal="true" aria-labelledby="actionPromptTitle">
+    <div class="confirm-modal__backdrop" data-action-prompt-dismiss></div>
+    <div class="confirm-modal__box">
+      <div class="confirm-modal__icon confirm-modal__icon--prompt" aria-hidden="true">?</div>
+      <h2 id="actionPromptTitle" class="confirm-modal__title">Confirmar operação</h2>
+      <p id="actionPromptMessage" class="confirm-modal__message">Deseja executar esta ação na loja?</p>
+      <div id="actionPromptBody" class="confirm-modal__body"></div>
+      <div class="confirm-modal__actions">
+        <button type="button" id="actionPromptCancel" class="btn btn--ghost">Cancelar</button>
+        <button type="button" id="actionPromptOk" class="btn btn--primary">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="confirmModal" class="confirm-modal hidden" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="confirm-modal__backdrop"></div>
+    <div class="confirm-modal__box">
+      <div class="confirm-modal__icon confirm-modal__icon--ok" aria-hidden="true"></div>
+      <h2 id="confirmTitle" class="confirm-modal__title">Comando confirmado</h2>
+      <p id="confirmMessage" class="confirm-modal__message"></p>
+      <div id="confirmBody" class="confirm-modal__body hidden"></div>
+      <span id="confirmStatus" class="confirm-modal__badge">Confirmado</span>
+      <button type="button" id="confirmOk" class="btn btn--primary confirm-modal__btn">OK</button>
+    </div>
+  </div>
+
   <div id="storeChannelModal" class="store-channel-modal hidden" role="dialog" aria-modal="true" aria-labelledby="storeChannelTitle">
     <div class="store-channel-modal__backdrop" data-channel-dismiss tabindex="-1"></div>
     <div class="store-channel-modal__panel">
       <header class="store-channel-modal__head">
         <div class="store-channel-modal__intro">
-          <span class="store-channel-modal__eyebrow">Canal de operação</span>
+          <span class="store-channel-modal__eyebrow">Agente de operação</span>
           <h2 id="storeChannelTitle" class="store-channel-modal__title">—</h2>
           <p id="storeChannelSubtitle" class="store-channel-modal__subtitle">Verificando canais disponíveis…</p>
         </div>
@@ -125,24 +182,30 @@
     </div>
   </div>
 
-  <script src="auth.js?v=10"></script>
+  <script src="auth.js?v=13"></script>
   <script src="audit.js?v=3"></script>
-  <script src="api.js?v=45"></script>
-  <script src="gateway-overview.js?v=12"></script>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin=""></script>
-  <script src="dashboard-store-map.js?v=1"></script>
-  <script src="stores.js?v=48"></script>
+  <script src="cache.js?v=3"></script>
+  <script src="api.js?v=91"></script>
+  <script src="gateway-overview.js?v=22"></script>
+  <script src="stores.js?v=76"></script>
   <script src="records.js?v=21"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" crossorigin="anonymous"></script>
   <script src="infra-period.js?v=1"></script>
   <script src="infra-vps.js?v=8"></script>
   <script src="infra-database.js?v=15"></script>
-  <script src="support-catalog.js?v=7"></script>
-  <script src="support-chat.js?v=1"></script>
-  <script src="support.js?v=12"></script>
+  <script src="support-catalog.js?v=12"></script>
+  <script src="support-chat.js?v=7"></script>
+  <script src="support.js?v=18"></script>
   <script src="sites-monitor.js?v=8"></script>
-  <script src="portal-layout.js?v=2"></script>
-  <script src="router.js?v=31"></script>
+  <script src="device-ui.js?v=12"></script>
+  <script src="agent-console.js?v=2"></script>
+  <script src="agent-nav.js?v=2"></script>
+  <script src="agent-hub-stores.js?v=1"></script>
+  <script src="agent-get01-overview.js?v=5"></script>
+  <script src="agent-get01.js?v=10"></script>
+  <script src="gateway.js?v=69"></script>
+  <script src="store.js?v=27"></script>
+  <script src="portal-layout.js?v=3"></script>
+  <script src="router.js?v=39"></script>
 </body>
 </html>

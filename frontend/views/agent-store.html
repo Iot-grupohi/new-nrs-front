@@ -1,0 +1,123 @@
+<div class="store-banner store-banner--suspended hidden" id="storeSuspendedBanner" role="status">
+  <span class="store-banner__icon" aria-hidden="true">!</span>
+  <div class="store-banner__text">
+    <strong class="store-banner__title">Loja suspensa no Lav60</strong>
+    <p class="store-banner__message" id="storeSuspendedMessage">Operação local permitida enquanto o agente estiver online.</p>
+  </div>
+</div>
+
+<main class="main-content agent-page agent-store-page">
+  <nav class="agent-store-page__nav" aria-label="Navegação">
+    <button type="button" class="page-header__back" data-page-back="agent-get01">← GET01</button>
+    <a class="agent-store-page__get02 btn btn--sm btn--ghost" id="storeGet02Link" href="index.html#/agent-get02" data-route="agent-get02" title="Alternar para GET02 — MQTT">
+      <svg class="icon" aria-hidden="true"><use href="#i-hub"></use></svg>
+      GET02
+    </a>
+  </nav>
+
+  <header class="agent-page__hero agent-store-page__hero">
+    <div class="agent-page__hero-main">
+      <p class="agent-page__eyebrow">Operação GET01</p>
+      <h2 class="agent-page__headline" id="storeHeroTitle">—</h2>
+      <p class="agent-page__desc" id="storeHeroDesc">Carregando loja…</p>
+      <span class="visually-hidden" id="storeTitle">—</span>
+      <span class="visually-hidden" id="storeCode">—</span>
+      <span class="visually-hidden" id="storeSubtitle">GET01 — Operação via túnel Cloudflare</span>
+    </div>
+    <div class="agent-page__hero-aside">
+      <div class="agent-page__channel-badge">
+        <span class="agent-page__channel-icon" aria-hidden="true">
+          <svg class="icon"><use href="#i-cloud"></use></svg>
+        </span>
+        <div>
+          <strong>Cloudflare</strong>
+          <span id="storeHeroTunnel">—.powpay.com.br</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="agent-kpi-panel card agent-store-kpis">
+    <header class="agent-kpi-panel__head">
+      <div>
+        <h2 class="agent-kpi-panel__title">Resumo da loja</h2>
+        <p class="agent-kpi-panel__meta">Equipamentos e saúde operacional</p>
+      </div>
+    </header>
+    <div class="agent-kpi-panel__grid agent-kpi-panel__grid--store">
+      <article class="stat-card stat-card--success">
+        <span class="stat-card__label">Online</span>
+        <strong class="stat-card__value" id="summaryOnline">—</strong>
+        <span class="stat-card__sub" id="summaryTotal">de — total</span>
+      </article>
+      <article class="stat-card">
+        <span class="stat-card__label">Saúde</span>
+        <strong class="stat-card__value" id="summaryHealth">—</strong>
+        <div class="stat-card__bar"><div id="summaryHealthBar" style="width:0%"></div></div>
+      </article>
+      <article class="stat-card stat-card--primary">
+        <span class="stat-card__label">Última verificação</span>
+        <strong class="stat-card__value stat-card__value--sm" id="summaryTime">—</strong>
+      </article>
+    </div>
+  </section>
+
+  <section class="gateway-status card" id="storeStatusBar">
+    <div class="gateway-status__row">
+      <div class="gateway-status__info">
+        <span class="gateway-meta" id="storeAgentMeta">Agente: —</span>
+        <span class="gateway-status__hint" id="storeAgentHint">Use ↻ em cada equipamento para verificar o status na rede local</span>
+      </div>
+      <div class="gateway-status__actions">
+        <button type="button" class="btn btn--sm btn--ghost" id="btnVerifyStoreAgent">Verificar agente</button>
+        <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshStoreDevices" disabled>Atualizar equipamentos</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="devices-panel devices-panel--loading" id="devicesPanel">
+    <div class="devices-panel__section">
+      <header class="devices-panel__head">
+        <h2 class="devices-panel__title">Lavadoras</h2>
+        <div class="devices-panel__head-actions">
+          <span class="devices-panel__count" id="washersCount">—</span>
+          <button type="button" class="btn btn--sm btn--ghost" data-refresh-group="washer" disabled>Atualizar</button>
+        </div>
+      </header>
+      <div class="device-list" id="washersGrid"></div>
+    </div>
+
+    <div class="devices-panel__section">
+      <header class="devices-panel__head">
+        <h2 class="devices-panel__title">Secadoras</h2>
+        <div class="devices-panel__head-actions">
+          <span class="devices-panel__count" id="dryersCount">—</span>
+          <button type="button" class="btn btn--sm btn--ghost" data-refresh-group="dryer" disabled>Atualizar</button>
+        </div>
+      </header>
+      <div class="device-list" id="dryersGrid"></div>
+    </div>
+
+    <div class="devices-panel__section">
+      <header class="devices-panel__head">
+        <h2 class="devices-panel__title">Dosadoras</h2>
+        <div class="devices-panel__head-actions">
+          <span class="devices-panel__count" id="dosersCount">—</span>
+          <button type="button" class="btn btn--sm btn--ghost" data-refresh-group="doser" disabled>Atualizar</button>
+        </div>
+      </header>
+      <div class="device-list" id="dosersGrid"></div>
+    </div>
+
+    <div class="devices-panel__section">
+      <header class="devices-panel__head">
+        <h2 class="devices-panel__title">Ar-condicionado</h2>
+        <div class="devices-panel__head-actions">
+          <span class="devices-panel__count" id="acCount">—</span>
+          <button type="button" class="btn btn--sm btn--ghost" data-refresh-group="ac" disabled>Atualizar</button>
+        </div>
+      </header>
+      <div class="device-list" id="acPanel"></div>
+    </div>
+  </section>
+</main>

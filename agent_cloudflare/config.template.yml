@@ -1,0 +1,7 @@
+# Modelo inicial — o agente reescreve em %USERPROFILE%\.lav60\config.yml ao provisionar o túnel.
+tunnel: pending
+protocol: http2
+credentials-file: pending
+
+ingress:
+  - service: http_status:404

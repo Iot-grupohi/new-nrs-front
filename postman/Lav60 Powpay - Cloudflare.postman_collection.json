@@ -1,8 +1,8 @@
 {
   "info": {
-    "_postman_id": "8c7b1977-8503-4f84-87c7-a30ef23631be",
+    "_postman_id": "5df67998-faf2-4754-af85-385edc592bf4",
     "name": "Lav60 Powpay - Cloudflare",
-    "description": "API do agente de loja exposta via **Cloudflare Tunnel** em `https://{loja}.powpay.com.br`.\n\nVia servidor unificado: `{{serverUrl}}/powpay/{{storeCode}}/...`\n\n## Variáveis\n| Variável | Exemplo | Descrição |\n|----------|---------|------------|\n| `serverUrl` | `http://127.0.0.1:3100` | Servidor local unificado |\n| `storeCode` | `pb05` | Código da loja (minúsculas) |\n| `token` | `CLOUDFLARE_API_TOKEN` | Header `X-Token` |\n| `washerId` / `dryerId` / `doserId` | `321` / `765` / `321` | IDs numéricos |\n\n## Autenticação\nHeader `X-Token: {{token}}` nas rotas operacionais quando `API_TOKEN` estiver configurado no agente.\n\nRotas públicas (sem token): `/`, `/health`, `/api/health`, `/api/agent/config`, `/debug`, `/tunnel-status`, `/api/tunnel-status`, `/tunnel-test`.\n\n## Importante\n- Use sempre **HTTPS** em produção — requisições `http://` são redirecionadas e **POST pode perder o corpo JSON**.\n- Trocar de loja: altere só `storeCode`.\n\nDocumentação: `docs/guides/controle-remoto-powpay.md`",
+    "description": "API do agente de loja exposta via **Cloudflare Tunnel** em `https://{loja}.powpay.com.br`.\n\nVia servidor unificado: `{{serverUrl}}/powpay/{{storeCode}}/...`\n\n## Variáveis\n| Variável | Exemplo | Descrição |\n|----------|---------|------------|\n| `serverUrl` | `http://127.0.0.1:3100` | Servidor local unificado |\n| `storeCode` | `pb05` | Código da loja (minúsculas) |\n| `token` | `CLOUDFLARE_API_TOKEN` | Header `X-Token` |\n| `washerId` / `dryerId` / `doserId` | `321` / `765` / `321` | IDs numéricos |\n\n## Autenticação\nHeader `X-Token: {{token}}` nas rotas operacionais quando `API_TOKEN` estiver configurado no agente.\n\nRotas públicas (sem token): `/`, `/health`, `/api/health`, `/api/agent/config`, `/debug`, `/tunnel-status`, `/api/tunnel-status`, `/tunnel-test`.\n\n## Importante\n- Use sempre **HTTPS** em produção — requisições `http://` são redirecionadas e **POST pode perder o corpo JSON**.\n- Trocar de loja: altere só `storeCode`.\n\nDocumentação: `docs/controle-remoto-powpay.md`",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "_exporter_id": "6806954"
   },
@@ -21,9 +21,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 ""
               ]
             }
@@ -41,9 +43,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/health",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "health"
               ]
             }
@@ -61,9 +65,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/api/health",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "api",
                 "health"
               ]
@@ -82,9 +88,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/api/agent/config",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "api",
                 "agent",
                 "config"
@@ -104,9 +112,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/debug",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "debug"
               ]
             }
@@ -127,9 +137,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/status",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "status"
               ]
@@ -145,9 +157,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/status/washer/{{washerId}}",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "status",
                 "washer",
@@ -165,9 +179,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/status/dryer/{{dryerId}}",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "status",
                 "dryer",
@@ -185,9 +201,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/status/doser/{{doserId}}",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "status",
                 "doser",
@@ -205,9 +223,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/status/ac",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "status",
                 "ac"
@@ -224,9 +244,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/devices",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "devices"
               ]
@@ -242,9 +264,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/api/devices",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "api",
                 "devices"
               ]
@@ -260,9 +284,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/api/network-status",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "api",
                 "network-status"
               ]
@@ -278,9 +304,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/api/network-status?machine={{washerId}}&type=washer",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "api",
                 "network-status"
               ],
@@ -306,9 +334,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/ping-status",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "ping-status"
               ]
             }
@@ -323,9 +353,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/device-status",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "doser",
                 "{{doserId}}",
@@ -357,9 +389,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/washer/{{washerId}}",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "washer",
                 "{{washerId}}"
@@ -385,9 +419,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/washer/{{washerId}}",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "washer",
                 "{{washerId}}"
@@ -413,9 +449,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/dryer/{{dryerId}}",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "dryer",
                 "{{dryerId}}"
@@ -441,9 +479,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/dryer/{{dryerId}}",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "dryer",
                 "{{dryerId}}"
@@ -469,9 +509,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/dryer/{{dryerId}}",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "dryer",
                 "{{dryerId}}"
@@ -497,9 +539,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/ac",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "ac"
               ]
@@ -524,9 +568,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/ac",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "ac"
               ]
@@ -557,9 +603,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "doser",
                 "{{doserId}}"
@@ -585,9 +633,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/bomba",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "doser",
                 "{{doserId}}",
@@ -614,9 +664,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/bomba",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "doser",
                 "{{doserId}}",
@@ -643,9 +695,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/amaciante",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "doser",
                 "{{doserId}}",
@@ -672,9 +726,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/dosagem",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "doser",
                 "{{doserId}}",
@@ -692,9 +748,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/consulta",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "doser",
                 "{{doserId}}",
@@ -721,9 +779,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/settime/sabao",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "doser",
                 "{{doserId}}",
@@ -751,9 +811,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/settime/floral",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "doser",
                 "{{doserId}}",
@@ -781,9 +843,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/{{storeCode}}/doser/{{doserId}}/settime/sport",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "{{storeCode}}",
                 "doser",
                 "{{doserId}}",
@@ -811,9 +875,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/tunnel-status",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "tunnel-status"
               ]
             }
@@ -831,9 +897,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/api/tunnel-status",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "api",
                 "tunnel-status"
               ]
@@ -852,9 +920,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/tunnel-test",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "tunnel-test"
               ]
             }
@@ -872,9 +942,11 @@
             "url": {
               "raw": "{{serverUrl}}/powpay/{{storeCode}}/tunnel-monitoring",
               "host": [
-                "{{serverUrl}}/powpay/{{storeCode}}"
+                "{{serverUrl}}"
               ],
               "path": [
+                "powpay",
+                "{{storeCode}}",
                 "tunnel-monitoring"
               ]
             }

@@ -3,11 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LAV60 — Gateway (redundância)</title>
-  <link rel="stylesheet" href="app.css?v=67">
+  <title>LAV60 — GET02 MQTT</title>
+  <script>
+    (function () {
+      var store = new URLSearchParams(window.location.search).get('store');
+      var target = store
+        ? 'index.html?store=' + encodeURIComponent(store) + '#/agent-get02'
+        : 'index.html#/agent-get02';
+      window.location.replace(target);
+    })();
+  </script>
+  <link rel="stylesheet" href="app.css?v=78">
+  <link rel="stylesheet" href="agent-console.css?v=3">
   <script src="theme.js?v=1"></script>
 </head>
-<body class="page-dashboard page-store page-gateway auth-pending">
+<body class="page-dashboard page-store page-gateway page-agent page-agent-get02 page-agent-console auth-pending">
+  <svg class="agent-console__sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.35-3.35"/></symbol>
+    <symbol id="i-hub" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="21" r="2"/><path d="m6.6 6.6 3.7 3.7"/><path d="m17.4 6.6-3.7 3.7"/><path d="M12 14.5V19"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="m8 3-4 4 4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  </svg>
+
   <div class="app-shell">
     <header class="topbar topbar--store topbar--gateway">
       <div class="topbar__row">
@@ -18,9 +37,9 @@
             <nav class="topbar__crumb" aria-label="Navegação">
               <a href="index.html" class="topbar__crumb-link">Painel</a>
               <span class="topbar__crumb-sep" aria-hidden="true">/</span>
-              <span class="topbar__code">Gateway</span>
+              <span class="topbar__code">GET02</span>
             </nav>
-            <h1 class="topbar__title">Console de redundância</h1>
+            <h1 class="topbar__title">Agente MQTT</h1>
           </div>
         </div>
         <div class="topbar__toolbar">
@@ -29,22 +48,37 @@
         </div>
       </div>
       <div class="topbar__meta">
-        <p class="topbar__subtitle">Operação pela redundância quando o agente local estiver indisponível</p>
+        <div id="agentNavMount"></div>
       </div>
     </header>
 
-    <main class="main-content">
+    <main class="main-content agent-page">
+      <section class="gateway-alert hidden" id="get02DisabledAlert" role="alert">
+        <div>
+          <strong>GET02 indisponível neste painel</strong>
+          <p>O MQTT Gateway não está configurado. Use o <a href="agent-get01.html">GET01 — Cloudflare</a> ou contacte o suporte.</p>
+        </div>
+      </section>
+
       <section class="gateway-alert hidden" id="tokenAlert" role="alert">
-        Redundância não configurada no servidor. Contacte o suporte técnico.
+        <div>
+          <strong>Redundância não configurada</strong>
+          <p>O token do gateway não está definido no servidor. Contacte o suporte técnico.</p>
+        </div>
       </section>
 
       <section class="gateway-alert hidden" id="storeGatewayAlert" role="alert">
-        <strong>Gateway indisponível</strong>
-        <p id="storeGatewayAlertText">—</p>
+        <div>
+          <strong>Gateway indisponível</strong>
+          <p id="storeGatewayAlertText">—</p>
+        </div>
       </section>
 
       <section class="gateway-alert gateway-alert--checking hidden" id="storeGatewayChecking" role="status">
-        Verificando conexão com a loja…
+        <div>
+          <strong>Verificando conexão com a loja…</strong>
+          <p>Testando o módulo de redundância antes de liberar os comandos.</p>
+        </div>
       </section>
 
       <section class="gateway-status card hidden" id="storeStatusBar">
@@ -60,31 +94,138 @@
         </div>
       </section>
 
-      <section class="gateway-overview card" id="gatewayOverview">
-        <header class="gateway-overview__head">
-          <div>
-            <h2 class="gateway-overview__title">Gateways por loja</h2>
-            <p class="gateway-overview__meta" id="gatewayOverviewMeta">Clique no card para ver o relatório</p>
+      <div class="agent-page__hub" id="agentPageHub">
+        <header class="agent-page__hero">
+          <div class="agent-page__hero-main">
+            <p class="agent-page__eyebrow">Canal de redundância</p>
+            <h2 class="agent-page__headline">Console GET02 — MQTT</h2>
+            <p class="agent-page__desc">
+              Operação via gateway central <code>gateway.lav60.com</code>. Selecione uma loja online
+              para controlar equipamentos quando o túnel Cloudflare não estiver disponível.
+            </p>
           </div>
-          <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshGateways">Atualizar painel</button>
+          <div class="agent-page__hero-aside">
+            <div class="agent-page__channel-badge">
+              <span class="agent-page__channel-icon" aria-hidden="true">
+                <svg class="icon"><use href="#i-hub"></use></svg>
+              </span>
+              <div>
+                <strong>MQTT Gateway</strong>
+                <span>gateway.lav60.com</span>
+              </div>
+            </div>
+          </div>
         </header>
-        <div class="stats-grid stats-grid--gateway" id="gatewayKpis">
-          <article class="stat-card stat-card--success stat-card--clickable" data-kpi="gateway-online" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
-            <span class="stat-card__label">Gateway online</span>
-            <strong class="stat-card__value" id="kpiGatewayOnline">—</strong>
-          </article>
-          <article class="stat-card stat-card--danger stat-card--clickable" data-kpi="gateway-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
-            <span class="stat-card__label">Gateway offline</span>
-            <strong class="stat-card__value" id="kpiGatewayOffline">—</strong>
-          </article>
+
+        <div class="agent-page__layout">
+          <div class="agent-page__primary">
+            <section class="agent-kpi-panel card" id="gatewayOverview">
+              <header class="agent-kpi-panel__head">
+                <div>
+                  <h2 class="agent-kpi-panel__title">Status da rede</h2>
+                  <p class="agent-kpi-panel__meta" id="gatewayOverviewMeta">Clique no card para ver o relatório completo</p>
+                </div>
+                <button type="button" class="btn btn--sm btn--ghost agent-kpi-panel__refresh" id="btnRefreshGateways">
+                  <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
+                  Atualizar
+                </button>
+              </header>
+              <div class="agent-kpi-panel__grid" id="gatewayKpis">
+                <article class="stat-card stat-card--success stat-card--clickable" data-kpi="gateway-online" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+                  <span class="stat-card__label">Gateway online</span>
+                  <strong class="stat-card__value" id="kpiGatewayOnline">—</strong>
+                  <span class="stat-card__hint">Ver relatório <svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg></span>
+                </article>
+                <article class="stat-card stat-card--danger stat-card--clickable" data-kpi="gateway-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+                  <span class="stat-card__label">Gateway offline</span>
+                  <strong class="stat-card__value" id="kpiGatewayOffline">—</strong>
+                  <span class="stat-card__hint">Ver relatório <svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg></span>
+                </article>
+              </div>
+              <div class="agent-kpi-share">
+                <div class="agent-kpi-share__head">
+                  <span class="agent-kpi-share__label">Disponibilidade da rede</span>
+                  <strong class="agent-kpi-share__value" id="gatewaySharePct">—</strong>
+                </div>
+                <div class="agent-kpi-share__track" role="progressbar" aria-labelledby="gatewaySharePct" aria-valuemin="0" aria-valuemax="100" id="gatewayShareTrack">
+                  <div class="agent-kpi-share__fill" id="gatewayShareFill"></div>
+                </div>
+                <p class="agent-kpi-share__meta" id="gatewayShareMeta">Carregando…</p>
+              </div>
+            </section>
+
+            <section class="agent-hub card" id="get02StoreHub">
+              <header class="agent-hub__head">
+                <div class="agent-hub__head-row">
+                  <div>
+                    <h2 class="agent-hub__title">Lojas online</h2>
+                    <p class="agent-hub__meta" id="get02StoreHubMeta">Carregando…</p>
+                  </div>
+                  <span class="agent-hub__count agent-hub__count--online" id="get02StoreHubCount" aria-hidden="true">—</span>
+                </div>
+              </header>
+              <div class="agent-hub__toolbar">
+                <label class="search-field agent-hub__search" for="get02StoreSearch">
+                  <span class="search-field__icon" aria-hidden="true">
+                    <svg class="icon"><use href="#i-search"></use></svg>
+                  </span>
+                  <span class="visually-hidden">Buscar loja</span>
+                  <input type="search" id="get02StoreSearch" placeholder="Buscar por código ou nome…" autocomplete="off" enterkeyhint="search">
+                </label>
+              </div>
+              <div class="agent-hub__stores" id="get02StoreList"></div>
+            </section>
+          </div>
+
+          <aside class="agent-page__aside">
+            <section class="agent-about card" id="get02AboutHub">
+              <h2 class="agent-about__title">Sobre o GET02</h2>
+              <ul class="agent-about__features">
+                <li class="agent-about__feature">
+                  <span class="agent-about__feature-icon" aria-hidden="true">
+                    <svg class="icon"><use href="#i-hub"></use></svg>
+                  </span>
+                  <div>
+                    <strong>Gateway central</strong>
+                    <p>Comunicação MQTT via <code>gateway.lav60.com</code>.</p>
+                  </div>
+                </li>
+                <li class="agent-about__feature">
+                  <span class="agent-about__feature-icon" aria-hidden="true">
+                    <svg class="icon"><use href="#i-swap"></use></svg>
+                  </span>
+                  <div>
+                    <strong>Redundância</strong>
+                    <p>Usado quando o GET01 (Cloudflare) não responde.</p>
+                  </div>
+                </li>
+                <li class="agent-about__feature">
+                  <span class="agent-about__feature-icon" aria-hidden="true">
+                    <svg class="icon"><use href="#i-check"></use></svg>
+                  </span>
+                  <div>
+                    <strong>Requisitos</strong>
+                    <p>Módulo da loja online e token configurado no painel.</p>
+                  </div>
+                </li>
+              </ul>
+              <a class="agent-about__link" href="index.html#/lojas">
+                Ver todas as lojas no painel
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg>
+              </a>
+            </section>
+          </aside>
         </div>
-      </section>
+      </div>
 
       <section class="devices-panel devices-panel--blocked hidden" id="devicesPanel">
         <div class="devices-panel__section">
           <header class="devices-panel__head">
             <h2 class="devices-panel__title">Lavadoras</h2>
-            <span class="devices-panel__count" id="washersCount">—</span>
+            <div class="devices-panel__head-actions">
+              <span class="devices-panel__count" id="washersCount">—</span>
+              <button type="button" class="btn btn--sm btn--ghost" data-refresh-group="washer" disabled>Atualizar</button>
+            </div>
           </header>
           <div class="device-list" id="washersGrid"></div>
         </div>
@@ -92,15 +233,21 @@
         <div class="devices-panel__section">
           <header class="devices-panel__head">
             <h2 class="devices-panel__title">Secadoras</h2>
-            <span class="devices-panel__count" id="dryersCount">—</span>
+            <div class="devices-panel__head-actions">
+              <span class="devices-panel__count" id="dryersCount">—</span>
+              <button type="button" class="btn btn--sm btn--ghost" data-refresh-group="dryer" disabled>Atualizar</button>
+            </div>
           </header>
           <div class="device-list" id="dryersGrid"></div>
         </div>
 
-        <div class="devices-panel__section devices-panel__section--wide">
+        <div class="devices-panel__section">
           <header class="devices-panel__head">
             <h2 class="devices-panel__title">Dosadoras</h2>
-            <span class="devices-panel__count" id="dosersCount">—</span>
+            <div class="devices-panel__head-actions">
+              <span class="devices-panel__count" id="dosersCount">—</span>
+              <button type="button" class="btn btn--sm btn--ghost" data-refresh-group="doser" disabled>Atualizar</button>
+            </div>
           </header>
           <div class="device-list" id="dosersGrid"></div>
         </div>
@@ -108,6 +255,9 @@
         <div class="devices-panel__section">
           <header class="devices-panel__head">
             <h2 class="devices-panel__title">Ar condicionado</h2>
+            <div class="devices-panel__head-actions">
+              <button type="button" class="btn btn--sm btn--ghost" data-refresh-group="ac" disabled>Atualizar</button>
+            </div>
           </header>
           <div class="device-list" id="acGrid"></div>
         </div>
@@ -144,7 +294,9 @@
       </header>
       <div class="agent-kpi-modal__toolbar hidden" id="agentKpiModalToolbar">
         <label class="agent-kpi-modal__search search-field">
-          <span class="search-field__icon" aria-hidden="true">⌕</span>
+          <span class="search-field__icon" aria-hidden="true">
+            <svg class="icon"><use href="#i-search"></use></svg>
+          </span>
           <span class="visually-hidden">Buscar no relatório</span>
           <input type="search" id="agentKpiModalSearch" placeholder="Buscar loja, equipamento…" autocomplete="off" enterkeyhint="search">
         </label>
@@ -165,11 +317,15 @@
     </div>
   </div>
 
-  <script src="api.js?v=33"></script>
-  <script src="auth.js"></script>
-  <script src="device-ui.js?v=9"></script>
+  <script src="auth.js?v=13"></script>
   <script src="audit.js?v=3"></script>
-  <script src="gateway-overview.js?v=12"></script>
-  <script src="gateway.js?v=48"></script>
+  <script src="cache.js?v=2"></script>
+  <script src="api.js?v=91"></script>
+  <script src="device-ui.js?v=12"></script>
+  <script src="agent-console.js?v=1"></script>
+  <script src="agent-nav.js?v=1"></script>
+  <script src="gateway-overview.js?v=21"></script>
+  <script src="agent-hub-stores.js?v=1"></script>
+  <script src="gateway.js?v=64"></script>
 </body>
 </html>

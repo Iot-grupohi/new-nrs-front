@@ -18,6 +18,46 @@
   let lastTouchAt = 0;
   let idleSignOutPending = false;
   let sessionCheckTimer = null;
+  /** Sessão de painel ok para APIs protegidas (heartbeats/SSE). */
+  let panelSessionOk = false;
+  let authDisabledMode = false;
+
+  function emitAuthChanged(authenticated) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent('lav60:auth-changed', {
+          detail: { authenticated: Boolean(authenticated) },
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function setPanelSessionOk(ok) {
+    const next = Boolean(ok);
+    const changed = panelSessionOk !== next;
+    panelSessionOk = next;
+    if (changed) emitAuthChanged(panelSessionOk || authDisabledMode);
+  }
+
+  function isPanelSessionOk() {
+    if (authDisabledMode) return true;
+    return panelSessionOk;
+  }
+
+  function stopProtectedRealtime() {
+    try {
+      window.Lav60?.stopHeartbeatMonitor?.();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function markPanelSessionInvalid() {
+    setPanelSessionOk(false);
+    stopProtectedRealtime();
+  }
 
   function panelFetch(url, options = {}) {
     return fetch(url, {
@@ -157,6 +197,8 @@
     if (idleSignOutPending) return;
     idleSignOutPending = true;
     stopIdleMonitor();
+    stopProtectedRealtime();
+    setPanelSessionOk(false);
     const email = await logoutEmail();
     try {
       await panelFetch(AUTH_LOGOUT_URL, {
@@ -181,20 +223,26 @@
   async function getSessionUser(options = {}) {
     const cfg = await fetchAuthConfig();
     if (!cfg.enabled) {
+      authDisabledMode = true;
       currentUser = null;
+      setPanelSessionOk(true);
       return { authenticated: true, auth_disabled: true, user: null };
     }
+    authDisabledMode = false;
     const res = await panelFetch(AUTH_ME_URL);
     const data = await parseJson(res);
     if (!res.ok) throw new Error('Erro ao verificar sessão');
     if (!data.authenticated) {
       currentUser = null;
+      setPanelSessionOk(false);
+      stopProtectedRealtime();
       if (data.reason === 'session_idle_timeout' && !options.skipIdleStart) {
         await signOutDueToIdle();
       }
       return { authenticated: false, user: null, reason: data.reason || null };
     }
     currentUser = data.user || null;
+    setPanelSessionOk(true);
     if (!options.skipIdleStart) {
       startIdleMonitor(cfg);
     }
@@ -212,12 +260,15 @@
       throw new Error(data.detail || data.message || `Login recusado (HTTP ${res.status})`);
     }
     currentUser = data.user || null;
+    setPanelSessionOk(true);
     return data;
   }
 
   async function guardPage(options = {}) {
     const cfg = await fetchAuthConfig();
     if (!cfg.enabled) {
+      authDisabledMode = true;
+      setPanelSessionOk(true);
       document.body.classList.remove('auth-pending');
       return true;
     }
@@ -229,6 +280,7 @@
       return true;
     }
 
+    stopProtectedRealtime();
     const returnPath =
       options.returnPath ||
       `${window.location.pathname.split('/').pop() || 'index.html'}${window.location.search}`;
@@ -257,6 +309,8 @@
 
   async function signOut() {
     stopIdleMonitor();
+    stopProtectedRealtime();
+    setPanelSessionOk(false);
     const email = await logoutEmail();
     try {
       await panelFetch(AUTH_LOGOUT_URL, {
@@ -366,6 +420,14 @@
     });
   }
 
+  window.addEventListener('pageshow', (event) => {
+    if (!event.persisted) return;
+    void authEnabled().then((enabled) => {
+      if (!enabled) return;
+      return getSessionUser({ skipIdleStart: true });
+    }).catch(() => {});
+  });
+
   window.Lav60Auth = {
     guardPage,
     signInWithEmail,
@@ -373,6 +435,8 @@
     getUser,
     authEnabled,
     getSessionUser,
+    isPanelSessionOk,
+    markPanelSessionInvalid,
     fetchAuthConfig,
     ensureFirebase,
     panelFetch,

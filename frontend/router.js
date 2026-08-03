@@ -5,44 +5,62 @@
     dashboard: {
       nav: 'dashboard',
       title: 'LAV60 — Dashboard',
-      view: 'views/dashboard.html?v=25',
+      view: 'views/dashboard.html?v=26',
       pageClass: 'page-dashboard',
     },
     lojas: {
       nav: 'lojas',
       title: 'LAV60 — Lojas',
-      view: 'views/lojas.html?v=4',
+      view: 'views/lojas.html?v=7',
       pageClass: 'page-dashboard page-lojas',
     },
     registros: {
       nav: 'registros',
       title: 'LAV60 — Registros',
-      view: 'views/records.html',
+      view: 'views/records.html?v=3',
       pageClass: 'page-records',
     },
     'infra-vps': {
       nav: 'infra-vps',
       title: 'LAV60 — Infraestrutura · VPS',
-      view: 'views/infra-vps.html?v=5',
+      view: 'views/infra-vps.html?v=6',
       pageClass: 'page-records page-infra-metrics',
     },
     'infra-database': {
       nav: 'infra-database',
       title: 'LAV60 — Infraestrutura · Database',
-      view: 'views/infra-database.html?v=9',
+      view: 'views/infra-database.html?v=10',
       pageClass: 'page-records page-infra-metrics',
     },
     suporte: {
       nav: 'suporte',
-      title: 'LAV60 — Suporte / Runbooks',
-      view: 'views/support.html?v=10',
+      title: 'LAV60 — Assistente de Suporte',
+      view: 'views/support.html?v=17',
       pageClass: 'page-records page-support',
     },
     'monitor-sites': {
       nav: 'monitor-sites',
       title: 'LAV60 — Monitoramento de sites',
-      view: 'views/sites-monitor.html?v=2',
+      view: 'views/sites-monitor.html?v=3',
       pageClass: 'page-records page-sites-monitor',
+    },
+    'agent-get01': {
+      nav: 'agent-get01',
+      title: 'LAV60 — GET01 · Cloudflare',
+      view: 'views/agent-get01.html?v=3',
+      pageClass: 'page-agent page-agent-get01 page-agent-console',
+    },
+    'agent-get02': {
+      nav: 'agent-get02',
+      title: 'LAV60 — GET02 · MQTT',
+      view: 'views/agent-get02.html?v=3',
+      pageClass: 'page-agent page-agent-get02 page-agent-console',
+    },
+    store: {
+      nav: 'agent-get01',
+      title: 'LAV60 — Loja · GET01',
+      view: 'views/agent-store.html?v=1',
+      pageClass: 'page-store page-agent page-agent-get01 page-agent-console',
     },
   };
 
@@ -50,6 +68,9 @@
     'lojas.html': 'lojas',
     'records.html': 'registros',
     'index.html': 'dashboard',
+    'agent-get01.html': 'agent-get01',
+    'gateway.html': 'agent-get02',
+    'store.html': 'store',
   };
 
   let currentRoute = null;
@@ -88,6 +109,15 @@
     ) {
       return 'monitor-sites';
     }
+    if (hash === 'agent-get01' || hash === 'agente-cloudflare' || hash === 'get01') {
+      return 'agent-get01';
+    }
+    if (hash === 'agent-get02' || hash === 'agente-mqtt' || hash === 'get02' || hash === 'gateway') {
+      return 'agent-get02';
+    }
+    if (hash === 'store' || hash.startsWith('store/')) {
+      return 'store';
+    }
     if (hash === 'dashboard' || hash === '') {
       const legacy = LEGACY_PATHS[window.location.pathname.split('/').pop() || ''];
       if (legacy && !window.location.hash) return legacy;
@@ -102,6 +132,14 @@
     if (routeName === 'infra-database') return 'index.html#/infra/database';
     if (routeName === 'suporte') return 'index.html#/suporte';
     if (routeName === 'monitor-sites') return 'index.html#/monitor-sites';
+    if (routeName === 'agent-get01') return 'index.html#/agent-get01';
+    if (routeName === 'agent-get02') return 'index.html#/agent-get02';
+    if (routeName === 'store') {
+      const store = new URLSearchParams(window.location.search).get('store');
+      return store
+        ? `index.html?store=${encodeURIComponent(store)}#/store`
+        : 'index.html#/agent-get01';
+    }
     return `index.html#/${routeName}`;
   }
 
@@ -147,6 +185,15 @@
     if ((currentRoute === 'dashboard' || currentRoute === 'lojas') && window.Lav60StoresPage?.destroy) {
       await window.Lav60StoresPage.destroy();
     }
+    if (currentRoute === 'agent-get01' && window.Lav60AgentGet01Page?.destroy) {
+      await window.Lav60AgentGet01Page.destroy();
+    }
+    if (currentRoute === 'agent-get02' && window.Lav60AgentGet02Page?.destroy) {
+      await window.Lav60AgentGet02Page.destroy();
+    }
+    if (currentRoute === 'store' && window.Lav60AgentStorePage?.destroy) {
+      await window.Lav60AgentStorePage.destroy();
+    }
   }
 
   async function initRouteModule(routeName) {
@@ -168,6 +215,21 @@
     }
     if (routeName === 'monitor-sites') {
       await window.Lav60SitesMonitorPage?.init?.();
+      return;
+    }
+    if (routeName === 'agent-get01') {
+      window.Lav60AgentConsole?.reinit?.();
+      await window.Lav60AgentGet01Page?.init?.();
+      return;
+    }
+    if (routeName === 'agent-get02') {
+      window.Lav60AgentConsole?.reinit?.();
+      await window.Lav60AgentGet02Page?.init?.();
+      return;
+    }
+    if (routeName === 'store') {
+      window.Lav60AgentConsole?.reinit?.();
+      await window.Lav60AgentStorePage?.init?.();
       return;
     }
     await window.Lav60StoresPage?.init?.(routeName);
@@ -211,7 +273,13 @@
         'page-records',
         'page-infra-metrics',
         'page-support',
-        'page-sites-monitor'
+        'page-sites-monitor',
+        'page-agent',
+        'page-agent-get01',
+        'page-agent-get02',
+        'page-agent-console',
+        'page-gateway',
+        'page-store'
       );
       String(route.pageClass || '')
         .split(/\s+/)
@@ -254,22 +322,32 @@
     const page = window.location.pathname.split('/').pop() || '';
     const legacyRoute = LEGACY_PATHS[page];
     if (!legacyRoute || page === 'index.html') return false;
-    const target = routeUrl(legacyRoute);
+    let target = routeUrl(legacyRoute);
+    if (page === 'gateway.html') {
+      const store = new URLSearchParams(window.location.search).get('store');
+      if (store) {
+        target = `index.html?store=${encodeURIComponent(store)}#/agent-get02`;
+      }
+    }
+    if (page === 'store.html') {
+      const store = new URLSearchParams(window.location.search).get('store');
+      target = store
+        ? `index.html?store=${encodeURIComponent(store)}#/store`
+        : 'index.html#/lojas';
+    }
     history.replaceState({ route: legacyRoute }, '', target);
     return legacyRoute;
   }
 
   async function boot() {
+    window.Lav60?.stopHeartbeatMonitor?.();
+
     if (window.Lav60Auth) {
       const ok = await Lav60Auth.guardPage();
       if (!ok) return;
     }
 
     document.body.classList.remove('auth-pending');
-
-    if (window.Lav60Auth) {
-      await Lav60Auth.mountSidebarUser(document.getElementById('sidebarUser'));
-    }
 
     bindSidebarNav();
 
@@ -285,8 +363,12 @@
       navigate(parseRoute(), { replace: true, force: true });
     });
 
+    void window.Lav60Auth?.mountSidebarUser?.(document.getElementById('sidebarUser'));
+
     const legacyRoute = redirectLegacyEntry();
-    await navigate(legacyRoute || parseRoute(), { replace: true, force: true });
+    const initialRoute = legacyRoute || parseRoute();
+    void fetchView(ROUTES.dashboard.view).catch(() => {});
+    await navigate(initialRoute, { replace: true, force: true });
   }
 
   window.Lav60Router = { navigate, parseRoute, boot };

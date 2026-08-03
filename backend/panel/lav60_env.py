@@ -9,9 +9,11 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent.parent
-FRONTEND_DIR = ROOT / "frontend"
-DATA_DIR = Path(__file__).resolve().parent / "data"
+from panel.runtime_paths import app_root, bundle_root, data_dir
+
+ROOT = app_root()
+FRONTEND_DIR = bundle_root() / "frontend"
+DATA_DIR = data_dir()
 
 _env_loaded = False
 

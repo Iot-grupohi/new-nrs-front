@@ -1,9 +1,10 @@
-"""Lav60 API Portal + MQTT Gateway + Powpay Cloudflare — proxy local."""
+"""Lav60 API Portal + Totem + MQTT Gateway + Powpay Cloudflare — proxy local."""
 
 from __future__ import annotations
 
 import os
 import time
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -35,10 +36,11 @@ from server.totem import (
     proxy_totem,
     require_totem_token,
     totem_info,
-    totem_relative_path,
 )
 from panel.paths import is_panel_path, is_frontend_static_path
 from panel.router import mount_panel
+from panel import http_client as http_clients
+from panel.auth import require_panel_session
 
 load_dotenv()
 
@@ -80,17 +82,16 @@ _store_codes_cache: dict[str, Any] = {"data": None, "expires_at": 0.0}
 
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI):
+    await http_clients.startup()
     infra_svc.start_db_metrics_poller()
     yield
     infra_svc.stop_db_metrics_poller()
+    await http_clients.shutdown()
 
 
 app = FastAPI(
     title="Lav60 Unified API Proxy",
-    description=(
-        "Domínio único local para Portal, Totem, MQTT Gateway e Powpay. "
-        "Todas as collections Postman apontam para este servidor."
-    ),
+    description="Domínio único local para Portal Lav60, Totem e MQTT Gateway.",
     version="2.0.0",
     lifespan=_app_lifespan,
 )
@@ -143,6 +144,8 @@ async def auth_middleware(request: Request, call_next):
             require_gateway_token(request, GATEWAY_API_TOKEN)
         else:
             _require_portal_token(request)
+        if is_panel_path(request.url.path):
+            require_panel_session(request)
     except HTTPException as exc:
         return JSONResponse(
             status_code=exc.status_code,
@@ -158,11 +161,12 @@ async def upstream_get(path: str, params: dict | None = None) -> Any:
     url = f"{UPSTREAM_URL}{path}"
     headers = {"X-Token": API_TOKEN, "Accept": "application/json"}
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            response = await client.get(url, headers=headers, params=params or {})
-        except httpx.RequestError as exc:
-            raise HTTPException(502, f"Erro ao conectar upstream: {exc}") from exc
+    try:
+        response = await http_clients.client().get(
+            url, headers=headers, params=params or {}, timeout=60.0
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(502, f"Erro ao conectar upstream: {exc}") from exc
 
     if response.status_code >= 400:
         try:
@@ -195,17 +199,9 @@ def parse_store(data: dict) -> dict:
 
 
 def parse_machine(item: dict) -> dict:
-    attrs = item.get("attributes") or {}
-    return {
-        "id": item.get("id"),
-        "code": attrs.get("name"),
-        "name": attrs.get("name"),
-        "status": attrs.get("status"),
-        "machine_type": attrs.get("machine-type"),
-        "store_code": attrs.get("store_code"),
-        "address": attrs.get("address"),
-        "waiting_minutes": attrs.get("waiting-minutes"),
-    }
+    from panel.machines import parse_machine_item
+
+    return parse_machine_item(item)
 
 
 @app.get("/")
@@ -228,6 +224,7 @@ async def health():
         "totem": TOTEM_URL,
         "gateway": GATEWAY_URL,
         "powpay_domain": POWPAY_DOMAIN_SUFFIX,
+        "mqtt_gateway_enabled": bool(GATEWAY_API_TOKEN),
         "token_configured": bool(API_TOKEN),
         "gateway_token_configured": bool(GATEWAY_API_TOKEN),
         "cloudflare_token_configured": bool(CLOUDFLARE_API_TOKEN),
@@ -250,32 +247,6 @@ async def upstream_info():
 @app.get("/api/v1/gateway")
 async def gateway_upstream_info():
     return gateway_info(GATEWAY_URL)
-
-
-@app.get("/gateway")
-@app.get("/gateway/")
-async def gateway_health():
-    return await proxy_gateway(
-        gateway_url=GATEWAY_URL,
-        gateway_token=GATEWAY_API_TOKEN,
-        method="GET",
-        path="",
-        require_token=False,
-    )
-
-
-@app.api_route("/gateway/{path:path}", methods=["GET", "POST"])
-async def gateway_proxy(path: str, request: Request):
-    body = await request.body()
-    content_type = request.headers.get("content-type")
-    return await proxy_gateway(
-        gateway_url=GATEWAY_URL,
-        gateway_token=GATEWAY_API_TOKEN,
-        method=request.method,
-        path=path,
-        body=body if body else None,
-        content_type=content_type,
-    )
 
 
 @app.get("/api/v1/powpay")
@@ -308,6 +279,32 @@ async def powpay_root(store_code: str, request: Request):
 @app.api_route("/powpay/{store_code}/{path:path}", methods=["GET", "POST"])
 async def powpay_proxy(store_code: str, path: str, request: Request):
     return await _powpay_forward(store_code, path, request)
+
+
+@app.get("/gateway")
+@app.get("/gateway/")
+async def gateway_health():
+    return await proxy_gateway(
+        gateway_url=GATEWAY_URL,
+        gateway_token=GATEWAY_API_TOKEN,
+        method="GET",
+        path="",
+        require_token=False,
+    )
+
+
+@app.api_route("/gateway/{path:path}", methods=["GET", "POST"])
+async def gateway_proxy(path: str, request: Request):
+    body = await request.body()
+    content_type = request.headers.get("content-type")
+    return await proxy_gateway(
+        gateway_url=GATEWAY_URL,
+        gateway_token=GATEWAY_API_TOKEN,
+        method=request.method,
+        path=path,
+        body=body if body else None,
+        content_type=content_type,
+    )
 
 
 @app.get("/api/v1/totem")
@@ -379,10 +376,9 @@ async def store_detail(store_code: str, parsed: int = Query(1)):
 
 @app.get("/api/v1/stores/{store_code}/profile")
 async def store_profile(store_code: str):
-    store_raw = await upstream_get(f"/api/v1/stores/{store_code}")
-    hi_bank_raw = await upstream_get(
-        "/api/v1/hi_banks/account",
-        {"store_code": store_code},
+    store_raw, hi_bank_raw = await asyncio.gather(
+        upstream_get(f"/api/v1/stores/{store_code}"),
+        upstream_get("/api/v1/hi_banks/account", {"store_code": store_code}),
     )
     data = store_raw.get("data") or {}
     attrs = data.get("attributes") or {}
@@ -432,11 +428,13 @@ async def machines(
     store_code: str = Query(..., alias="store_code"),
     raw: int = Query(0),
 ):
-    raw_data = await upstream_get("/api/v1/machines", {"store_code": store_code})
     if raw:
-        return raw_data
+        return await upstream_get("/api/v1/machines", {"store_code": store_code})
 
-    store_raw = await upstream_get(f"/api/v1/stores/{store_code}")
+    raw_data, store_raw = await asyncio.gather(
+        upstream_get("/api/v1/machines", {"store_code": store_code}),
+        upstream_get(f"/api/v1/stores/{store_code}"),
+    )
     store_status = (store_raw.get("data") or {}).get("attributes", {}).get("status")
     lav60_status = "suspended" if store_status == "suspended" else "ok"
 

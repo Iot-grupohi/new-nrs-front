@@ -1,0 +1,1504 @@
+/* ============================================================================
+   Consoles de agente — GET01 (Cloudflare) e GET02 (MQTT)
+
+   Escopo exclusivo: .page-agent-console (agent-get01.html e gateway.html).
+   store.html e index.html continuam em agent-pages.css e não são afetados.
+
+   Todas as cores derivam dos tokens de app.css para funcionar nos dois temas.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Tokens de canal
+   -------------------------------------------------------------------------- */
+
+.page-agent-console {
+  --agent-accent: #38bdf8;
+  --agent-accent-rgb: 56, 189, 248;
+  --agent-ink: #7dd3fc;
+
+  --agent-tint-weak: rgba(var(--agent-accent-rgb), 0.07);
+  --agent-tint: rgba(var(--agent-accent-rgb), 0.12);
+  --agent-tint-strong: rgba(var(--agent-accent-rgb), 0.2);
+  --agent-line: rgba(var(--agent-accent-rgb), 0.28);
+  --agent-line-strong: rgba(var(--agent-accent-rgb), 0.5);
+
+  --agent-ok: var(--status-ok);
+  --agent-ok-rgb: 34, 197, 94;
+  --agent-off-rgb: 239, 68, 68;
+
+  --agent-gap: 1rem;
+  --agent-radius: 14px;
+  --agent-radius-sm: 10px;
+}
+
+.page-agent-console.page-agent-get02 {
+  --agent-accent: #34d399;
+  --agent-accent-rgb: 52, 211, 153;
+  --agent-ink: #6ee7b7;
+}
+
+[data-theme="light"] .page-agent-console {
+  --agent-accent: #0284c7;
+  --agent-accent-rgb: 2, 132, 199;
+  --agent-ink: #0369a1;
+
+  --agent-tint-weak: rgba(var(--agent-accent-rgb), 0.05);
+  --agent-tint: rgba(var(--agent-accent-rgb), 0.09);
+  --agent-tint-strong: rgba(var(--agent-accent-rgb), 0.16);
+  --agent-line: rgba(var(--agent-accent-rgb), 0.24);
+  --agent-line-strong: rgba(var(--agent-accent-rgb), 0.45);
+
+  --agent-ok-rgb: 22, 163, 74;
+  --agent-off-rgb: 220, 38, 38;
+}
+
+[data-theme="light"] .page-agent-console.page-agent-get02 {
+  --agent-accent: #047857;
+  --agent-accent-rgb: 4, 120, 87;
+  --agent-ink: #065f46;
+}
+
+/* Brilho ambiente no topo da página, na cor do canal. */
+.page-agent-console {
+  background:
+    radial-gradient(ellipse 70% 32rem at 50% -6rem, var(--agent-tint-weak), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* --------------------------------------------------------------------------
+   2. Ícones
+   -------------------------------------------------------------------------- */
+
+.agent-console__sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.page-agent-console .icon {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  overflow: visible;
+}
+
+/* --------------------------------------------------------------------------
+   3. Topbar
+   -------------------------------------------------------------------------- */
+
+.page-agent-console .topbar {
+  background: var(--surface-topbar);
+  border-bottom: 1px solid var(--border-line);
+  box-shadow: 0 1px 0 var(--agent-tint-weak);
+}
+
+.page-agent-console .topbar__logo {
+  background: linear-gradient(140deg, var(--agent-accent), #6366f1);
+  box-shadow: 0 6px 16px rgba(var(--agent-accent-rgb), 0.28);
+}
+
+.page-agent-console .agent-nav {
+  margin-bottom: 0;
+}
+
+.page-agent-console .agent-nav__link {
+  padding: 0.34rem 0.8rem;
+  background: var(--surface-chip);
+  border-color: var(--border-line);
+}
+
+.page-agent-console .agent-nav__link:hover {
+  border-color: var(--border-mid);
+  background: var(--surface-hover);
+}
+
+.page-agent-console .agent-nav__link--active {
+  color: var(--agent-ink);
+  border-color: var(--agent-line-strong);
+  background: var(--agent-tint);
+}
+
+.page-agent-console .topbar__code {
+  background: var(--agent-tint);
+  border-color: var(--agent-line);
+  color: var(--agent-ink);
+}
+
+/* --------------------------------------------------------------------------
+   4. Shell da página
+   -------------------------------------------------------------------------- */
+
+/* Mesma caixa de store.html (agent-pages.css) para o painel ficar coerente. */
+.page-agent-console .main-content.agent-page {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 1.35rem 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--agent-gap);
+}
+
+/* O hub é um bloco comum: precisa do próprio flex para espaçar hero e layout. */
+.page-agent-console .agent-page__hub {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agent-gap);
+}
+
+.agent-page__hub.hidden {
+  display: none !important;
+}
+
+/* Superfície comum dos painéis. */
+.page-agent-console .agent-kpi-panel.card,
+.page-agent-console .agent-hub.card,
+.page-agent-console .agent-about.card {
+  margin: 0;
+  padding: 1.15rem 1.25rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--agent-radius);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="light"] .page-agent-console .agent-kpi-panel.card,
+[data-theme="light"] .page-agent-console .agent-hub.card,
+[data-theme="light"] .page-agent-console .agent-about.card {
+  box-shadow: var(--shadow-elevated);
+}
+
+/* --------------------------------------------------------------------------
+   5. Cabeçalho do console
+   -------------------------------------------------------------------------- */
+
+.page-agent-console .agent-page__hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin: 0;
+  padding: 1.15rem 1.35rem;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--agent-radius);
+  background:
+    radial-gradient(ellipse 42rem 14rem at 0% 0%, var(--agent-tint), transparent 68%),
+    var(--surface-card);
+  box-shadow: var(--shadow-card);
+}
+
+/* Fio de destaque no topo, na cor do canal. */
+.page-agent-console .agent-page__hero::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--agent-accent), transparent 62%);
+}
+
+.page-agent-console .agent-page__hero-main {
+  min-width: 0;
+  flex: 1 1 26rem;
+}
+
+.page-agent-console .agent-page__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--agent-ink);
+}
+
+.page-agent-console .agent-page__eyebrow::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px var(--agent-tint);
+}
+
+.page-agent-console .agent-page__headline {
+  margin: 0 0 0.4rem;
+  font-size: clamp(1.3rem, 2.4vw, 1.6rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--text-bright);
+}
+
+.page-agent-console .agent-page__desc {
+  margin: 0;
+  max-width: 46rem;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.page-agent-console .agent-page__desc code {
+  padding: 0.08rem 0.34rem;
+  border-radius: 5px;
+  border: 1px solid var(--agent-line);
+  background: var(--agent-tint-weak);
+  font-size: 0.82em;
+  color: var(--agent-ink);
+}
+
+.page-agent-console .agent-page__hero-aside {
+  flex: 0 0 auto;
+}
+
+.page-agent-console .agent-page__channel-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-width: 12.5rem;
+  padding: 0.7rem 0.95rem;
+  border-radius: var(--agent-radius-sm);
+  border: 1px solid var(--agent-line);
+  background: var(--agent-tint-weak);
+}
+
+.page-agent-console .agent-page__channel-icon {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  flex: none;
+  border-radius: 9px;
+  font-size: 1.15rem;
+  color: var(--agent-ink);
+  background: var(--agent-tint);
+  border: 1px solid var(--agent-line);
+}
+
+.page-agent-console .agent-page__channel-badge strong {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.page-agent-console .agent-page__channel-badge span {
+  display: block;
+  margin-top: 0.12rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   6. Alertas e barra de status
+   -------------------------------------------------------------------------- */
+
+.page-agent-console .gateway-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  margin: 0;
+  padding: 0.8rem 1rem;
+  border-radius: var(--agent-radius-sm);
+  border: 1px solid rgba(var(--agent-off-rgb), 0.32);
+  background: rgba(var(--agent-off-rgb), 0.09);
+  color: var(--status-danger);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.page-agent-console .gateway-alert strong {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: inherit;
+}
+
+.page-agent-console .gateway-alert a {
+  color: inherit;
+  font-weight: 600;
+  text-underline-offset: 2px;
+}
+
+.page-agent-console .gateway-alert--checking {
+  border-color: rgba(245, 158, 11, 0.32);
+  background: rgba(245, 158, 11, 0.09);
+  color: var(--status-warn);
+}
+
+.page-agent-console .gateway-status.card {
+  margin: 0;
+  padding: 0.8rem 1.1rem;
+  border: 1px solid var(--agent-line);
+  border-radius: var(--agent-radius-sm);
+  background: var(--agent-tint-weak);
+}
+
+.page-agent-console .gateway-status__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.page-agent-console .gateway-status__hint {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+/* --------------------------------------------------------------------------
+   7. Layout de duas colunas
+   -------------------------------------------------------------------------- */
+
+.page-agent-console .agent-page__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(15rem, 19rem);
+  gap: var(--agent-gap);
+  align-items: start;
+}
+
+.page-agent-console .agent-page__primary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agent-gap);
+  min-width: 0;
+}
+
+.page-agent-console .agent-page__aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agent-gap);
+  position: sticky;
+  /* --topbar-offset é medido em agent-console.js. */
+  top: calc(var(--topbar-offset, 7.5rem) + 0.75rem);
+}
+
+/* --------------------------------------------------------------------------
+   8. Painel de KPIs
+   -------------------------------------------------------------------------- */
+
+.page-agent-console .agent-kpi-panel__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.page-agent-console .agent-kpi-panel__title {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-bright);
+}
+
+.page-agent-console .agent-kpi-panel__meta {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.page-agent-console .agent-kpi-panel__refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: none;
+}
+
+.page-agent-console .agent-kpi-panel__refresh .icon {
+  font-size: 0.9em;
+}
+
+.page-agent-console .agent-kpi-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.page-agent-console .agent-kpi-panel__grid .stat-card {
+  --card-rgb: var(--agent-accent-rgb);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.95rem 1rem 0.85rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--agent-radius-sm);
+  background:
+    radial-gradient(ellipse 12rem 8rem at 100% 0%, rgba(var(--card-rgb), 0.13), transparent 70%),
+    var(--surface-inset);
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+/* Neutraliza a barra lateral de 3px herdada de app.css. */
+.page-agent-console .agent-kpi-panel__grid .stat-card::before {
+  content: none;
+}
+
+.page-agent-console .agent-kpi-panel__grid .stat-card--success {
+  --card-rgb: var(--agent-ok-rgb);
+}
+
+.page-agent-console .agent-kpi-panel__grid .stat-card--danger {
+  --card-rgb: var(--agent-off-rgb);
+}
+
+.page-agent-console .agent-kpi-panel__grid .stat-card__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.page-agent-console .agent-kpi-panel__grid .stat-card__label::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(var(--card-rgb));
+  box-shadow: 0 0 0 3px rgba(var(--card-rgb), 0.16);
+}
+
+.page-agent-console .agent-kpi-panel__grid .stat-card__value {
+  font-size: clamp(1.7rem, 3.2vw, 2.1rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-bright);
+}
+
+.stat-card__hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.18s ease, transform 0.18s ease, color 0.18s ease;
+}
+
+.stat-card__hint .icon {
+  transition: transform 0.18s ease;
+}
+
+.page-agent-console .stat-card--clickable {
+  cursor: pointer;
+}
+
+.page-agent-console .stat-card--clickable:hover,
+.page-agent-console .stat-card--clickable:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(var(--card-rgb), 0.45);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.16);
+  outline: none;
+}
+
+.page-agent-console .stat-card--clickable:hover .stat-card__hint,
+.page-agent-console .stat-card--clickable:focus-visible .stat-card__hint {
+  opacity: 1;
+  transform: translateY(0);
+  color: rgb(var(--card-rgb));
+}
+
+.page-agent-console .stat-card--clickable:hover .stat-card__hint .icon {
+  transform: translateX(2px);
+}
+
+.page-agent-console .stat-card--clickable:focus-visible {
+  box-shadow: 0 0 0 3px rgba(var(--card-rgb), 0.28);
+}
+
+.page-agent-console .stat-card--active {
+  border-color: rgba(var(--card-rgb), 0.55);
+  background:
+    radial-gradient(ellipse 12rem 8rem at 100% 0%, rgba(var(--card-rgb), 0.2), transparent 70%),
+    var(--surface-inset);
+}
+
+.page-agent-console .stat-card--active .stat-card__hint {
+  opacity: 1;
+  transform: translateY(0);
+  color: rgb(var(--card-rgb));
+}
+
+/* Barra de disponibilidade da rede. */
+.agent-kpi-share {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border-line);
+}
+
+.agent-kpi-share__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.45rem;
+}
+
+.agent-kpi-share__label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.agent-kpi-share__value {
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-bright);
+}
+
+.agent-kpi-share__track {
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface-chip);
+}
+
+.agent-kpi-share__fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(var(--agent-ok-rgb), 0.65), rgb(var(--agent-ok-rgb)));
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1), background 0.3s ease;
+}
+
+.agent-kpi-share__fill[data-level="warn"] {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.6), #f59e0b);
+}
+
+.agent-kpi-share__fill[data-level="danger"] {
+  background: linear-gradient(90deg, rgba(var(--agent-off-rgb), 0.6), rgb(var(--agent-off-rgb)));
+}
+
+.agent-kpi-share__meta {
+  margin: 0.45rem 0 0;
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   9. Hub de lojas
+   -------------------------------------------------------------------------- */
+
+.page-agent-console .agent-hub__head {
+  margin-bottom: 0.85rem;
+}
+
+.page-agent-console .agent-hub__head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.page-agent-console .agent-hub__title {
+  margin: 0 0 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text-bright);
+}
+
+.page-agent-console .agent-hub__meta {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.page-agent-console .agent-hub__count {
+  display: grid;
+  place-items: center;
+  min-width: 3.1rem;
+  height: 2.6rem;
+  flex: none;
+  padding: 0 0.7rem;
+  border-radius: var(--agent-radius-sm);
+  border: 1px solid rgba(var(--agent-ok-rgb), 0.32);
+  background: rgba(var(--agent-ok-rgb), 0.1);
+  color: var(--status-ok);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.page-agent-console .agent-hub__toolbar {
+  margin-bottom: 0.75rem;
+}
+
+.page-agent-console .agent-hub__search {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: none;
+}
+
+.page-agent-console .agent-hub__search .search-field__icon {
+  position: absolute;
+  top: 50%;
+  left: 0.75rem;
+  display: grid;
+  place-items: center;
+  transform: translateY(-50%);
+  font-size: 0.95rem;
+  color: var(--muted);
+  pointer-events: none;
+  transition: color 0.15s ease;
+}
+
+.page-agent-console .agent-hub__search input {
+  width: 100%;
+  padding: 0.6rem 0.85rem 0.6rem 2.3rem;
+  border-radius: var(--agent-radius-sm);
+  border: 1px solid var(--border-input);
+  background: var(--surface-input);
+  color: var(--text);
+  font-size: 0.85rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.page-agent-console .agent-hub__search input::placeholder {
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+.page-agent-console .agent-hub__search input:focus {
+  outline: none;
+  border-color: var(--agent-line-strong);
+  box-shadow: 0 0 0 3px var(--agent-tint);
+}
+
+.page-agent-console .agent-hub__search:focus-within .search-field__icon {
+  color: var(--agent-ink);
+}
+
+.page-agent-console .agent-hub__stores {
+  margin: 0;
+}
+
+.page-agent-console .agent-hub-store-list {
+  border: 1px solid var(--border-line);
+  border-radius: var(--agent-radius-sm);
+  background: var(--surface-inset);
+  max-height: min(30rem, 58vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-mid) transparent;
+}
+
+.page-agent-console .agent-hub-store-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.page-agent-console .agent-hub-store-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: var(--border-mid);
+}
+
+.page-agent-console .agent-hub-store-list__row + .agent-hub-store-list__row {
+  border-top: 1px solid var(--border-line);
+}
+
+.page-agent-console .agent-hub-store-list__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0 0.7rem;
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease;
+}
+
+/* Indicador de status da loja. */
+.page-agent-console .agent-hub-store-list__item::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(var(--agent-ok-rgb));
+  box-shadow: 0 0 0 3px rgba(var(--agent-ok-rgb), 0.16);
+}
+
+.page-agent-console .agent-hub-store-list__item:hover,
+.page-agent-console .agent-hub-store-list__item:focus-visible {
+  background: var(--agent-tint-weak);
+  border-left-color: var(--agent-accent);
+  outline: none;
+}
+
+.page-agent-console .agent-hub-store-list__name {
+  min-width: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.14s ease;
+}
+
+.page-agent-console .agent-hub-store-list__item:hover .agent-hub-store-list__name,
+.page-agent-console .agent-hub-store-list__item:focus-visible .agent-hub-store-list__name {
+  color: var(--agent-ink);
+}
+
+.page-agent-console .agent-hub-store-list__sub {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--agent-ok-rgb), 0.26);
+  background: rgba(var(--agent-ok-rgb), 0.09);
+  color: var(--status-ok);
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.page-agent-console .agent-hub-store-list__action {
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--muted);
+  transition: transform 0.14s ease, color 0.14s ease;
+}
+
+.page-agent-console .agent-hub-store-list__item:hover .agent-hub-store-list__action,
+.page-agent-console .agent-hub-store-list__item:focus-visible .agent-hub-store-list__action {
+  transform: translateX(2px);
+  color: var(--agent-accent);
+}
+
+.page-agent-console .agent-hub__empty {
+  margin: 0;
+  padding: 2.5rem 1.25rem;
+  border: 1px dashed var(--border-mid);
+  border-radius: var(--agent-radius-sm);
+  background: var(--surface-inset);
+  color: var(--muted);
+  font-size: 0.84rem;
+  text-align: center;
+}
+
+/* --------------------------------------------------------------------------
+   10. Painel lateral "Sobre"
+   -------------------------------------------------------------------------- */
+
+.page-agent-console .agent-about__title {
+  margin: 0 0 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.page-agent-console .agent-about__features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.page-agent-console .agent-about__feature {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+}
+
+.page-agent-console .agent-about__feature-icon {
+  display: grid;
+  place-items: center;
+  width: 1.95rem;
+  height: 1.95rem;
+  flex: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: var(--agent-ink);
+  background: var(--agent-tint);
+  border: 1px solid var(--agent-line);
+}
+
+.page-agent-console .agent-about__feature strong {
+  display: block;
+  margin-bottom: 0.12rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.page-agent-console .agent-about__feature p {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.page-agent-console .agent-about__feature code {
+  font-size: 0.92em;
+  color: var(--agent-ink);
+}
+
+.page-agent-console .agent-about__feature a {
+  color: var(--agent-ink);
+  font-weight: 600;
+  text-underline-offset: 2px;
+}
+
+.page-agent-console .agent-about__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  margin-top: 1.1rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: var(--agent-radius-sm);
+  border: 1px solid var(--agent-line);
+  background: var(--agent-tint-weak);
+  color: var(--agent-ink);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.page-agent-console .agent-about__link .icon {
+  margin-left: auto;
+  transition: transform 0.15s ease;
+}
+
+.page-agent-console .agent-about__link:hover {
+  background: var(--agent-tint);
+  border-color: var(--agent-line-strong);
+  text-decoration: none;
+}
+
+.page-agent-console .agent-about__link:hover .icon {
+  transform: translateX(2px);
+}
+
+/* --------------------------------------------------------------------------
+   11. Painel de equipamentos (fallback GET01/GET02 sem .page-store)
+   Com .page-store no body, os cards usam app.css (mesmo visual da rota /store).
+   -------------------------------------------------------------------------- */
+
+.page-agent-console:not(.page-store) .devices-panel {
+  margin: 0;
+  gap: var(--agent-gap);
+}
+
+.page-agent-console:not(.page-store) .devices-panel__section {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--agent-radius);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+}
+
+.page-agent-console:not(.page-store) .devices-panel__head {
+  padding: 0.8rem 1.15rem;
+  border-bottom: 1px solid var(--border-line);
+  background: var(--gradient-panel-head);
+}
+
+.page-agent-console:not(.page-store) .devices-panel__title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.page-agent-console:not(.page-store) .devices-panel--blocked {
+  opacity: 0.5;
+  pointer-events: none;
+  user-select: none;
+}
+
+.page-agent-console:not(.page-store) .devices-panel--loading {
+  visibility: hidden;
+}
+
+.page-agent-console:not(.page-store) .device-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+  gap: 0.85rem;
+  padding: 1rem 1.15rem 1.15rem;
+}
+
+.page-agent-console:not(.page-store) .device-card--tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.95rem 1rem;
+  border-radius: var(--agent-radius-sm);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid rgba(var(--agent-accent-rgb), 0.45);
+  background: var(--surface-inset);
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.page-agent-console:not(.page-store) .device-card--tile:hover {
+  border-color: var(--agent-line);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14);
+}
+
+.page-agent-console:not(.page-store) .device-card--blocked {
+  opacity: 0.58;
+  cursor: not-allowed;
+  pointer-events: none;
+  user-select: none;
+}
+
+.page-agent-console:not(.page-store) .device-card--blocked .device-card__refresh {
+  pointer-events: auto;
+  opacity: 1;
+  cursor: pointer;
+}
+
+.page-agent-console:not(.page-store) .device-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.page-agent-console:not(.page-store) .device-card__title-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.page-agent-console:not(.page-store) .device-card__id {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text-bright);
+}
+
+.page-agent-console:not(.page-store) .device-card__cap {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--agent-ink);
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: var(--agent-tint);
+  border: 1px solid var(--agent-line);
+}
+
+.page-agent-console:not(.page-store) .device-card__status {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.page-agent-console:not(.page-store) .device-card__facts {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.page-agent-console:not(.page-store) .device-card__sep {
+  margin: 0 0.35rem;
+  opacity: 0.45;
+}
+
+.page-agent-console:not(.page-store) .device-card__hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.page-agent-console:not(.page-store) .device-card__status.pill {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.page-agent-console:not(.page-store) .device-card .pill--on {
+  background: rgba(var(--agent-ok-rgb), 0.14);
+  color: var(--status-ok);
+}
+
+.page-agent-console:not(.page-store) .device-card .pill--off {
+  background: rgba(var(--agent-off-rgb), 0.12);
+  color: var(--status-danger);
+}
+
+.page-agent-console:not(.page-store) .device-card .pill--warn {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--status-warn);
+}
+
+.page-agent-console:not(.page-store) .device-card .pill--suspended {
+  background: rgba(167, 139, 250, 0.15);
+  color: #c4b5fd;
+}
+
+.page-agent-console:not(.page-store) .device-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: auto;
+  padding-top: 0.35rem;
+}
+
+.page-agent-console:not(.page-store) .device-card__actions--doser,
+.page-agent-console:not(.page-store) .device-card__actions--dryer,
+.page-agent-console:not(.page-store) .device-card__actions--washer,
+.page-agent-console:not(.page-store) .device-card__actions--ac {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.page-agent-console:not(.page-store) .device-card__actions--dryer,
+.page-agent-console:not(.page-store) .device-card__actions--washer {
+  min-height: 9.5rem;
+}
+
+.page-agent-console:not(.page-store) .device-card__choice-grid {
+  display: grid;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.page-agent-console:not(.page-store) .device-card__choice-grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.page-agent-console:not(.page-store) .device-card__choice-grid--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.page-agent-console:not(.page-store) .device-card__choice {
+  padding: 0.48rem 0.35rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-mid);
+  background: var(--surface-card);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.page-agent-console:not(.page-store) .device-card__choice--wide {
+  grid-column: 1 / -1;
+}
+
+.page-agent-console:not(.page-store) .device-card__choice:hover:not(:disabled) {
+  border-color: var(--agent-line-strong);
+}
+
+.page-agent-console:not(.page-store) .device-card__choice--active {
+  border-color: rgba(var(--agent-accent-rgb), 0.65);
+  background: var(--agent-tint);
+  box-shadow: 0 0 0 1px rgba(var(--agent-accent-rgb), 0.28);
+}
+
+.page-agent-console:not(.page-store) .device-card__choice:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.page-agent-console:not(.page-store) .device-card__release-btn {
+  width: 100%;
+  justify-content: center;
+  margin-top: 0.1rem;
+}
+
+.page-agent-console:not(.page-store) .device-card__cycle-status,
+.page-agent-console:not(.page-store) .device-card__dryer-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.1rem;
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  border: 1px solid transparent;
+}
+
+.page-agent-console:not(.page-store) .device-card--busy .device-card__cycle-status:not(:empty),
+.page-agent-console:not(.page-store) .device-card--busy .device-card__dryer-status:not(:empty) {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.25);
+  color: var(--status-warn);
+}
+
+.page-agent-console:not(.page-store) .device-card__action-grid {
+  display: grid;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.page-agent-console:not(.page-store) .device-card__action-grid--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.page-agent-console:not(.page-store) .device-card__action-grid .btn {
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+}
+
+.page-agent-console:not(.page-store) .device-card__action-row,
+.page-agent-console:not(.page-store) .device-card__action-wide {
+  width: 100%;
+}
+
+.page-agent-console:not(.page-store) .device-card__panel {
+  width: 100%;
+  padding: 0.7rem;
+  border-radius: var(--agent-radius-sm);
+  background: var(--agent-tint-weak);
+  border: 1px solid var(--agent-line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.page-agent-console:not(.page-store) .device-card__panel-label {
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.page-agent-console:not(.page-store) .device-card__time-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.page-agent-console:not(.page-store) .device-card__time-unit {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.page-agent-console:not(.page-store) .device-card--doser .device-card__input {
+  flex: 1;
+  min-width: 0;
+  max-width: 5.5rem;
+}
+
+.page-agent-console:not(.page-store) .device-card--busy .device-card__actions {
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  pointer-events: none;
+}
+
+.page-agent-console:not(.page-store) .device-card__lock-status {
+  width: 100%;
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: var(--status-warn);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.page-agent-console:not(.page-store) .device-card--busy .device-card__actions .btn:disabled {
+  opacity: 0.45;
+}
+
+.page-agent-console:not(.page-store) .devices-panel__count {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   12. Página da loja (store.html)
+   -------------------------------------------------------------------------- */
+
+/* Atalho GET02 na topbar. */
+.page-agent-console .topbar__tool-icon {
+  display: grid;
+  place-items: center;
+}
+
+/* Fica fora do <main>, então replica a caixa interna do conteúdo. */
+.page-agent-console .store-banner {
+  width: calc(100% - 3rem);
+  max-width: calc(1280px - 3rem);
+  margin: 0 auto;
+  padding: 0.8rem 1rem;
+  border-radius: var(--agent-radius-sm);
+  border: 1px solid var(--border-mid);
+  background: var(--surface-chip);
+}
+
+.page-agent-console .store-banner__icon {
+  width: 1.6rem;
+  height: 1.6rem;
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+
+.page-agent-console .store-banner__title {
+  color: var(--text-secondary);
+}
+
+/* O <main> da loja abre logo abaixo do banner. */
+.page-agent-console .store-banner:not(.hidden) + .main-content.agent-page {
+  padding-top: 0.85rem;
+}
+
+.page-agent-console .agent-kpi-panel__grid--store {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.page-agent-console .agent-kpi-panel__grid .stat-card__sub {
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.page-agent-console .agent-kpi-panel__grid .stat-card__value--sm {
+  font-size: clamp(1rem, 2vw, 1.2rem) !important;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.page-agent-console .agent-kpi-panel__grid .stat-card__bar {
+  height: 5px;
+  margin-top: 0.5rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface-chip);
+}
+
+.page-agent-console .agent-kpi-panel__grid .stat-card__bar div {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(var(--agent-ok-rgb), 0.65), rgb(var(--agent-ok-rgb)));
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.page-agent-console.page-agent-get02 .device-card__ping-row {
+  margin: 0.35rem 0 0.65rem;
+}
+
+.page-agent-console.page-agent-get02 .device-card__ping {
+  width: 100%;
+  justify-content: center;
+  font-size: 0.78rem;
+}
+
+.page-agent-console.page-agent-get02 .device-card__endpoint {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.page-agent-console.page-agent-get02 .device-card__endpoint code {
+  font-size: inherit;
+  color: var(--link-accent);
+}
+
+/* Neutraliza regras legadas de app.css (.page-gateway / .page-agent-get01 .gateway-overview). */
+.page-agent-console .agent-kpi-panel.card {
+  margin-bottom: 0;
+}
+
+.page-agent-console .agent-page__store-mode {
+  display: flex;
+  flex-direction: column;
+  gap: var(--agent-gap);
+}
+
+.page-agent-console .agent-page__store-mode.hidden {
+  display: none !important;
+}
+
+.page-agent-console .agent-store-page__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.15rem;
+}
+
+.page-agent-console .agent-store-page__get02 {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-color: var(--agent-line);
+  color: var(--agent-ink);
+}
+
+.page-agent-console .agent-store-page__get02:hover {
+  border-color: var(--agent-line-strong);
+  background: var(--agent-tint-weak);
+}
+
+/* --------------------------------------------------------------------------
+   13. Responsivo
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 1080px) {
+  .page-agent-console .agent-page__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .page-agent-console .agent-page__aside {
+    position: static;
+  }
+
+  .page-agent-console .agent-about__features {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .page-agent-console .agent-about__feature {
+    flex: 1 1 15rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .page-agent-console .agent-kpi-panel__grid--store {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 820px) {
+  .page-agent-console .agent-page__hero {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .page-agent-console .agent-page__channel-badge {
+    width: 100%;
+  }
+}
+
+/* 640px é onde app.css reduz o padding lateral da topbar para 1rem. */
+@media (max-width: 640px) {
+  .page-agent-console .main-content.agent-page {
+    padding: 1rem 1rem 1.5rem;
+  }
+
+  .page-agent-console .store-banner {
+    width: calc(100% - 2rem);
+  }
+
+  .page-agent-console .agent-kpi-panel__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .page-agent-console .agent-kpi-panel__head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+  }
+
+  .page-agent-console .agent-hub-store-list__item {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'dot name action'
+      '.   sub  sub';
+    row-gap: 0.3rem;
+  }
+
+  .page-agent-console .agent-hub-store-list__item::before {
+    grid-area: dot;
+  }
+
+  .page-agent-console .agent-hub-store-list__name {
+    grid-area: name;
+  }
+
+  .page-agent-console .agent-hub-store-list__sub {
+    grid-area: sub;
+    justify-self: start;
+    white-space: nowrap;
+  }
+
+  .page-agent-console .agent-hub-store-list__action {
+    grid-area: action;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   14. Acessibilidade
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .page-agent-console *,
+  .page-agent-console *::before,
+  .page-agent-console *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

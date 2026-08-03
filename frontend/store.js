@@ -20,6 +20,7 @@
     fetchHeartbeatsSnapshot,
     watchStoreHeartbeat,
     fetchStoreStatusFromHeartbeat,
+    probePowpayHealth,
     ensureDefaultAgentToken,
     isAgentTokenConfiguredOnServer,
     shouldUsePanelAgentProxy,
@@ -28,6 +29,7 @@
     noAgentMessage,
     isAgentUnavailableError,
     isHeartbeatEntryAlive,
+    networkPayloadHasDevices,
     lav60Debug,
     WASHER_DOSAGE_OPTIONS,
     friendlyUserMessage,
@@ -43,9 +45,15 @@
     applyFrontendDeviceVisibility,
     resolveDeviceOnline,
     isStoreLav60Suspended,
+    isAgentsDisabled,
+    isPowpayHealthPanel,
+    isRtdbOnlyPanel,
   } = window.Lav60;
 
-  const pageStore = normalizeStoreId(new URLSearchParams(window.location.search).get('store'));
+  const pageStoreFromUrl = () =>
+    normalizeStoreId(new URLSearchParams(window.location.search).get('store'));
+
+  let pageStore = pageStoreFromUrl();
   let catalog = null;
   let storeMeta = null;
   let config = null;
@@ -58,6 +66,32 @@
   let washerLocks = {};
   let uiReady = false;
   let agentStatusPollTimer = null;
+  let pingStatus = null;
+  let lastNetworkStatusSource = null;
+  let storeAgentReady = false;
+  let storeAgentChecking = false;
+  let storeAgentCheckedAt = null;
+  let storeAgentError = null;
+  let storeHeartbeatAlive = false;
+  const probingDevices = new Set();
+  const activeProbeGroups = new Set();
+  let probeGeneration = 0;
+  let probeQueueRunner = null;
+  let storeStatusBarReady = false;
+
+  const STATUS_PATHS = {
+    washer: (id) => `status/washer/${id}`,
+    dryer: (id) => `status/dryer/${id}`,
+    doser: (id) => `status/doser/${id}`,
+    ac: () => 'status/ac',
+  };
+
+  const GROUP_REFRESH_LABELS = {
+    washer: 'Lavadoras',
+    dryer: 'Secadoras',
+    doser: 'Dosadoras',
+    ac: 'Ar condicionado',
+  };
 
   const $ = (id) => document.getElementById(id);
 
@@ -85,12 +119,362 @@
   const DRYER_LOCK_STORAGE_KEY = 'lav60_dryer_locks';
   const WASHER_LOCK_STORAGE_KEY = 'lav60_washer_locks';
 
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function formatCacheAge(checkedAt) {
+    if (!Number.isFinite(checkedAt)) return '';
+    const sec = Math.floor((Date.now() - checkedAt) / 1000);
+    if (sec < 45) return 'agora';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min === 1 ? 'há 1 min' : `há ${min} min`;
+    const hours = Math.floor(min / 60);
+    return hours === 1 ? 'há 1 h' : `há ${hours} h`;
+  }
+
+  function storeAgentMetaSuffix() {
+    const parts = [];
+    if (storeAgentCheckedAt) parts.push(formatCacheAge(storeAgentCheckedAt));
+    return parts.length ? ` · ${parts.join(' · ')}` : '';
+  }
+
+  function updateStoreAgentMeta(state, detail = '') {
+    const el = $('storeAgentMeta');
+    const hint = $('storeAgentHint');
+    if (!el) return;
+    el.className = 'gateway-meta';
+    const code = pageStore.toUpperCase();
+    if (!state) {
+      el.textContent = 'Agente: —';
+      if (hint) hint.textContent = 'Use ↻ em cada equipamento para verificar o status na rede local';
+      updateStoreStatusButtons();
+      return;
+    }
+    if (state === 'waiting') {
+      el.textContent = `Agente: aguardando (${code})`;
+      el.classList.add('gateway-meta--warn');
+      if (hint) hint.textContent = 'Use ↻ em cada equipamento ou “Atualizar equipamentos”';
+    } else if (state === 'checking') {
+      el.textContent = `Agente: verificando (${code})…`;
+      el.classList.add('gateway-meta--warn');
+      if (hint) hint.textContent = 'Consultando túnel Cloudflare / agente local…';
+    } else if (state === 'online') {
+      el.textContent = `Agente: online (${code})${storeAgentMetaSuffix()}`;
+      el.classList.add('gateway-meta--ok');
+      if (hint) hint.textContent = 'Túnel respondendo — verifique cada equipamento com ↻';
+    } else if (state === 'offline') {
+      el.textContent = detail || `Agente: offline (${code})${storeAgentMetaSuffix()}`;
+      el.classList.add('gateway-meta--err');
+      if (hint) hint.textContent = 'Túnel ou agente sem resposta — tente “Verificar agente”';
+    } else {
+      el.textContent = 'Agente: —';
+    }
+    updateStoreStatusButtons();
+  }
+
+  function updateStoreStatusButtons() {
+    const verifyBtn = $('btnVerifyStoreAgent');
+    const devicesBtn = $('btnRefreshStoreDevices');
+    const batchProbing = Boolean(probeQueueRunner);
+    const canProbe = Boolean(config && storeAgentReady && !storeAgentChecking);
+    if (verifyBtn) {
+      verifyBtn.disabled = !config || storeAgentChecking;
+      verifyBtn.textContent = storeAgentChecking ? 'Verificando…' : 'Verificar agente';
+    }
+    if (devicesBtn) {
+      devicesBtn.disabled = !canProbe || batchProbing;
+      devicesBtn.textContent = batchProbing ? 'Verificando…' : 'Atualizar equipamentos';
+    }
+    document.querySelectorAll('[data-refresh-group]').forEach((btn) => {
+      const group = btn.dataset.refreshGroup;
+      const groupBusy = batchProbing && activeProbeGroups.has(group);
+      btn.disabled = !canProbe || groupBusy;
+      btn.textContent = groupBusy ? 'Verificando…' : 'Atualizar';
+    });
+  }
+
+  function deviceRefreshKey(deviceType, machine) {
+    const id = machine == null || machine === '' ? '_' : String(machine);
+    return `${deviceType}:${id}`;
+  }
+
+  function parseDeviceRefreshKey(raw) {
+    const text = String(raw || '');
+    const colon = text.indexOf(':');
+    if (colon < 1) return null;
+    const deviceType = text.slice(0, colon).toLowerCase();
+    const machineRaw = text.slice(colon + 1);
+    const machine = machineRaw === '_' ? null : machineRaw;
+    return { deviceType, machine };
+  }
+
+  function deviceEndpointPath(deviceType, machine) {
+    const build = STATUS_PATHS[deviceType];
+    return build ? build(machine) : '';
+  }
+
+  function deviceProbeKey(deviceType, machine) {
+    return machine ? `${deviceType}:${machine}` : deviceType;
+  }
+
+  function isDeviceProbing(deviceType, machine) {
+    return probingDevices.has(deviceProbeKey(deviceType, machine));
+  }
+
+  function canRefreshDevice(deviceType, machine) {
+    if (!config || !storeAgentReady || storeAgentChecking) return false;
+    if (isDeviceProbing(deviceType, machine)) return false;
+    return true;
+  }
+
+  function deviceCardRefreshOptions(deviceType, machine) {
+    return {
+      refreshKey: deviceRefreshKey(deviceType, machine),
+      canRefresh: canRefreshDevice(deviceType, machine),
+      probing: isDeviceProbing(deviceType, machine),
+      requireProbeOnline: true,
+      pendingLabel: 'Aguardando',
+    };
+  }
+
+  function resetPingStatus() {
+    if (!config?.devices) {
+      pingStatus = { washers: {}, dryers: {}, dosers: {}, ac: null };
+      return;
+    }
+    pingStatus = {
+      washers: Object.fromEntries((config.devices.washers || []).map((id) => [id, null])),
+      dryers: Object.fromEntries((config.devices.dryers || []).map((id) => [id, null])),
+      dosers: Object.fromEntries((config.devices.dosers || []).map((id) => [id, null])),
+      ac: config.devices.ac ? null : null,
+    };
+  }
+
+  function rebuildPingStatusFromConfig() {
+    const prev = pingStatus || {};
+    if (!config?.devices) {
+      resetPingStatus();
+      return;
+    }
+    pingStatus = {
+      washers: Object.fromEntries(
+        (config.devices.washers || []).map((id) => [id, prev.washers?.[id] ?? null])
+      ),
+      dryers: Object.fromEntries(
+        (config.devices.dryers || []).map((id) => [id, prev.dryers?.[id] ?? null])
+      ),
+      dosers: Object.fromEntries(
+        (config.devices.dosers || []).map((id) => [id, prev.dosers?.[id] ?? null])
+      ),
+      ac: prev.ac ?? null,
+    };
+  }
+
+  function pingStatusHasAnyResult() {
+    if (!pingStatus) return false;
+    const lists = [pingStatus.washers, pingStatus.dryers, pingStatus.dosers];
+    for (const map of lists) {
+      if (Object.values(map || {}).some((v) => v !== null)) return true;
+    }
+    return pingStatus.ac !== null;
+  }
+
+  function parseOnlineFlag(value) {
+    if (value === true || value === 1) return true;
+    if (value === false || value === 0) return false;
+    if (typeof value === 'string') {
+      const n = value.trim().toLowerCase();
+      if (n === 'true' || n === 'online' || n === '1') return true;
+      if (n === 'false' || n === 'offline' || n === '0') return false;
+    }
+    return null;
+  }
+
+  function extractOnlineFromProbeResult(result) {
+    const data = result.data || {};
+    const detail = String(data.detail || data.message || '').toLowerCase();
+    if (detail.includes('did not respond') || detail.includes('timeout')) {
+      return null;
+    }
+
+    const status = typeof data.status === 'string' ? data.status.trim().toLowerCase() : '';
+    if (status === 'online') return true;
+    if (status === 'offline') return false;
+
+    const fromOnline = parseOnlineFlag(data.online);
+    if (fromOnline !== null) return fromOnline;
+
+    const upstream = Number(data.upstream_status);
+    if (upstream === 200) return true;
+    if (upstream >= 400) return false;
+    if (result.ok) return true;
+    return null;
+  }
+
+  function isEspTimeoutResult(result) {
+    const data = result?.data || {};
+    const detail = String(data.detail || data.message || '').toLowerCase();
+    return detail.includes('did not respond') || detail.includes('timeout');
+  }
+
+  async function agentProbeRequest(method, path, body) {
+    try {
+      const data = await apiCall(method, path, body, { allowHttpError: true, validateOperation: false });
+      return { ok: data._httpOk !== false, status: data._httpStatus || 200, data };
+    } catch (e) {
+      return { ok: false, status: 0, data: { detail: e?.message || String(e) } };
+    }
+  }
+
+  function setDeviceOnlineState(deviceType, machine, online) {
+    if (!pingStatus) resetPingStatus();
+    if (online !== true && online !== false) return;
+    if (deviceType === 'ac') pingStatus.ac = online;
+    else pingStatus[`${deviceType}s`][machine] = online;
+  }
+
+  function networkValueToOnline(value) {
+    if (value === true || value === false) return value;
+    if (typeof value === 'number') return value !== 0;
+    if (typeof value === 'object' && value != null) {
+      if (typeof value.online === 'boolean') return value.online;
+      const status = typeof value.status === 'string' ? value.status.trim().toLowerCase() : '';
+      if (status === 'online') return true;
+      if (status === 'offline') return false;
+    }
+    return Boolean(value);
+  }
+
+  function lookupNetworkValue(block, id) {
+    if (!block || typeof block !== 'object') return undefined;
+    const norm = normalizeStoreId(id);
+    if (Object.prototype.hasOwnProperty.call(block, id)) return block[id];
+    if (Object.prototype.hasOwnProperty.call(block, norm)) return block[norm];
+    const match = Object.entries(block).find(([key]) => normalizeStoreId(key) === norm);
+    return match ? match[1] : undefined;
+  }
+
+  /** Espelha mapas washers/dryers/dosers/ac do heartbeat RTDB no pingStatus (mesma fonte do card das lojas). */
+  function seedPingStatusFromNetworkStatus(source) {
+    if (!source || typeof source !== 'object') return false;
+    const hasNetwork =
+      (source.washers && Object.keys(source.washers).length) ||
+      (source.dryers && Object.keys(source.dryers).length) ||
+      (source.dosers && Object.keys(source.dosers).length) ||
+      source.ac != null;
+    if (!hasNetwork) return false;
+
+    if (!pingStatus) {
+      if (config?.devices) rebuildPingStatusFromConfig();
+      else resetPingStatus();
+    }
+    if (!pingStatus) return false;
+
+    let seeded = false;
+    const applyBlock = (deviceType, block, catalogIds) => {
+      const key = `${deviceType}s`;
+      const targets = Array.isArray(catalogIds) && catalogIds.length ? catalogIds : Object.keys(block || {});
+      targets.forEach((rawId) => {
+        const id = String(rawId);
+        const value = lookupNetworkValue(block, id);
+        if (value === undefined) return;
+        if (!pingStatus[key]) pingStatus[key] = {};
+        pingStatus[key][id] = networkValueToOnline(value);
+        seeded = true;
+      });
+    };
+
+    if (config?.devices) {
+      applyBlock('washer', source.washers, config.devices.washers);
+      applyBlock('dryer', source.dryers, config.devices.dryers);
+      applyBlock('doser', source.dosers, config.devices.dosers);
+      if (config.devices.ac || source.ac != null) {
+        pingStatus.ac = networkValueToOnline(source.ac);
+        seeded = true;
+      }
+    } else {
+      applyBlock('washer', source.washers);
+      applyBlock('dryer', source.dryers);
+      applyBlock('doser', source.dosers);
+      if (source.ac != null) {
+        pingStatus.ac = networkValueToOnline(source.ac);
+        seeded = true;
+      }
+    }
+    return seeded;
+  }
+
+  function storeAgentMetaStateFromContext() {
+    if (storeAgentChecking) return 'checking';
+    if (isRtdbOnlyPanel(catalog)) {
+      if (storeHeartbeatAlive) return 'online';
+      if (storeAgentReady) return 'offline';
+      return 'waiting';
+    }
+    if (pingStatusHasAnyResult() || statusData?.summary?.total) return 'online';
+    if (storeAgentReady) return 'waiting';
+    return 'waiting';
+  }
+
+  function syncStoreHeartbeatAlive(entry, cat) {
+    if (!isRtdbOnlyPanel(cat)) return;
+    storeHeartbeatAlive = Boolean(entry && isHeartbeatEntryAlive(entry, cat));
+  }
+
+  function updateStoreAgentMetaFromContext(detail = '') {
+    updateStoreAgentMeta(storeAgentMetaStateFromContext(), detail);
+  }
+
+  function updateSummaryWidgets(summary, timestamp) {
+    const on = summary?.online ?? 0;
+    const tot = summary?.total ?? 0;
+    const pct = healthPercent(summary);
+    $('summaryOnline').textContent = on;
+    $('summaryTotal').textContent = `de ${tot} total`;
+    $('summaryHealth').textContent = `${pct}%`;
+    $('summaryHealthBar').style.width = `${pct}%`;
+    if (timestamp) {
+      $('summaryTime').textContent = formatTime(timestamp);
+    }
+  }
+
+  function updateSummaryFromPingStatus() {
+    if (!pingStatus || !config) return;
+    let on = 0;
+    let total = 0;
+    ['washers', 'dryers', 'dosers'].forEach((key) => {
+      Object.values(pingStatus[key] || {}).forEach((value) => {
+        total += 1;
+        if (value === true) on += 1;
+      });
+    });
+    if (config.devices?.ac || pingStatus.ac !== null) {
+      total += 1;
+      if (pingStatus.ac === true) on += 1;
+    }
+    const summary = { online: on, total, offline: total - on };
+    updateSummaryWidgets(summary, new Date().toISOString());
+    if (statusData) {
+      statusData.summary = summary;
+      statusData.timestamp = new Date().toISOString();
+    }
+    updateStoreHeader(statusData || { summary, timestamp: new Date().toISOString() });
+  }
+
+  function deviceOnline(deviceType, id) {
+    if (isDeviceProbing(deviceType, id)) return null;
+    if (deviceType === 'ac') return pingStatus?.ac ?? null;
+    return pingStatus?.[`${deviceType}s`]?.[id] ?? null;
+  }
+
   function markDeviceOffline(deviceType, id) {
-    if (!statusData || !id) return;
-    const mapKey = deviceType === 'washer' ? 'washers' : deviceType === 'dryer' ? 'dryers' : 'dosers';
-    const mid = String(id).trim().toLowerCase();
-    statusData[mapKey] = { ...(statusData[mapKey] || {}), [mid]: false };
-    if (uiReady) renderDevices();
+    if (!id) return;
+    setDeviceOnlineState(deviceType, id, false);
+    if (uiReady) {
+      updateSummaryFromPingStatus();
+      renderDevices();
+    }
   }
 
   function isDeviceUnreachableError(error) {
@@ -173,20 +557,38 @@
   function updateStoreHeader(status) {
     const name = storeMeta?.name || pageStore.toUpperCase();
     const code = pageStore.toUpperCase();
+    const codeLower = pageStore.toLowerCase();
     $('storeTitle').textContent = name;
     $('storeCode').textContent = code;
+    if ($('storeHeroTitle')) $('storeHeroTitle').textContent = name;
+    if ($('storeHeroTunnel')) $('storeHeroTunnel').textContent = `${codeLower}.powpay.com.br`;
+    const get02Link = $('storeGet02Link');
+    if (get02Link && pageStore) {
+      const sid = encodeURIComponent(pageStore);
+      if (document.getElementById('appView')) {
+        get02Link.href = `index.html?store=${sid}#/agent-get02`;
+        get02Link.dataset.route = 'agent-get02';
+      } else {
+        get02Link.href = `gateway.html?store=${sid}`;
+        delete get02Link.dataset.route;
+      }
+    }
     if ($('footerStore')) {
       $('footerStore').textContent = `LAV60 · ${name}`;
     }
-    document.title = `LAV60 — ${name}`;
+    document.title = `LAV60 — GET01 · ${name}`;
+    window.Lav60PortalLayout?.setPageTitle?.(`LAV60 — GET01 · ${name}`);
 
+    let subtitle = 'GET01 — Aguardando status do agente…';
     if (status) {
       const summary = status.summary || {};
       const tot = summary.total ?? 0;
       const when = formatTime(status.timestamp);
-      $('storeSubtitle').textContent = tot > 0 ? `Última leitura · ${when}` : `Atualizado · ${when}`;
-    } else {
-      $('storeSubtitle').textContent = 'Aguardando status do agente…';
+      subtitle = tot > 0 ? `GET01 · Última leitura · ${when}` : `GET01 · Atualizado · ${when}`;
+    }
+    $('storeSubtitle').textContent = subtitle;
+    if ($('storeHeroDesc')) {
+      $('storeHeroDesc').textContent = `Operação via túnel Cloudflare · ${subtitle.replace(/^GET01 ·?\s?/, '')}`;
     }
   }
 
@@ -206,6 +608,223 @@
     return agentRequest(storeMeta, catalog, agentToken, method, path, body, ep, options);
   }
 
+  async function probeDeviceOnline(deviceType, machine, options = {}) {
+    const { silent = false, generation = probeGeneration, ignoreGeneration = false } = options;
+    if (!config) return;
+    const path = deviceEndpointPath(deviceType, machine);
+    if (!path) return;
+
+    const key = deviceProbeKey(deviceType, machine);
+    const label = devicePingLabel(deviceType, machine);
+    probingDevices.add(key);
+    updateStoreStatusButtons();
+    renderDevices();
+
+    let resolved = null;
+
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (!ignoreGeneration && generation !== probeGeneration) return;
+
+        const result = await agentProbeRequest('GET', path);
+        if (!ignoreGeneration && generation !== probeGeneration) return;
+
+        const online = extractOnlineFromProbeResult(result);
+        if (online === true || online === false) {
+          resolved = online;
+          setDeviceOnlineState(deviceType, machine, online);
+          break;
+        }
+
+        if (attempt === 0 && isEspTimeoutResult(result)) {
+          await sleep(400);
+          continue;
+        }
+        break;
+      }
+
+      if (!silent && resolved === true) showToast(`${label} — online`);
+      else if (!silent && resolved === false) showToast(`${label} — offline`, false);
+    } catch (err) {
+      if (!ignoreGeneration && generation !== probeGeneration) return;
+      if (!silent) showToast(`${label}: ${friendlyUserMessage(err.message)}`, false);
+    } finally {
+      probingDevices.delete(key);
+      if (!ignoreGeneration && generation !== probeGeneration) return;
+      updateSummaryFromPingStatus();
+      renderDevices();
+      updateStoreStatusButtons();
+    }
+  }
+
+  function collectDeviceProbeJobs(deviceTypes = null) {
+    if (!config?.devices) return [];
+    const allowed = Array.isArray(deviceTypes) && deviceTypes.length
+      ? new Set(deviceTypes.map((t) => String(t || '').toLowerCase()))
+      : null;
+    const include = (type) => !allowed || allowed.has(type);
+    const jobs = [];
+    if (include('washer')) {
+      (config.devices.washers || []).forEach((id) => jobs.push({ deviceType: 'washer', machine: id }));
+    }
+    if (include('dryer')) {
+      (config.devices.dryers || []).forEach((id) => jobs.push({ deviceType: 'dryer', machine: id }));
+    }
+    if (include('doser')) {
+      (config.devices.dosers || []).forEach((id) => jobs.push({ deviceType: 'doser', machine: id }));
+    }
+    if (include('ac') && config.devices.ac) {
+      jobs.push({ deviceType: 'ac', machine: null });
+    }
+    return jobs;
+  }
+
+  async function runProbeQueue(generation, jobs) {
+    if (probeQueueRunner) {
+      await probeQueueRunner.catch(() => {});
+    }
+
+    const queue = Array.isArray(jobs) ? jobs : collectDeviceProbeJobs();
+    const groups = new Set(queue.map((job) => job.deviceType));
+    probeQueueRunner = (async () => {
+      const batchSize = 4;
+      for (let i = 0; i < queue.length; i += batchSize) {
+        if (generation !== probeGeneration) return;
+        const batch = queue.slice(i, i + batchSize);
+        await Promise.all(
+          batch.map(({ deviceType, machine }) =>
+            probeDeviceOnline(deviceType, machine, { silent: true, generation })
+          )
+        );
+      }
+    })();
+
+    try {
+      await probeQueueRunner;
+      if (generation === probeGeneration) {
+        updateSummaryFromPingStatus();
+        renderDevices();
+      }
+    } catch {
+      /* fila cancelada */
+    } finally {
+      groups.forEach((g) => activeProbeGroups.delete(g));
+      if (probeQueueRunner && generation === probeGeneration) {
+        probeQueueRunner = null;
+      }
+      if (generation === probeGeneration) {
+        updateStoreStatusButtons();
+      }
+    }
+  }
+
+  async function startBackgroundDeviceProbes({ force = false, deviceTypes = null } = {}) {
+    if (!config) return Promise.resolve();
+    const jobs = collectDeviceProbeJobs(deviceTypes);
+    if (!jobs.length) return Promise.resolve();
+
+    probeGeneration += 1;
+    const generation = probeGeneration;
+    const scoped = Array.isArray(deviceTypes) && deviceTypes.length > 0;
+    if (!scoped) probingDevices.clear();
+    jobs.forEach((job) => activeProbeGroups.add(job.deviceType));
+    rebuildPingStatusFromConfig();
+    renderDevices();
+    updateStoreStatusButtons();
+    return runProbeQueue(generation, jobs);
+  }
+
+  async function refreshStoreDevice(deviceType, machine) {
+    const dtype = String(deviceType || '').toLowerCase();
+    if (!dtype) return;
+    if (!canRefreshDevice(dtype, machine)) return;
+    await probeDeviceOnline(dtype, machine, { silent: false, ignoreGeneration: true });
+  }
+
+  async function refreshStoreDevices() {
+    if (!config || storeAgentChecking) return;
+    try {
+      await startBackgroundDeviceProbes({ force: true });
+      if (!probeQueueRunner && probingDevices.size === 0) {
+        showToast('Status dos equipamentos atualizado');
+      }
+    } catch {
+      showToast('Falha ao verificar equipamentos', false);
+    }
+  }
+
+  async function refreshStoreDeviceGroup(deviceType) {
+    const dtype = String(deviceType || '').toLowerCase();
+    if (!GROUP_REFRESH_LABELS[dtype]) return;
+    if (!config || storeAgentChecking) return;
+    if (probingDevices.size > 0 || probeQueueRunner) return;
+    try {
+      await startBackgroundDeviceProbes({ force: true, deviceTypes: [dtype] });
+      if (!probeQueueRunner && probingDevices.size === 0) {
+        showToast(`Status · ${GROUP_REFRESH_LABELS[dtype]} atualizado`);
+      }
+    } catch {
+      showToast(`Falha ao verificar ${GROUP_REFRESH_LABELS[dtype].toLowerCase()}`, false);
+    }
+  }
+
+  async function verifyStoreAgent() {
+    if (storeAgentChecking || !config) return false;
+    storeAgentChecking = true;
+    updateStoreAgentMeta('checking');
+    try {
+      let ok = false;
+      const ping = await agentProbeRequest('GET', 'ping-status');
+      if (ping.ok) {
+        const online = extractOnlineFromProbeResult(ping);
+        ok = online !== false;
+      }
+      if (!ok) {
+        const net = await agentProbeRequest('GET', '/api/network-status');
+        ok = net.ok;
+      }
+      storeAgentCheckedAt = Date.now();
+      storeAgentReady = true;
+      storeAgentError = ok ? null : 'Agente sem resposta';
+      updateStoreAgentMeta(ok ? 'online' : 'offline', storeAgentError || '');
+      showToast(ok ? 'Agente online' : 'Agente offline ou sem resposta', ok);
+      return ok;
+    } catch (e) {
+      storeAgentError = friendlyUserMessage(e.message);
+      updateStoreAgentMeta('offline', storeAgentError);
+      showToast(storeAgentError, false);
+      return false;
+    } finally {
+      storeAgentChecking = false;
+      updateStoreStatusButtons();
+    }
+  }
+
+  function bindStoreStatusBarEvents() {
+    if (storeStatusBarReady) return;
+    storeStatusBarReady = true;
+    $('btnVerifyStoreAgent')?.addEventListener('click', () => {
+      void verifyStoreAgent();
+    });
+    $('btnRefreshStoreDevices')?.addEventListener('click', () => {
+      void refreshStoreDevices();
+    });
+    $('devicesPanel')?.addEventListener('click', (e) => {
+      const deviceBtn = e.target.closest('[data-refresh-device]');
+      if (deviceBtn && !deviceBtn.disabled) {
+        const parsed = parseDeviceRefreshKey(deviceBtn.dataset.refreshDevice);
+        if (parsed) {
+          e.preventDefault();
+          void refreshStoreDevice(parsed.deviceType, parsed.machine);
+        }
+        return;
+      }
+      const btn = e.target.closest('[data-refresh-group]');
+      if (!btn || btn.disabled) return;
+      void refreshStoreDeviceGroup(btn.dataset.refreshGroup);
+    });
+  }
+
   function applyStatus(data, options = {}) {
     const acId = catalog?.ac_id || '110';
     let payload = data ? { ...data } : data;
@@ -213,30 +832,44 @@
       const merged = mergeMachinesCatalog(config?.machines, payload.machines);
       if (merged.length) payload.machines = merged;
     }
+    const networkSource = data && typeof data === 'object' ? data : null;
+    if (payload) {
+      delete payload.washers;
+      delete payload.dryers;
+      delete payload.dosers;
+      delete payload.ac;
+    }
     statusData = payload ? applyFrontendDeviceVisibility(payload, acId) : payload;
     if (config) {
       if (statusData?.machines?.length) {
         config.machines = statusData.machines;
       }
       syncConfigDevices(config, statusData);
-    } else if (statusData?.summary?.total || statusData?.washers || statusData?.machines?.length) {
+      rebuildPingStatusFromConfig();
+    } else if (statusData?.summary?.total || statusData?.machines?.length) {
       config = configFromStatus(statusData);
+      rebuildPingStatusFromConfig();
     }
-    const summary = statusData.summary || {};
-    const on = summary.online ?? 0;
-    const tot = summary.total ?? 0;
-    const pct = healthPercent(summary);
 
-    $('summaryOnline').textContent = on;
-    $('summaryTotal').textContent = `de ${tot} total`;
-    $('summaryHealth').textContent = `${pct}%`;
-    $('summaryHealthBar').style.width = `${pct}%`;
-    $('summaryTime').textContent = formatTime(statusData.timestamp);
+    if (networkSource && networkPayloadHasDevices(networkSource)) {
+      if (seedPingStatusFromNetworkStatus(networkSource)) {
+        lastNetworkStatusSource = networkSource;
+      }
+    }
 
-    updateStoreHeader(statusData);
+    if (pingStatusHasAnyResult()) {
+      updateSummaryFromPingStatus();
+    } else if (statusData?.summary) {
+      updateSummaryWidgets(statusData.summary, statusData.timestamp);
+      updateStoreHeader(statusData);
+    } else {
+      updateStoreHeader(statusData);
+    }
+
     if (options.render !== false && uiReady) {
       renderDevices();
     }
+    updateStoreStatusButtons();
   }
 
   function applyCachedBootstrap(entry, options = {}) {
@@ -283,6 +916,8 @@
       if (statusData) statusData.machines = merged;
     }
     syncConfigDevices(config, statusData || config.last_network_check);
+    rebuildPingStatusFromConfig();
+    if (lastNetworkStatusSource) seedPingStatusFromNetworkStatus(lastNetworkStatusSource);
     agentEndpoint = resolveAgentEndpoint(storeMeta, catalog, config);
   }
 
@@ -306,10 +941,6 @@
         device_id: audit?.device_id || null,
         meta: audit?.meta || null,
       });
-      const readOnly = audit?.method === 'GET' || audit?.action === 'doser_consult';
-      if (!readOnly) {
-        await refreshStatus({ force: true });
-      }
     } catch (e) {
       await logStoreAudit({
         action: audit?.action || 'operation',
@@ -507,7 +1138,7 @@
     const unlockBtn = card.querySelector('.device-card__unlock');
     const releaseBtn = card.querySelector('button[data-dryer-release]');
     const choiceButtons = card.querySelectorAll('.device-card__choice');
-    const operable = canOperateMachine(meta, online);
+    const operable = online === true && canOperateMachine(meta, true);
 
     if (remaining) {
       card.classList.add('device-card--busy');
@@ -524,7 +1155,11 @@
 
     card.classList.remove('device-card--busy');
     if (statusEl) {
-      statusEl.textContent = operable ? '' : deviceUnifiedStatus(online, meta).label;
+      statusEl.textContent = operable
+        ? ''
+        : online === null
+          ? 'Aguardando'
+          : deviceUnifiedStatus(online, meta).label;
     }
     if (releaseBtn) {
       const hasChoice = Array.from(choiceButtons).some((b) =>
@@ -539,14 +1174,9 @@
     return false;
   }
 
-  function deviceNetworkOnline(deviceType, id, meta) {
-    const mapKey = deviceType === 'washer' ? 'washers' : deviceType === 'dryer' ? 'dryers' : 'dosers';
-    return resolveDeviceOnline(statusData?.[mapKey], id, meta);
-  }
-
   function applyDryerLockUI(card, dryerId) {
     const meta = getMachineMeta(dryerId, 'dryer', getMachinesCatalog());
-    const online = deviceNetworkOnline('dryer', dryerId, meta);
+    const online = deviceOnline('dryer', dryerId);
     return syncDryerCardControls(card, meta, online);
   }
 
@@ -557,7 +1187,7 @@
     const unlockBtn = card.querySelector('.device-card__unlock');
     const releaseBtn = card.querySelector('button[data-washer-release]');
     const choiceButtons = card.querySelectorAll('.device-card__choice');
-    const operable = canOperateMachine(meta, online);
+    const operable = online === true && canOperateMachine(meta, true);
 
     if (remaining) {
       card.classList.add('device-card--busy');
@@ -574,7 +1204,11 @@
 
     card.classList.remove('device-card--busy');
     if (statusEl) {
-      statusEl.textContent = operable ? '' : deviceUnifiedStatus(online, meta).label;
+      statusEl.textContent = operable
+        ? ''
+        : online === null
+          ? 'Aguardando'
+          : deviceUnifiedStatus(online, meta).label;
     }
     if (releaseBtn) {
       const hasChoice = Array.from(choiceButtons).some((b) =>
@@ -591,7 +1225,7 @@
 
   function applyWasherLockUI(card, washerId) {
     const meta = getMachineMeta(washerId, 'washer', getMachinesCatalog());
-    const online = deviceNetworkOnline('washer', washerId, meta);
+    const online = deviceOnline('washer', washerId);
     return syncWasherCardControls(card, meta, online);
   }
 
@@ -652,7 +1286,6 @@
         device_type: 'dryer',
         device_id: String(id),
       });
-      await refreshStatus({ force: true });
     } catch (e) {
       await logStoreAudit({
         action: 'dryer_release',
@@ -672,7 +1305,6 @@
         ],
       });
       if (isDeviceUnreachableError(e)) markDeviceOffline('dryer', id);
-      void refreshStatus({ force: true });
     }
   }
 
@@ -704,7 +1336,6 @@
         device_type: 'washer',
         device_id: String(id),
       });
-      await refreshStatus({ force: true });
     } catch (e) {
       await logStoreAudit({
         action: 'washer_release',
@@ -721,7 +1352,6 @@
         rows: [['Equipamento', `Lavadora ${id}`]],
       });
       if (isDeviceUnreachableError(e)) markDeviceOffline('washer', id);
-      void refreshStatus({ force: true });
     }
   }
 
@@ -762,10 +1392,10 @@
     const grid = $('washersGrid');
     grid.innerHTML = '';
     if (!config) return;
-    setSectionCount('washersCount', statusData?.washers);
+    setSectionCount('washersCount', pingStatus?.washers);
     visibleDeviceIds('washer', config.devices.washers).forEach((id) => {
       const meta = getMachineMeta(id, 'washer', getMachinesCatalog());
-      const online = deviceNetworkOnline('washer', id, meta);
+      const online = deviceOnline('washer', id);
       const card = createDeviceCard(
         id,
         online,
@@ -801,11 +1431,12 @@
           const hint = deviceStatusHint(ctx);
           if (hint) statusEl.textContent = hint;
         },
-        meta
+        meta,
+        deviceCardRefreshOptions('washer', id)
       );
       card.dataset.washerId = id;
       grid.appendChild(card);
-      if (online) {
+      if (online !== null) {
         syncWasherCardControls(card, meta, online);
       }
     });
@@ -815,10 +1446,10 @@
     const grid = $('dryersGrid');
     grid.innerHTML = '';
     if (!config) return;
-    setSectionCount('dryersCount', statusData?.dryers);
+    setSectionCount('dryersCount', pingStatus?.dryers);
     visibleDeviceIds('dryer', config.devices.dryers).forEach((id) => {
       const meta = getMachineMeta(id, 'dryer', getMachinesCatalog());
-      const online = deviceNetworkOnline('dryer', id, meta);
+      const online = deviceOnline('dryer', id);
       const card = createDeviceCard(
         id,
         online,
@@ -857,11 +1488,12 @@
           const hint = deviceStatusHint(ctx);
           if (hint) statusEl.textContent = hint;
         },
-        meta
+        meta,
+        deviceCardRefreshOptions('dryer', id)
       );
       card.dataset.dryerId = id;
       grid.appendChild(card);
-      if (online) {
+      if (online !== null) {
         syncDryerCardControls(card, meta, online);
       }
     });
@@ -871,16 +1503,17 @@
     const grid = $('dosersGrid');
     grid.innerHTML = '';
     if (!config) return;
-    setSectionCount('dosersCount', statusData?.dosers);
+    setSectionCount('dosersCount', pingStatus?.dosers);
     visibleDeviceIds('doser', config.devices.dosers).forEach((id) => {
       const catalog = getMachinesCatalog();
       const meta = enrichDoserMeta(getMachineMeta(id, 'doser', catalog), id, catalog);
-      const online = deviceNetworkOnline('doser', id, meta);
+      const online = deviceOnline('doser', id);
       const card = createDeviceCard(
         id,
         online,
         (actions, _card, ctx) => buildDoserCardContent(actions, id, ctx, runAction, doserCardApi),
-        meta
+        meta,
+        deviceCardRefreshOptions('doser', id)
       );
       card.classList.add('device-card--doser');
       grid.appendChild(card);
@@ -891,11 +1524,18 @@
     const panel = $('acPanel');
     panel.innerHTML = '';
     if (!config) return;
-    const online = Boolean(statusData?.ac);
-    $('acCount').textContent = online ? '1/1 online' : '0/1 online';
+    const online = deviceOnline('ac', null);
+    if (pingStatus?.ac === null) {
+      $('acCount').textContent = '—';
+    } else {
+      $('acCount').textContent = online ? '1/1 online' : '0/1 online';
+    }
 
     panel.appendChild(
-      createDeviceCard('AC', online, (actions, _card, ctx) => {
+      createDeviceCard(
+        'AC',
+        online,
+        (actions, _card, ctx) => {
         actions.classList.add('device-card__actions--ac');
         const tempOptions = (config.ac_temperatures || ['18', '22', 'off']).map((temp) => ({
           value: temp,
@@ -932,7 +1572,10 @@
           },
         });
         syncReleaseButtonWithPicker(releaseBtn, picker, ctx.operable);
-      })
+      },
+        null,
+        deviceCardRefreshOptions('ac', null)
+      )
     );
   }
 
@@ -950,7 +1593,7 @@
   }
 
   function initAuthUi() {
-    if (!window.Lav60Auth) return;
+    if (!window.Lav60Auth || !$('headerUserMenu')) return;
     Lav60Auth.authEnabled().then(async (enabled) => {
       if (!enabled) return;
       await Lav60Auth.mountUserMenu($('headerUserMenu'));
@@ -959,6 +1602,7 @@
 
   function initEvents() {
     bindConfirmEvents();
+    bindStoreStatusBarEvents();
   }
 
   function startLiveStatusWatch() {
@@ -966,12 +1610,25 @@
     stopHeartbeatWatch = watchStoreHeartbeat(
       pageStore,
       catalog,
-      (status, hbMeta) => {
-        applyStatus(status);
-        updateStoreSuspendedBanner(storeMeta, hbMeta);
-        lav60Debug('store', 'status SSE (espelho do card)', status.summary);
+      (nextStatus, hbMeta) => {
+        if (hbMeta && (hbMeta.entry || hbMeta.alive != null || hbMeta.payload)) {
+          syncStoreHeartbeatAlive(
+            hbMeta.entry || {
+              payload: hbMeta.payload,
+              received_at: hbMeta.receivedAt,
+              alive: hbMeta.alive,
+            },
+            catalog
+          );
+          updateStoreAgentMetaFromContext();
+        }
+        updateStoreSuspendedBanner(storeMeta, hbMeta?.payload || hbMeta);
+        if (nextStatus?.summary?.total) {
+          applyStatus(nextStatus, { render: uiReady });
+        }
+        lav60Debug('store', 'heartbeat SSE', nextStatus?.summary);
       },
-      { skipInitialBootstrap: true, skipInitialPoll: true }
+      { skipInitialBootstrap: true, skipInitialPoll: false }
     );
   }
 
@@ -988,7 +1645,7 @@
 
   function startAgentStatusPolling() {
     if (agentStatusPollTimer) return;
-    const intervalMs = Math.max(15000, getPollIntervalMs(catalog) || 30000);
+    const intervalMs = getPollIntervalMs(catalog);
     agentStatusPollTimer = setInterval(() => {
       void refreshStatus({ force: false });
     }, intervalMs);
@@ -1000,13 +1657,29 @@
     agentStatusPollTimer = null;
   }
 
+  function renderStoreUiFromContext() {
+    if (pingStatusHasAnyResult()) {
+      updateSummaryFromPingStatus();
+    } else if (statusData?.summary) {
+      updateSummaryWidgets(statusData.summary, statusData.timestamp);
+      updateStoreHeader(statusData);
+    } else {
+      updateStoreHeader(statusData);
+    }
+    renderDevices();
+    updateStoreStatusButtons();
+  }
+
   function applyStatusCacheBootstrap(doc, options = {}) {
     if (!doc?.hit) return false;
     let applied = false;
-    const status = statusFromStatusCacheDoc(storeMeta, doc, pageStore);
-    if (status?.summary?.total) {
-      applyStatus(status, options);
-      applied = true;
+    const skipNetwork = options.skipNetwork === true;
+    if (!skipNetwork) {
+      const status = statusFromStatusCacheDoc(storeMeta, doc, pageStore);
+      if (status?.summary?.total) {
+        applyStatus(status, options);
+        applied = true;
+      }
     }
     if (doc.config_fresh && doc.config_snapshot) {
       const snapConfig = configFromStatusCacheDoc(doc.config_snapshot);
@@ -1038,32 +1711,56 @@
     }
 
     uiReady = true;
-    if (statusData) {
-      applyStatus(statusData);
-    } else {
-      renderDevices();
-    }
+    storeAgentReady = true;
+    rebuildPingStatusFromConfig();
+    if (lastNetworkStatusSource) seedPingStatusFromNetworkStatus(lastNetworkStatusSource);
+    updateStoreAgentMetaFromContext();
+    renderStoreUiFromContext();
 
     lav60Debug('store', 'ready — staying on store page');
 
-    if (config?.token_required && !agentToken?.trim()) {
+    if (
+      config?.token_required &&
+      !agentToken?.trim() &&
+      !(shouldUsePanelAgentProxy(pageStore) && isAgentTokenConfiguredOnServer())
+    ) {
       showToast('Autenticação do agente indisponível. Contacte o suporte.', false);
     }
 
     if (heartbeatAlive) {
       startLiveStatusWatch();
-    } else if (agentReachable) {
-      void refreshStatus({ force: true });
-      startAgentStatusPolling();
     }
     return true;
   }
 
   async function init() {
+    pageStore = pageStoreFromUrl();
     lav60Debug('store', 'init', { pageStore, href: window.location.href });
     if (!pageStore) {
-      window.location.href = 'index.html#/lojas';
+      window.location.href = document.getElementById('appView')
+        ? 'index.html#/lojas'
+        : 'index.html#/lojas';
       return;
+    }
+
+    if (isAgentsDisabled(null)) {
+      window.location.replace(
+        document.getElementById('appView') ? 'index.html#/agent-get01' : 'index.html#/agent-get01'
+      );
+      return;
+    }
+
+    if (!document.getElementById('appView')) {
+      window.Lav60AgentNav?.render?.('get01');
+    }
+    const get02Link = $('storeGet02Link');
+    if (get02Link && pageStore) {
+      const sid = encodeURIComponent(pageStore);
+      if (document.getElementById('appView')) {
+        get02Link.href = `index.html?store=${sid}#/agent-get02`;
+      } else {
+        get02Link.href = `gateway.html?store=${sid}`;
+      }
     }
 
     initEvents();
@@ -1078,7 +1775,7 @@
       agentToken = await ensureDefaultAgentToken();
 
       const [hbSnap, statusCache, cached] = await Promise.all([
-        fetchHeartbeatsSnapshot().catch((e) => {
+        fetchHeartbeatsSnapshot({ force: true, lite: false }).catch((e) => {
           lav60Debug('store', 'heartbeat unavailable', e?.message || e);
           return null;
         }),
@@ -1088,13 +1785,15 @@
 
       let heartbeatEntry = null;
       let heartbeatAlive = false;
+      let heartbeatBootstrapped = false;
       if (hbSnap?.heartbeats) {
         heartbeatEntry = hbSnap.heartbeats[pageStore];
         heartbeatAlive = isHeartbeatEntryAlive(heartbeatEntry, catalog);
+        syncStoreHeartbeatAlive(heartbeatEntry, catalog);
         lav60Debug('store', 'heartbeat', {
           entry: heartbeatEntry,
           alive: heartbeatAlive,
-          timeout: catalog.heartbeat_timeout_seconds || 90,
+          timeout: catalog.heartbeat_timeout_seconds || 120,
         });
         if (heartbeatEntry) {
           const status = statusFromHeartbeatPayload(
@@ -1105,13 +1804,32 @@
           if (status?.summary?.total) {
             if (!config) config = configFromStatus(status);
             applyStatus(status, { render: false });
+            heartbeatBootstrapped = true;
             updateStoreSuspendedBanner(storeMeta, heartbeatEntry);
             lav60Debug('store', 'status from heartbeat', status.summary);
+          }
+          if (
+            typeof probePowpayHealth === 'function' &&
+            isPowpayHealthPanel(catalog) &&
+            !isRtdbOnlyPanel(catalog)
+          ) {
+            const health = await probePowpayHealth(pageStore);
+            lav60Debug('store', 'powpay health', health);
+            if (health.definite_offline || (health.ok === false && !health.transient)) {
+              heartbeatAlive = false;
+            } else if (health.ok) {
+              heartbeatAlive = true;
+            }
           }
         }
       }
 
-      if (applyStatusCacheBootstrap(statusCache, { render: false })) {
+      if (
+        applyStatusCacheBootstrap(statusCache, {
+          render: false,
+          skipNetwork: heartbeatBootstrapped && isRtdbOnlyPanel(catalog),
+        })
+      ) {
         $('summaryTime').title = statusCache?.config_fresh
           ? 'Cache Firebase · atualizando agente em segundo plano'
           : 'Cache Firebase';
@@ -1162,9 +1880,12 @@
           .then(() => {
             agentReachable = true;
             lav60Debug('store', 'background loadConfig ok');
+            storeAgentReady = true;
+            rebuildPingStatusFromConfig();
+            if (lastNetworkStatusSource) seedPingStatusFromNetworkStatus(lastNetworkStatusSource);
+            updateStoreAgentMetaFromContext();
             if (uiReady) {
-              if (statusData) applyStatus(statusData);
-              else renderDevices();
+              renderStoreUiFromContext();
             }
           })
           .catch((e) => {
@@ -1203,19 +1924,47 @@
     }
   }
 
-  window.addEventListener('beforeunload', () => {
-    if (stopHeartbeatWatch) stopHeartbeatWatch();
+  function destroy() {
+    if (stopHeartbeatWatch) {
+      stopHeartbeatWatch();
+      stopHeartbeatWatch = null;
+    }
     stopAgentStatusPolling();
+    if (deviceLockTimer) {
+      clearInterval(deviceLockTimer);
+      deviceLockTimer = null;
+    }
+    storeStatusBarReady = false;
+    uiReady = false;
+    storeAgentReady = false;
+  }
+
+  window.addEventListener('beforeunload', () => {
+    destroy();
   });
 
-  (async () => {
-    if (window.Lav60Auth) {
-      const ok = await Lav60Auth.guardPage();
-      if (!ok) return;
-    }
-    if (window.Lav60Audit) {
-      await Lav60Audit.refreshStatus();
-    }
-    await init();
-  })();
+  if (document.getElementById('appView')) {
+    window.Lav60AgentStorePage = {
+      init: async () => {
+        if (window.Lav60Audit) {
+          await Lav60Audit.refreshStatus();
+        }
+        await init();
+      },
+      destroy,
+    };
+  } else {
+    (async () => {
+      if (window.Lav60Auth) {
+        const ok = await Lav60Auth.guardPage({
+          returnPath: `store.html?store=${encodeURIComponent(pageStore || '')}`,
+        });
+        if (!ok) return;
+      }
+      if (window.Lav60Audit) {
+        await Lav60Audit.refreshStatus();
+      }
+      await init();
+    })();
+  }
 })();

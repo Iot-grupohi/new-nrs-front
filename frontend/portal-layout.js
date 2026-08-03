@@ -14,6 +14,9 @@
     'infra-vps': 'LAV60 · Infraestrutura · VPS',
     'infra-database': 'LAV60 · Infraestrutura · Database',
     'monitor-sites': 'LAV60 · Monitoramento de sites',
+    'agent-get01': 'LAV60 · Agente GET01 · Cloudflare',
+    'agent-get02': 'LAV60 · Agente GET02 · MQTT',
+    store: 'LAV60 · Operação GET01 · Loja',
   };
 
   function closeMobileNav() {

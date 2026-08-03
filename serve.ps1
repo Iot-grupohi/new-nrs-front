@@ -46,6 +46,17 @@ $frontendPort = [int]$frontendPortRaw
 
 if (Test-PortListening -Port $backendPort) {
     Write-Host "Backend ja esta rodando na porta $backendPort." -ForegroundColor Yellow
+    try {
+        $catalog = Invoke-RestMethod -Uri "http://127.0.0.1:$backendPort/api/catalog?force=1" -TimeoutSec 8
+        if ($null -eq $catalog.suspended_count) {
+            Write-Host "AVISO: backend desatualizado (sem lojas suspensas no catalogo)." -ForegroundColor Red
+            Write-Host "       Feche a janela 'LAV60 Backend' e rode .\serve.ps1 de novo." -ForegroundColor Red
+        } else {
+            Write-Host "Catalogo OK: $($catalog.suspended_count) loja(s) suspensa(s)." -ForegroundColor DarkGray
+        }
+    } catch {
+        Write-Host "Nao foi possivel validar /api/catalog no backend em execucao." -ForegroundColor DarkGray
+    }
 } else {
     Write-Host "LAV60 - iniciando backend..." -ForegroundColor Cyan
     $backend = Start-ServerWindow -Title "LAV60 Backend :$backendPort" -Command "python backend\main.py"

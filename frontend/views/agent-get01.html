@@ -1,0 +1,132 @@
+<main class="main-content agent-page">
+  <section class="gateway-alert hidden" id="get01DisabledAlert" role="alert">
+    <div>
+      <strong>GET01 indisponível neste painel</strong>
+      <p>O agente local via Cloudflare está desativado. Use o <a href="index.html#/agent-get02" data-route="agent-get02">GET02 — MQTT</a> ou contacte o suporte.</p>
+    </div>
+  </section>
+
+  <div class="agent-page__hub" id="agentPageHub">
+    <header class="agent-page__hero">
+      <div class="agent-page__hero-main">
+        <p class="agent-page__eyebrow">Canal principal</p>
+        <h2 class="agent-page__headline">Console GET01 — Cloudflare</h2>
+        <p class="agent-page__desc">
+          Operação direta com o agente Python na loja via túnel
+          <code>{loja}.powpay.com.br</code>. Selecione uma loja online para abrir o painel de equipamentos.
+        </p>
+      </div>
+      <div class="agent-page__hero-aside">
+        <div class="agent-page__channel-badge">
+          <span class="agent-page__channel-icon" aria-hidden="true">
+            <svg class="icon"><use href="#i-cloud"></use></svg>
+          </span>
+          <div>
+            <strong>Cloudflare</strong>
+            <span>Túnel Powpay</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="agent-page__layout">
+      <div class="agent-page__primary">
+        <section class="agent-kpi-panel card" id="get01Overview">
+          <header class="agent-kpi-panel__head">
+            <div>
+              <h2 class="agent-kpi-panel__title">Status da rede</h2>
+              <p class="agent-kpi-panel__meta" id="get01OverviewMeta">Clique no card para ver o relatório completo</p>
+            </div>
+            <button type="button" class="btn btn--sm btn--ghost agent-kpi-panel__refresh" id="btnRefreshGet01">
+              <svg class="icon" aria-hidden="true"><use href="#i-refresh"></use></svg>
+              Atualizar
+            </button>
+          </header>
+          <div class="agent-kpi-panel__grid" id="get01Kpis">
+            <article class="stat-card stat-card--success stat-card--clickable" data-kpi="get01-online" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+              <span class="stat-card__label">Online</span>
+              <strong class="stat-card__value" id="kpiGet01Online">—</strong>
+              <span class="stat-card__hint">Ver relatório <svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg></span>
+            </article>
+            <article class="stat-card stat-card--danger stat-card--clickable" data-kpi="get01-offline" tabindex="0" role="button" aria-expanded="false" aria-controls="agentKpiModal">
+              <span class="stat-card__label">Offline</span>
+              <strong class="stat-card__value" id="kpiGet01Offline">—</strong>
+              <span class="stat-card__hint">Ver relatório <svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg></span>
+            </article>
+          </div>
+          <div class="agent-kpi-share">
+            <div class="agent-kpi-share__head">
+              <span class="agent-kpi-share__label">Disponibilidade da rede</span>
+              <strong class="agent-kpi-share__value" id="get01SharePct">—</strong>
+            </div>
+            <div class="agent-kpi-share__track" role="progressbar" aria-labelledby="get01SharePct" aria-valuemin="0" aria-valuemax="100" id="get01ShareTrack">
+              <div class="agent-kpi-share__fill" id="get01ShareFill"></div>
+            </div>
+            <p class="agent-kpi-share__meta" id="get01ShareMeta">Carregando…</p>
+          </div>
+        </section>
+
+        <section class="agent-hub card" id="get01StoreHub">
+          <header class="agent-hub__head">
+            <div class="agent-hub__head-row">
+              <div>
+                <h2 class="agent-hub__title">Lojas online</h2>
+                <p class="agent-hub__meta" id="get01StoreHubMeta">Carregando…</p>
+              </div>
+              <span class="agent-hub__count agent-hub__count--online" id="get01StoreHubCount" aria-hidden="true">—</span>
+            </div>
+          </header>
+          <div class="agent-hub__toolbar">
+            <label class="search-field agent-hub__search" for="get01StoreSearch">
+              <span class="search-field__icon" aria-hidden="true">
+                <svg class="icon"><use href="#i-search"></use></svg>
+              </span>
+              <span class="visually-hidden">Buscar loja</span>
+              <input type="search" id="get01StoreSearch" placeholder="Buscar por código ou nome…" autocomplete="off" enterkeyhint="search">
+            </label>
+          </div>
+          <div class="agent-hub__stores" id="get01StoreList"></div>
+        </section>
+      </div>
+
+      <aside class="agent-page__aside">
+        <section class="agent-about card" id="get01AboutHub">
+          <h2 class="agent-about__title">Sobre o GET01</h2>
+          <ul class="agent-about__features">
+            <li class="agent-about__feature">
+              <span class="agent-about__feature-icon" aria-hidden="true">
+                <svg class="icon"><use href="#i-bolt"></use></svg>
+              </span>
+              <div>
+                <strong>Canal principal</strong>
+                <p>Comunicação direta com o agente local quando o túnel responde.</p>
+              </div>
+            </li>
+            <li class="agent-about__feature">
+              <span class="agent-about__feature-icon" aria-hidden="true">
+                <svg class="icon"><use href="#i-link"></use></svg>
+              </span>
+              <div>
+                <strong>Túnel Cloudflare</strong>
+                <p>Requer agente instalado e <code>*.powpay.com.br</code> online.</p>
+              </div>
+            </li>
+            <li class="agent-about__feature">
+              <span class="agent-about__feature-icon" aria-hidden="true">
+                <svg class="icon"><use href="#i-swap"></use></svg>
+              </span>
+              <div>
+                <strong>Redundância</strong>
+                <p>Se o GET01 falhar, use o <a href="index.html#/agent-get02" data-route="agent-get02">GET02 — MQTT</a>.</p>
+              </div>
+            </li>
+          </ul>
+          <a class="agent-about__link" href="index.html#/lojas" data-route="lojas">
+            Ver todas as lojas no painel
+            <svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg>
+          </a>
+        </section>
+      </aside>
+    </div>
+  </div>
+</main>

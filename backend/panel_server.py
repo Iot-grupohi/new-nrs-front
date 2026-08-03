@@ -14,9 +14,11 @@ from urllib.parse import urlencode
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
-BACKEND = Path(__file__).resolve().parent
-ROOT = BACKEND.parent
-FRONTEND = ROOT / "frontend"
+from panel.lav60_env import FRONTEND_DIR
+from panel.runtime_paths import backend_dir
+
+if str(backend_dir()) not in sys.path:
+    sys.path.insert(0, str(backend_dir()))
 
 _HTML_NO_CACHE = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -25,9 +27,6 @@ _HTML_NO_CACHE = {
 }
 
 LOGIN_HTML_VERSION = "3"
-
-if str(BACKEND) not in sys.path:
-    sys.path.insert(0, str(BACKEND))
 
 from server.app import app  # noqa: E402
 
@@ -53,9 +52,9 @@ def _frontend_file(rel: str) -> Path | None:
         return None
     if ".." in rel.split("/"):
         return None
-    target = (FRONTEND / rel).resolve()
+    target = (FRONTEND_DIR / rel).resolve()
     try:
-        target.relative_to(FRONTEND.resolve())
+        target.relative_to(FRONTEND_DIR.resolve())
     except ValueError:
         return None
     return target if target.is_file() else None
@@ -65,7 +64,7 @@ def _frontend_file(rel: str) -> Path | None:
 async def serve_icon_png(name: str) -> FileResponse:
     if not name or "/" in name or "\\" in name:
         raise HTTPException(status_code=404)
-    svg = FRONTEND / "fac" / "img" / "Icons" / f"{name}.svg"
+    svg = FRONTEND_DIR / "fac" / "img" / "Icons" / f"{name}.svg"
     if svg.is_file():
         return FileResponse(svg, media_type="image/svg+xml")
     raise HTTPException(status_code=404)
@@ -78,7 +77,7 @@ def _file_response(path: Path) -> FileResponse:
 
 @app.get("/")
 async def serve_index() -> FileResponse:
-    return _file_response(FRONTEND / "index.html")
+    return _file_response(FRONTEND_DIR / "index.html")
 
 
 @app.get("/login.html", response_model=None)
@@ -91,7 +90,7 @@ async def serve_login_html(request: Request) -> Response:
             status_code=302,
             headers=_HTML_NO_CACHE,
         )
-    return _file_response(FRONTEND / "login.html")
+    return _file_response(FRONTEND_DIR / "login.html")
 
 
 @app.get("/{path:path}")
@@ -105,7 +104,7 @@ async def serve_frontend(path: str) -> FileResponse:
         html = _frontend_file(path)
         if html:
             return _file_response(html)
-    return _file_response(FRONTEND / "index.html")
+    return _file_response(FRONTEND_DIR / "index.html")
 
 
 __all__ = ["app"]

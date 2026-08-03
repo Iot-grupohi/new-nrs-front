@@ -22,6 +22,7 @@ _write_lock = threading.Lock()
 _writer_started = False
 _last_firestore_write: dict[str, float] = {}
 _hydrated = False
+_revision = 0
 
 
 def _write_interval_seconds() -> float:
@@ -142,7 +143,93 @@ def _build_doc_from_heartbeat(store_id: str, entry: dict[str, Any], timeout_seco
     last_check = payload.get("last_network_check")
     if isinstance(last_check, dict):
         doc["last_network_check"] = last_check
+
+    online_since = payload.get("agent_online_since_ms")
+    if online_since is None:
+        online_since = entry.get("agent_online_since_ms")
+    if isinstance(online_since, (int, float)):
+        doc["agent_online_since_ms"] = int(online_since)
+
+    offline_since = payload.get("agent_offline_since_ms")
+    if offline_since is None:
+        offline_since = entry.get("agent_offline_since_ms")
+    if isinstance(offline_since, (int, float)):
+        doc["agent_offline_since_ms"] = int(offline_since)
+
+    heartbeat_source = entry.get("heartbeat_source") or payload.get("heartbeat_source")
+    if heartbeat_source:
+        doc["heartbeat_source"] = str(heartbeat_source)
+
     return doc
+
+
+def _bump_revision() -> int:
+    global _revision
+    _revision += 1
+    return _revision
+
+
+def memory_revision() -> int:
+    with _memory_lock:
+        return _revision
+
+
+def status_cache_etag(timeout_seconds: int = 60, fields: str | None = None) -> str:
+    """ETag barato (revisão + contagem + max updated_at) — evita hash do bulk inteiro."""
+    from panel.http_cache import weak_etag
+
+    with _memory_lock:
+        count = len(_memory)
+        max_updated = 0
+        for row in _memory.values():
+            try:
+                max_updated = max(max_updated, int(row.get("updated_at_ms") or 0))
+            except (TypeError, ValueError):
+                continue
+        rev = _revision
+    return weak_etag("status-cache", rev, count, max_updated, timeout_seconds, fields or "full")
+
+
+# Campos pesados omitidos no preset dashboard (lista do painel).
+_DASHBOARD_OMIT = frozenset({"config_snapshot", "last_network_check", "source_config"})
+_SUMMARY_KEEP = frozenset(
+    {
+        "store",
+        "alive",
+        "age_seconds",
+        "timeout_seconds",
+        "lav60_status",
+        "heartbeat_source",
+        "agent_url",
+        "agent_online_since_ms",
+        "agent_offline_since_ms",
+        "updated_at_ms",
+        "received_at",
+        "received_at_iso",
+        "config_fresh",
+    }
+)
+
+
+def parse_fields_param(fields: str | None) -> str:
+    raw = str(fields or "").strip().lower()
+    if raw in {"", "full", "*"}:
+        return "full"
+    if raw in {"dashboard", "list", "panel"}:
+        return "dashboard"
+    if raw in {"summary", "lite", "minimal"}:
+        return "summary"
+    return "full"
+
+
+def project_public_doc(doc: dict[str, Any], fields: str = "full") -> dict[str, Any]:
+    mode = parse_fields_param(fields)
+    if mode == "full":
+        return doc
+    if mode == "summary":
+        return {key: doc[key] for key in _SUMMARY_KEEP if key in doc}
+    # dashboard: tudo menos config pesada
+    return {key: value for key, value in doc.items() if key not in _DASHBOARD_OMIT}
 
 
 def _memory_set(store_id: str, data: dict[str, Any]) -> None:
@@ -155,6 +242,7 @@ def _memory_set(store_id: str, data: dict[str, Any]) -> None:
             _memory[sid] = merged
         else:
             _memory[sid] = dict(data)
+        _bump_revision()
 
 
 def _memory_get(store_id: str) -> dict[str, Any] | None:
@@ -280,10 +368,55 @@ def _queue_write(
         }
 
 
+def _merge_availability_windows(
+    existing: dict[str, Any] | None,
+    doc: dict[str, Any],
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    """Persiste início da janela online/offline do agente (Firestore + memória)."""
+    now_ms = int(time.time() * 1000)
+    is_alive = bool(doc.get("alive"))
+
+    was_alive = False
+    if existing:
+        prev_received = existing.get("received_at")
+        if isinstance(prev_received, (int, float)):
+            prev_ra = float(prev_received)
+            if prev_ra > 1e12:
+                prev_ra /= 1000.0
+            was_alive = (time.time() - prev_ra) <= timeout_seconds
+
+    if is_alive:
+        payload_online = doc.get("agent_online_since_ms")
+        if payload_online is not None:
+            doc["agent_online_since_ms"] = int(payload_online)
+        elif not was_alive:
+            doc["agent_online_since_ms"] = now_ms
+        else:
+            doc["agent_online_since_ms"] = (
+                existing.get("agent_online_since_ms") if existing else None
+            ) or now_ms
+        doc.pop("agent_offline_since_ms", None)
+    else:
+        received_at = float(doc.get("received_at") or time.time())
+        if was_alive:
+            doc["agent_offline_since_ms"] = int((received_at + timeout_seconds) * 1000)
+        else:
+            doc["agent_offline_since_ms"] = (
+                (existing.get("agent_offline_since_ms") if existing else None)
+                or int((received_at + timeout_seconds) * 1000)
+            )
+        doc.pop("agent_online_since_ms", None)
+    return doc
+
+
 def ingest_heartbeat_entry(store_id: str, entry: dict[str, Any], timeout_seconds: int = 60) -> None:
     if not entry:
         return
+    sid = _normalize_store_id(store_id)
+    existing = _memory_get(sid)
     doc = _build_doc_from_heartbeat(store_id, entry, timeout_seconds)
+    doc = _merge_availability_windows(existing, doc, timeout_seconds)
     _queue_write(store_id, doc, merge=True)
 
 
@@ -317,6 +450,18 @@ def _public_doc(raw: dict[str, Any] | None, timeout_seconds: int = 60) -> dict[s
         age = max(0.0, time.time() - float(received_at))
         doc["age_seconds"] = round(age, 1)
         doc["alive"] = age <= timeout_seconds
+        if doc["alive"]:
+            if not doc.get("agent_online_since_ms"):
+                received_ms = int(float(received_at) * 1000)
+                doc["agent_online_since_ms"] = received_ms
+            doc["agent_offline_since_ms"] = None
+        else:
+            offline_ms = doc.get("agent_offline_since_ms")
+            if not offline_ms:
+                # Calcula na resposta; não grava em memória (evita revision thrash no GET).
+                offline_ms = int((float(received_at) + timeout_seconds) * 1000)
+            doc["agent_offline_since_ms"] = offline_ms
+            doc["agent_online_since_ms"] = None
     doc["timeout_seconds"] = timeout_seconds
     config_snap = doc.get("config_snapshot")
     if isinstance(config_snap, dict):
@@ -325,7 +470,11 @@ def _public_doc(raw: dict[str, Any] | None, timeout_seconds: int = 60) -> dict[s
     return doc
 
 
-def get_store_cache(store_id: str, timeout_seconds: int = 60) -> dict[str, Any]:
+def get_store_cache(
+    store_id: str,
+    timeout_seconds: int = 60,
+    fields: str | None = None,
+) -> dict[str, Any]:
     base = status_cache_status()
     if not base.get("available"):
         return {**base, "store": _normalize_store_id(store_id)}
@@ -338,22 +487,30 @@ def get_store_cache(store_id: str, timeout_seconds: int = 60) -> dict[str, Any]:
             "hit": False,
             "timeout_seconds": timeout_seconds,
             "read_source": base.get("read_source"),
+            "fields": parse_fields_param(fields),
         }
 
     public = _public_doc(doc, timeout_seconds) or {}
+    public = project_public_doc(public, fields)
     return {
         "available": True,
         "hit": True,
         "store": _normalize_store_id(store_id),
         "read_source": base.get("read_source"),
+        "fields": parse_fields_param(fields),
         **public,
     }
 
 
-def list_store_cache(timeout_seconds: int = 60, limit: int = 800) -> dict[str, Any]:
+def list_store_cache(
+    timeout_seconds: int = 60,
+    limit: int = 800,
+    fields: str | None = None,
+) -> dict[str, Any]:
+    mode = parse_fields_param(fields)
     base = status_cache_status()
     if not base.get("available"):
-        return {**base, "stores": {}}
+        return {**base, "stores": {}, "fields": mode}
 
     stores: dict[str, Any] = {}
     rows = _memory_all()
@@ -364,7 +521,7 @@ def list_store_cache(timeout_seconds: int = 60, limit: int = 800) -> dict[str, A
     for sid, data in list(rows.items())[:limit]:
         public = _public_doc(data, timeout_seconds)
         if public:
-            stores[sid] = public
+            stores[sid] = project_public_doc(public, mode)
 
     return {
         "available": True,
@@ -373,5 +530,7 @@ def list_store_cache(timeout_seconds: int = 60, limit: int = 800) -> dict[str, A
         "count": len(stores),
         "stores": stores,
         "read_source": base.get("read_source"),
+        "revision": memory_revision(),
+        "fields": mode,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }

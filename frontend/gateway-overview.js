@@ -35,8 +35,43 @@
   let getStores = () => [];
   let onStoreAction = null;
   let onRefresh = null;
+  let onStoresUpdated = null;
+  let overviewMounted = false;
+  let scanGeneration = 0;
 
   const $ = (id) => document.getElementById(id);
+
+  function gatewayScopeStoreIds() {
+    return new Set(
+      getGatewayScopeStores()
+        .map((meta) => normalizeStoreId(meta.id))
+        .filter(Boolean)
+    );
+  }
+
+  function isStoreInGatewayScope(storeId) {
+    const sid = normalizeStoreId(storeId);
+    if (!sid) return false;
+    return gatewayScopeStoreIds().has(sid);
+  }
+
+  async function fetchGatewayActiveStoreIds() {
+    const scopeIds = gatewayScopeStoreIds();
+    if (!scopeIds.size || !fetchFn) return [];
+    try {
+      const res = await fetchFn('/api/gateway/config', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return [];
+      return (Array.isArray(data.active_stores) ? data.active_stores : [])
+        .map(normalizeStoreId)
+        .filter((sid) => sid && scopeIds.has(sid));
+    } catch {
+      return [];
+    }
+  }
 
   function isGatewayScopeSuspended(meta) {
     if (!meta) return false;
@@ -67,6 +102,18 @@
     return sid.toUpperCase();
   }
 
+  function isGatewayOnline(status) {
+    if (!status || status.checking) return false;
+    return status.online === true;
+  }
+
+  function isGatewayOperable(status) {
+    if (!status) return false;
+    if (status.online === true) return true;
+    if (status.apiOnline === true) return true;
+    return false;
+  }
+
   function hydrateOverviewFromCache() {
     Object.keys(storeOverviewStatus).forEach((key) => delete storeOverviewStatus[key]);
     getGatewayScopeStores().forEach((meta) => {
@@ -81,6 +128,15 @@
     return storeOverviewStatus[sid] || getStoreGatewayCacheEntry(sid) || null;
   }
 
+  function getOnlineStoreMetas() {
+    const onlineIds = new Set(
+      buildGatewayEventLists()
+        .online.map((entry) => normalizeStoreId(entry.store))
+        .filter(Boolean)
+    );
+    return getGatewayScopeStores().filter((meta) => onlineIds.has(normalizeStoreId(meta.id)));
+  }
+
   function buildGatewayEventLists() {
     const online = [];
     const offline = [];
@@ -93,22 +149,30 @@
         checkedAt: status?.checkedAt,
         error: status?.error,
         checking: Boolean(status?.checking),
-        online: status?.online,
+        online: isGatewayOnline(status) ? true : false,
+        apiOnline: status?.apiOnline,
         agentAlive: status?.agentAlive,
         agentOfflineSinceMs: status?.agentOfflineSinceMs,
         gatewayOfflineSinceMs: status?.gatewayOfflineSinceMs,
       };
-      if (status?.online === true) online.push(entry);
-      else offline.push(entry);
+      if (isGatewayOnline(status)) {
+        online.push(entry);
+      } else {
+        offline.push(entry);
+      }
     });
     const sort = (a, b) => a.store.localeCompare(b.store);
     online.sort(sort);
     offline.sort(sort);
-    return { online, offline };
+    return { online, offline, pending: [] };
   }
 
   function gatewayPageHref(storeId) {
-    return `gateway.html?store=${encodeURIComponent(storeId)}`;
+    const sid = encodeURIComponent(storeId);
+    if (document.getElementById('appView')) {
+      return `index.html?store=${sid}#/agent-get02`;
+    }
+    return `gateway.html?store=${sid}`;
   }
 
   function renderGatewayOnlineEvents(items) {
@@ -144,8 +208,10 @@
       parts.push('Agente offline');
     } else if (entry.online == null && !entry.checking) {
       parts.push('Ainda não verificada');
+    } else if (!parts.length) {
+      parts.push('Offline');
     }
-    return parts.join(' · ') || 'Sem conexão';
+    return parts.join(' · ') || 'Offline';
   }
 
   function renderGatewayOfflineEvents(items) {
@@ -158,7 +224,7 @@
           const sub = age ? `${reason} · verificado ${age}` : reason;
           return `
         <li class="kpi-event-item kpi-event-item--alert">
-          <span class="kpi-event-item__store">${escapeHtml(storeDisplayName(entry))}</span>
+          <a class="kpi-event-item__store" href="${gatewayPageHref(entry.store)}">${escapeHtml(storeDisplayName(entry))}</a>
           <span class="kpi-event-item__sub">${escapeHtml(sub)}</span>
         </li>`;
         })
@@ -329,12 +395,41 @@
     hideSharedKpiModal();
   }
 
+  // Só existe no console GET02; nas demais páginas os elementos não estão no DOM.
+  function updateGatewayShareBar(online, total) {
+    const pct = total ? Math.round((online / total) * 100) : 0;
+
+    const pctEl = $('gatewaySharePct');
+    if (pctEl) pctEl.textContent = total ? `${pct}%` : '—';
+
+    const fillEl = $('gatewayShareFill');
+    if (fillEl) {
+      fillEl.style.width = `${total ? pct : 0}%`;
+      fillEl.dataset.level = pct >= 90 ? 'ok' : pct >= 70 ? 'warn' : 'danger';
+    }
+
+    const trackEl = $('gatewayShareTrack');
+    if (trackEl) trackEl.setAttribute('aria-valuenow', String(total ? pct : 0));
+
+    const metaEl = $('gatewayShareMeta');
+    if (metaEl) {
+      metaEl.textContent = total
+        ? `${online} de ${total} loja(s) com gateway online`
+        : 'Nenhuma loja no catálogo';
+    }
+  }
+
   function updateGatewayOverviewKpis() {
     const lists = buildGatewayEventLists();
     const onlineEl = $('kpiGatewayOnline');
     const offlineEl = $('kpiGatewayOffline');
     if (onlineEl) onlineEl.textContent = String(lists.online.length);
     if (offlineEl) offlineEl.textContent = String(lists.offline.length);
+    updateGatewayShareBar(lists.online.length, lists.online.length + lists.offline.length);
+    const metaEl = $('gatewayOverviewMeta');
+    if (metaEl && !overviewScanRunning) {
+      metaEl.textContent = `${lists.offline.length} loja(s) offline · clique no card para o relatório`;
+    }
   }
 
   function updateGatewayOverviewMeta(scanning = false) {
@@ -351,7 +446,8 @@
     const sid = normalizeStoreId(storeId);
     if (!sid) return;
     storeOverviewStatus[sid] = {
-      online: Boolean(entry.online),
+      online: entry.online === true ? true : entry.online === false ? false : null,
+      apiOnline: entry.apiOnline === true,
       error: entry.error || null,
       checkedAt: entry.checkedAt || Date.now(),
       checking: false,
@@ -359,17 +455,20 @@
     render();
   }
 
-  async function loadOverviewFromServer() {
+  async function loadOverviewFromServer(options = {}) {
     if (!fetchFn || typeof fetchStoreStatuses !== 'function') return;
+    if (!window.Lav60Auth?.isPanelSessionOk?.()) return;
+    const force = options.force === true;
     try {
-      const rows = await fetchStoreStatuses(fetchFn);
+      const rows = await fetchStoreStatuses(fetchFn, { force });
       if (typeof applyStoreStatusRows === 'function') applyStoreStatusRows(rows);
-      const scopeIds = new Set(getGatewayScopeStores().map((meta) => normalizeStoreId(meta.id)));
+      const scopeIds = gatewayScopeStoreIds();
       rows.forEach((row) => {
         const sid = normalizeStoreId(row?.store);
         if (!sid || !scopeIds.has(sid)) return;
         storeOverviewStatus[sid] = {
-          online: row.gateway_online === true ? true : (row.gateway_online === false ? false : null),
+          online: row.gateway_online === true ? true : row.gateway_online === false ? false : null,
+          apiOnline: row.gateway_api_online === true,
           error: row.gateway_error || null,
           checkedAt: row.gateway_checked_at_ms || null,
           checking: false,
@@ -384,49 +483,71 @@
     }
   }
 
-  function refreshFromCache() {
+  function refreshFromCache(options = {}) {
     hydrateOverviewFromCache();
     render();
-    void loadOverviewFromServer();
+    if (options.fetchServer !== false) {
+      void loadOverviewFromServer();
+    }
   }
 
   function render() {
     if (!$('gatewayOverview')) return;
     updateGatewayOverviewKpis();
-    updateGatewayOverviewMeta(overviewScanRunning);
+    if (overviewScanRunning) {
+      updateGatewayOverviewMeta(true);
+    }
     if (activeGatewayKpi) renderGatewayKpiModalContent(activeGatewayKpi);
+    if (!overviewScanRunning && typeof onStoresUpdated === 'function') onStoresUpdated();
   }
 
-  async function probeOverviewStoreGateway(storeId) {
+  async function probeOverviewStoreGateway(storeId, { force = false } = {}) {
     const sid = normalizeStoreId(storeId);
-    if (!fetchFn) return;
+    if (!fetchFn || !sid || !isStoreInGatewayScope(sid)) return;
     storeOverviewStatus[sid] = { ...(storeOverviewStatus[sid] || {}), checking: true, online: null };
     render();
 
     try {
-      const result = await verifyStoreGatewayLed(sid, fetchFn, { force: false });
-      setStoreGatewayCacheEntry(sid, { online: result.online, error: result.error });
+      const result = await verifyStoreGatewayLed(sid, fetchFn, { force });
+      setStoreGatewayCacheEntry(sid, {
+        online: result.online === true,
+        apiOnline: result.apiOnline === true,
+        error: result.error,
+      });
       storeOverviewStatus[sid] = {
-        online: result.online,
+        online: result.online === true,
+        apiOnline: result.apiOnline === true,
         error: result.error,
         checkedAt: result.checkedAt,
         checking: false,
-        gatewayOfflineSinceMs: result.online ? null : result.checkedAt,
+        gatewayOfflineSinceMs: result.online === true ? null : result.checkedAt,
       };
     } catch (err) {
       const error = formatStoreGatewayError(sid, err.message);
-      setStoreGatewayCacheEntry(sid, { online: false, error });
+      setStoreGatewayCacheEntry(sid, { online: false, apiOnline: false, error });
       storeOverviewStatus[sid] = { online: false, error, checkedAt: Date.now(), checking: false };
     }
 
     render();
   }
 
+  async function probeStore(storeId, { force = false } = {}) {
+    const sid = normalizeStoreId(storeId);
+    if (!sid || !fetchFn) return null;
+    await probeOverviewStoreGateway(sid, { force });
+    return overviewStatusForStore(sid);
+  }
+
   async function scanAll({ force = false, skipStores = null } = {}) {
     if (overviewScanRunning || !fetchFn || !$('gatewayOverview')) return;
-    const stores = getGatewayScopeStores();
-    if (!stores.length) return;
+    const targetIds = await fetchGatewayActiveStoreIds();
+    if (!targetIds.length) {
+      updateGatewayOverviewMeta(false);
+      render();
+      return;
+    }
 
+    const gen = ++scanGeneration;
     overviewScanRunning = true;
     updateGatewayOverviewMeta(true);
     $('btnRefreshGateways')?.setAttribute('disabled', 'disabled');
@@ -438,19 +559,26 @@
     );
 
     try {
-      for (let i = 0; i < stores.length; i += 1) {
-        const sid = normalizeStoreId(stores[i].id);
-        if (!sid || skip.has(sid)) continue;
+      const batchSize = 3;
+      const pending = [];
+      for (const sid of targetIds) {
+        if (gen !== scanGeneration || !sid || skip.has(sid)) continue;
         const cached = getStoreGatewayCacheEntry(sid);
         if (!force && cached && isGatewayCacheFresh(cached.checkedAt)) {
           storeOverviewStatus[sid] = { ...cached, checking: false };
-          render();
           continue;
         }
-        await probeOverviewStoreGateway(sid);
-        if (i < stores.length - 1) await sleep(400);
+        pending.push(sid);
+      }
+      render();
+      for (let i = 0; i < pending.length; i += batchSize) {
+        if (gen !== scanGeneration) return;
+        const batch = pending.slice(i, i + batchSize);
+        await Promise.all(batch.map((sid) => probeOverviewStoreGateway(sid, { force })));
+        if (i + batchSize < pending.length) await sleep(300);
       }
     } finally {
+      if (gen !== scanGeneration) return;
       overviewScanRunning = false;
       $('btnRefreshGateways')?.removeAttribute('disabled');
       updateGatewayOverviewMeta(false);
@@ -467,7 +595,9 @@
     if (!root) return;
 
     $('agentKpiModal')?.addEventListener('click', (e) => {
-      const storeLink = e.target.closest('a.kpi-event-item__store[href*="gateway.html"]');
+      const storeLink = e.target.closest(
+        'a.kpi-event-item__store[href*="agent-get02"], a.kpi-event-item__store[href*="gateway.html"]'
+      );
       if (!storeLink || !activeGatewayKpi) return;
       const sid = normalizeStoreId(new URL(storeLink.href, window.location.origin).searchParams.get('store'));
       if (!sid) return;
@@ -480,7 +610,8 @@
 
     root.addEventListener('click', (e) => {
       if (e.target.closest('#btnRefreshGateways')) {
-        refreshFromCache();
+        void scanAll({ force: true });
+        void loadOverviewFromServer({ force: true });
         if (typeof onRefresh === 'function') onRefresh();
         return;
       }
@@ -508,19 +639,55 @@
     }, { signal });
   }
 
+  async function probeActiveStores() {
+    if (!fetchFn || overviewScanRunning) return;
+    const stores = await fetchGatewayActiveStoreIds();
+    if (!stores.length) return;
+
+    const pending = stores.filter((sid) => {
+      const cached = getStoreGatewayCacheEntry(sid);
+      return !cached || !isGatewayCacheFresh(cached.checkedAt, GATEWAY_TTL_MS);
+    });
+    if (!pending.length) {
+      render();
+      return;
+    }
+
+    const batchSize = 3;
+    for (let i = 0; i < pending.length; i += batchSize) {
+      const batch = pending.slice(i, i + batchSize);
+      await Promise.all(batch.map((sid) => probeOverviewStoreGateway(sid, { force: false })));
+      if (i + batchSize < pending.length) await sleep(300);
+    }
+  }
+
   function mount(options = {}) {
     fetchFn = options.fetchFn || null;
     getStores = typeof options.getStores === 'function' ? options.getStores : () => [];
     onStoreAction = typeof options.onStoreAction === 'function' ? options.onStoreAction : null;
     onRefresh = typeof options.onRefresh === 'function' ? options.onRefresh : null;
-    bindEvents();
+    onStoresUpdated = typeof options.onStoresUpdated === 'function' ? options.onStoresUpdated : null;
+
+    if (!overviewMounted) {
+      overviewMounted = true;
+      bindEvents();
+      hydrateOverviewFromCache();
+      render();
+      void loadOverviewFromServer();
+      if (options.probeActiveOnMount === true) {
+        void probeActiveStores();
+      }
+      return;
+    }
+
     hydrateOverviewFromCache();
     render();
-    void loadOverviewFromServer();
   }
 
   function destroy() {
+    scanGeneration += 1;
     overviewScanRunning = false;
+    overviewMounted = false;
     activeGatewayKpi = null;
     eventsAbort?.abort();
     eventsAbort = null;
@@ -532,12 +699,16 @@
     destroy,
     render,
     scanAll,
+    probeStore,
+    probeActiveStores,
     noteStoreStatus,
     refreshFromCache,
     refresh: render,
     openGatewayKpiModal,
     closeGatewayKpiModal,
     clearGatewayKpiActive,
+    getOnlineStoreMetas,
+    statusForStore: overviewStatusForStore,
   };
 
   window.Lav60KpiModalSearch = {

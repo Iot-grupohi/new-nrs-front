@@ -3,20 +3,37 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LAV60 — Loja</title>
-  <link rel="stylesheet" href="app.css?v=67">
+  <title>LAV60 — Loja · GET01</title>
+  <script>
+    (function () {
+      var store = new URLSearchParams(window.location.search).get('store');
+      var target = store
+        ? 'index.html?store=' + encodeURIComponent(store) + '#/store'
+        : 'index.html#/lojas';
+      window.location.replace(target);
+    })();
+  </script>
+  <link rel="stylesheet" href="app.css?v=78">
+  <link rel="stylesheet" href="agent-console.css?v=3">
   <script src="theme.js?v=1"></script>
 </head>
-<body class="page-dashboard page-store auth-pending">
+<body class="page-dashboard page-store page-agent page-agent-get01 page-agent-console auth-pending">
+  <svg class="agent-console__sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></symbol>
+    <symbol id="i-hub" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="21" r="2"/><path d="m6.6 6.6 3.7 3.7"/><path d="m17.4 6.6-3.7 3.7"/><path d="M12 14.5V19"/></symbol>
+  </svg>
+
   <div class="app-shell">
-    <header class="topbar topbar--store">
+    <header class="topbar topbar--store topbar--agent-get01">
       <div class="topbar__row">
         <div class="topbar__brand">
-          <a href="index.html#/lojas" class="topbar__back" aria-label="Voltar às lojas">‹</a>
+          <a href="agent-get01.html" class="topbar__back" aria-label="Voltar ao GET01">‹</a>
           <div class="topbar__logo" aria-hidden="true">L60</div>
           <div class="topbar__identity">
             <nav class="topbar__crumb" aria-label="Navegação">
-              <a href="index.html#/lojas" class="topbar__crumb-link">Lojas</a>
+              <a href="index.html" class="topbar__crumb-link">Painel</a>
+              <span class="topbar__crumb-sep" aria-hidden="true">/</span>
+              <a href="agent-get01.html" class="topbar__crumb-link">GET01</a>
               <span class="topbar__crumb-sep" aria-hidden="true">/</span>
               <span class="topbar__code" id="storeCode">—</span>
             </nav>
@@ -25,15 +42,18 @@
         </div>
         <div class="topbar__toolbar">
           <div data-theme-mount='{"variant":"toolbar"}'></div>
-          <a href="index.html#/registros" class="topbar__tool" title="Registros de operações">
-            <span class="topbar__tool-icon" aria-hidden="true">☰</span>
-            <span class="topbar__tool-label">Registros</span>
+          <a href="gateway.html" class="topbar__tool" id="storeGet02Link" title="Alternar para GET02 — MQTT">
+            <span class="topbar__tool-icon" aria-hidden="true">
+              <svg class="icon"><use href="#i-hub"></use></svg>
+            </span>
+            <span class="topbar__tool-label">GET02</span>
           </a>
           <div id="headerUserMenu" class="topbar__user-slot"></div>
         </div>
       </div>
       <div class="topbar__meta">
-        <p class="topbar__subtitle" id="storeSubtitle">Operação da loja</p>
+        <div id="agentNavMount"></div>
+        <p class="topbar__subtitle visually-hidden" id="storeSubtitle">GET01 — Operação via túnel Cloudflare</p>
       </div>
     </header>
 
@@ -45,29 +65,72 @@
       </div>
     </div>
 
-    <main class="main-content">
-      <section class="stats-grid stats-grid--store">
-        <article class="stat-card stat-card--success">
-          <span class="stat-card__label">Online</span>
-          <strong class="stat-card__value" id="summaryOnline">—</strong>
-          <span class="stat-card__sub" id="summaryTotal">de — total</span>
-        </article>
-        <article class="stat-card">
-          <span class="stat-card__label">Saúde</span>
-          <strong class="stat-card__value" id="summaryHealth">—</strong>
-          <div class="stat-card__bar"><div id="summaryHealthBar" style="width:0%"></div></div>
-        </article>
-        <article class="stat-card stat-card--primary">
-          <span class="stat-card__label">Última verificação</span>
-          <strong class="stat-card__value stat-card__value--sm" id="summaryTime">—</strong>
-        </article>
+    <main class="main-content agent-page agent-store-page">
+      <header class="agent-page__hero agent-store-page__hero">
+        <div class="agent-page__hero-main">
+          <p class="agent-page__eyebrow">Operação GET01</p>
+          <h2 class="agent-page__headline" id="storeHeroTitle">—</h2>
+          <p class="agent-page__desc" id="storeHeroDesc">Carregando loja…</p>
+        </div>
+        <div class="agent-page__hero-aside">
+          <div class="agent-page__channel-badge">
+            <span class="agent-page__channel-icon" aria-hidden="true">
+              <svg class="icon"><use href="#i-cloud"></use></svg>
+            </span>
+            <div>
+              <strong>Cloudflare</strong>
+              <span id="storeHeroTunnel">—.powpay.com.br</span>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="agent-kpi-panel card agent-store-kpis">
+        <header class="agent-kpi-panel__head">
+          <div>
+            <h2 class="agent-kpi-panel__title">Resumo da loja</h2>
+            <p class="agent-kpi-panel__meta">Equipamentos e saúde operacional</p>
+          </div>
+        </header>
+        <div class="agent-kpi-panel__grid agent-kpi-panel__grid--store">
+          <article class="stat-card stat-card--success">
+            <span class="stat-card__label">Online</span>
+            <strong class="stat-card__value" id="summaryOnline">—</strong>
+            <span class="stat-card__sub" id="summaryTotal">de — total</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-card__label">Saúde</span>
+            <strong class="stat-card__value" id="summaryHealth">—</strong>
+            <div class="stat-card__bar"><div id="summaryHealthBar" style="width:0%"></div></div>
+          </article>
+          <article class="stat-card stat-card--primary">
+            <span class="stat-card__label">Última verificação</span>
+            <strong class="stat-card__value stat-card__value--sm" id="summaryTime">—</strong>
+          </article>
+        </div>
+      </section>
+
+      <section class="gateway-status card" id="storeStatusBar">
+        <div class="gateway-status__row">
+          <div class="gateway-status__info">
+            <span class="gateway-meta" id="storeAgentMeta">Agente: —</span>
+            <span class="gateway-status__hint" id="storeAgentHint">Use ↻ em cada equipamento para verificar o status na rede local</span>
+          </div>
+          <div class="gateway-status__actions">
+            <button type="button" class="btn btn--sm btn--ghost" id="btnVerifyStoreAgent">Verificar agente</button>
+            <button type="button" class="btn btn--sm btn--ghost" id="btnRefreshStoreDevices" disabled>Atualizar equipamentos</button>
+          </div>
+        </div>
       </section>
 
       <section class="devices-panel devices-panel--loading" id="devicesPanel">
         <div class="devices-panel__section">
           <header class="devices-panel__head">
             <h2 class="devices-panel__title">Lavadoras</h2>
-            <span class="devices-panel__count" id="washersCount">—</span>
+            <div class="devices-panel__head-actions">
+              <span class="devices-panel__count" id="washersCount">—</span>
+              <button type="button" class="btn btn--sm btn--ghost" data-refresh-group="washer" disabled>Atualizar</button>
+            </div>
           </header>
           <div class="device-list" id="washersGrid"></div>
         </div>
@@ -75,15 +138,21 @@
         <div class="devices-panel__section">
           <header class="devices-panel__head">
             <h2 class="devices-panel__title">Secadoras</h2>
-            <span class="devices-panel__count" id="dryersCount">—</span>
+            <div class="devices-panel__head-actions">
+              <span class="devices-panel__count" id="dryersCount">—</span>
+              <button type="button" class="btn btn--sm btn--ghost" data-refresh-group="dryer" disabled>Atualizar</button>
+            </div>
           </header>
           <div class="device-list" id="dryersGrid"></div>
         </div>
 
-        <div class="devices-panel__section devices-panel__section--wide">
+        <div class="devices-panel__section">
           <header class="devices-panel__head">
             <h2 class="devices-panel__title">Dosadoras</h2>
-            <span class="devices-panel__count" id="dosersCount">—</span>
+            <div class="devices-panel__head-actions">
+              <span class="devices-panel__count" id="dosersCount">—</span>
+              <button type="button" class="btn btn--sm btn--ghost" data-refresh-group="doser" disabled>Atualizar</button>
+            </div>
           </header>
           <div class="device-list" id="dosersGrid"></div>
         </div>
@@ -91,7 +160,10 @@
         <div class="devices-panel__section">
           <header class="devices-panel__head">
             <h2 class="devices-panel__title">Ar-condicionado</h2>
-            <span class="devices-panel__count" id="acCount">—</span>
+            <div class="devices-panel__head-actions">
+              <span class="devices-panel__count" id="acCount">—</span>
+              <button type="button" class="btn btn--sm btn--ghost" data-refresh-group="ac" disabled>Atualizar</button>
+            </div>
           </header>
           <div class="device-list" id="acPanel"></div>
         </div>
@@ -131,11 +203,13 @@
     </div>
   </div>
 
-  <script src="auth.js"></script>
-  <script src="cache.js"></script>
-  <script src="api.js?v=33"></script>
-  <script src="device-ui.js?v=9"></script>
+  <script src="auth.js?v=13"></script>
   <script src="audit.js?v=3"></script>
-  <script src="store.js?v=14"></script>
+  <script src="cache.js?v=2"></script>
+  <script src="api.js?v=91"></script>
+  <script src="device-ui.js?v=12"></script>
+  <script src="agent-console.js?v=1"></script>
+  <script src="agent-nav.js?v=1"></script>
+  <script src="store.js?v=26"></script>
 </body>
 </html>

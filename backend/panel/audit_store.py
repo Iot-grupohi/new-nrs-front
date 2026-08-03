@@ -10,9 +10,16 @@ from typing import Any
 
 from panel.firebase_client import firebase_status, get_firestore, service_account_path
 from panel.lav60_env import env_value
+
 _MAX_FIELD_LEN = 4000
 _MAX_RESPONSE_KEYS = 24
 _DEVICE_PATH_RE = re.compile(r"/(washer|dryer|doser|ac)(?:/([^/?#]+))?", re.IGNORECASE)
+
+# Cache em memória (processo único / gunicorn -w 1). Redis só faria sentido com multi-worker.
+_SUMMARY_TTL_SEC = 90.0
+_COUNT_TTL_SEC = 60.0
+_summary_cache: dict[str, Any] = {"key": None, "data": None, "expires_at": 0.0}
+_count_cache: dict[str, Any] = {}
 
 ACTION_LABELS_PT: dict[str, str] = {
     "auth_login": "Login no painel",
@@ -245,6 +252,14 @@ def build_audit_record(
     return {key: value for key, value in record.items() if value is not None}
 
 
+def invalidate_audit_caches() -> None:
+    """Invalida caches após escrita — frontend/dashboard veem dados frescos no próximo miss."""
+    _summary_cache["key"] = None
+    _summary_cache["data"] = None
+    _summary_cache["expires_at"] = 0.0
+    _count_cache.clear()
+
+
 def write_log(
     entry: dict[str, Any],
     *,
@@ -260,6 +275,7 @@ def write_log(
         user_agent=user_agent,
     )
     db.collection(_collection_name()).add(record)
+    invalidate_audit_caches()
 
 
 def _row_listable(data: dict[str, Any]) -> bool:
@@ -298,13 +314,38 @@ def _doc_to_item(doc_id: str, data: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def _count_cache_key(
+    *,
+    store: str | None,
+    operator: str | None,
+    action: str | None,
+    success: str | None,
+) -> str:
+    return "|".join(
+        [
+            (store or "").strip().lower(),
+            (operator or "").strip().lower(),
+            (action or "").strip(),
+            (success or "").strip(),
+        ]
+    )
+
+
 def count_logs(
     *,
     store: str | None = None,
     operator: str | None = None,
     action: str | None = None,
     success: str | None = None,
+    use_cache: bool = True,
 ) -> tuple[int, bool]:
+    cache_key = _count_cache_key(store=store, operator=operator, action=action, success=success)
+    now = time.time()
+    if use_cache:
+        cached = _count_cache.get(cache_key)
+        if cached and cached["expires_at"] > now:
+            return int(cached["total"]), bool(cached["truncated"])
+
     db = _get_db()
     from firebase_admin import firestore
 
@@ -322,6 +363,11 @@ def count_logs(
             continue
         total += 1
     truncated = total >= scan_limit
+    _count_cache[cache_key] = {
+        "total": total,
+        "truncated": truncated,
+        "expires_at": now + _COUNT_TTL_SEC,
+    }
     return total, truncated
 
 
@@ -374,24 +420,52 @@ def query_logs(
         "device_labels": DEVICE_LABELS_PT,
     }
     if include_total and before_ms is None:
-        total, truncated = count_logs(
-            store=store,
-            operator=operator,
-            action=action,
-            success=success,
-        )
+        # Sem filtros em Python: se a página não tem "mais", o total é len(page).
+        # Caso contrário usa count_logs com TTL (evita double-scan a cada paginação).
+        if not needs_scan and not has_more:
+            total, truncated = len(page_items), False
+            cache_key = _count_cache_key(
+                store=store, operator=operator, action=action, success=success
+            )
+            _count_cache[cache_key] = {
+                "total": total,
+                "truncated": truncated,
+                "expires_at": time.time() + _COUNT_TTL_SEC,
+            }
+        else:
+            total, truncated = count_logs(
+                store=store,
+                operator=operator,
+                action=action,
+                success=success,
+            )
         payload["total"] = total
         payload["total_truncated"] = truncated
     return payload
 
 
-def dashboard_summary(hours: int = 24) -> dict[str, Any]:
+def dashboard_summary(hours: int = 24, *, force: bool = False) -> dict[str, Any]:
+    hours = max(1, min(int(hours or 24), 168))
+    cache_key = f"hours:{hours}"
+    now = time.time()
+    if (
+        not force
+        and _summary_cache.get("key") == cache_key
+        and _summary_cache.get("data")
+        and float(_summary_cache.get("expires_at") or 0) > now
+    ):
+        cached = dict(_summary_cache["data"])
+        cached["cached"] = True
+        return cached
+
     db = _get_db()
-    since_ms = int((time.time() - max(1, hours) * 3600) * 1000)
+    from firebase_admin import firestore
+
+    since_ms = int((time.time() - hours * 3600) * 1000)
     docs = (
         db.collection(_collection_name())
         .where("ts_ms", ">=", since_ms)
-        .order_by("ts_ms", direction="DESCENDING")
+        .order_by("ts_ms", direction=firestore.Query.DESCENDING)
         .limit(500)
         .stream()
     )
@@ -420,7 +494,7 @@ def dashboard_summary(hours: int = 24) -> dict[str, Any]:
     if by_store:
         sid, count = max(by_store.items(), key=lambda x: x[1])
         top_store = {"store": sid, "count": count}
-    return {
+    payload = {
         "hours": hours,
         "total": total,
         "success_rate": round(success / total * 100, 1) if total else None,
@@ -428,4 +502,9 @@ def dashboard_summary(hours: int = 24) -> dict[str, Any]:
         "top_operator": top_operator,
         "top_store": top_store,
         "available": True,
+        "cached": False,
     }
+    _summary_cache["key"] = cache_key
+    _summary_cache["data"] = dict(payload)
+    _summary_cache["expires_at"] = now + _SUMMARY_TTL_SEC
+    return payload

@@ -11,7 +11,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from panel.catalog import _catalog_settings
-from panel.gateway import _gateway_verify_cache
+from panel.gateway import gateway_verify_cache_snapshot
+from panel.machines import fetch_store_machines
 from panel import status_store
 from panel.store_map import build_map_locations
 from panel import stores_cache
@@ -61,19 +62,19 @@ def register_stores(
         if deps.upstream_get is None:
             return {"items": []}
         catalog = await build_catalog(deps.upstream_get)
-        items: list[dict] = []
+        verify_by_store = {
+            str(row.get("store") or "").lower(): row
+            for row in gateway_verify_cache_snapshot()
+            if row.get("store")
+        }
+        items: list[dict[str, Any]] = []
         for meta in catalog.get("stores") or []:
             sid = str(meta.get("id") or "").lower()
             if not sid:
                 continue
-            cached = _gateway_verify_cache.get(sid, {}).get("payload")
+            cached = verify_by_store.get(sid)
             if cached:
-                items.append({
-                    "store": sid,
-                    "gateway_online": cached.get("gateway_online", False),
-                    "gateway_error": cached.get("gateway_error"),
-                    "gateway_checked_at_ms": cached.get("gateway_checked_at_ms"),
-                })
+                items.append(cached)
         return {"items": items}
 
     @router.get("/status-cache")
@@ -175,6 +176,10 @@ def register_stores(
             pass
         return data
 
+    @router.get("/{store_id}/machines")
+    async def store_machines(store_id: str) -> dict[str, Any]:
+        return await fetch_store_machines(store_id)
+
     def _gateway_target_url(store_id: str, sub: str) -> str:
         sid = store_id.strip().lower()
         return f"{gw_base}/{sid}/{sub}" if sub else f"{gw_base}/{sid}"
@@ -272,7 +277,6 @@ def register_stores(
     @router.get("/map-locations")
     async def store_map_locations() -> dict[str, Any]:
         from panel.catalog import build_catalog
-
         from panel import deps
 
         catalog = await build_catalog(deps.upstream_get)

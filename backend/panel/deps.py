@@ -16,10 +16,10 @@ agent_token: str = ""
 def configure(
     *,
     upstream_get_fn: UpstreamGet,
-    gateway_url_value: str,
-    gateway_token_value: str,
-    powpay_domain_value: str,
-    agent_token_value: str,
+    gateway_url_value: str = "",
+    gateway_token_value: str = "",
+    powpay_domain_value: str = "powpay.com.br",
+    agent_token_value: str = "",
 ) -> None:
     global upstream_get, gateway_url, gateway_token, powpay_domain, agent_token
     upstream_get = upstream_get_fn

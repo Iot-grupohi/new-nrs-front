@@ -3,19 +3,23 @@
     <button type="button" class="page-header__back" data-page-back="dashboard">← Painel</button>
   </nav>
   <div class="page-header__head">
+    <p class="agent-page__eyebrow">Monitoramento</p>
     <h1 class="page-header__title">Lojas</h1>
     <p class="page-header__subtitle" id="lojasSubtitle">Carregando…</p>
   </div>
 </header>
 
 <main class="main-content main-content--compact">
-  <section class="stores-panel stores-panel--compact">
+  <section class="stores-panel stores-panel--compact portal-panel-card">
     <div class="stores-panel__stats stores-panel__stats--compact" id="storesStats" aria-live="polite">
       <span class="stores-stat stores-stat--online">
         <strong id="storesStatOnline">—</strong> online
       </span>
       <span class="stores-stat stores-stat--offline">
         <strong id="storesStatOffline">—</strong> offline
+      </span>
+      <span class="stores-stat stores-stat--pending hidden" id="storesStatPendingWrap">
+        <strong id="storesStatPending">—</strong> aguard.
       </span>
       <span class="stores-stat stores-stat--suspended hidden" id="storesStatSuspendedWrap">
         <strong id="storesStatSuspended">—</strong> susp.

@@ -9,11 +9,22 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from panel import http_client
+from panel.machines import fetch_store_machines
+
 from panel.lav60_env import env_value
 
 router = APIRouter(prefix="/api/gateway", tags=["panel-gateway"])
 
 _gateway_verify_cache: dict[str, dict[str, Any]] = {}
+
+
+def gateway_verify_cache_snapshot() -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for sid, row in _gateway_verify_cache.items():
+        payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+        items.append({"store": sid, **payload})
+    return items
 
 
 def register_gateway(
@@ -25,14 +36,22 @@ def register_gateway(
 
     @router.get("/config")
     async def gateway_config() -> dict[str, Any]:
+        active_raw = env_value("LAV60_GATEWAY_ACTIVE_STORES", "pb05") or ""
+        active_stores = [
+            part.strip().lower()
+            for part in active_raw.split(",")
+            if part.strip()
+        ]
         return {
             "token_configured": bool(gateway_token),
             "gateway_url": base,
+            "active_stores": active_stores,
             "washers": [],
             "dryers": [],
             "dosers": [],
-            "dryer_minutes": [15, 30, 45, 60],
-            "ac_temperatures": ["18", "20", "22", "24"],
+            "dryer_minutes": [15, 30, 45],
+            "ac_temperatures": ["18", "22", "off"],
+            "ac_id": "110",
         }
 
     @router.get("/health")
@@ -40,24 +59,23 @@ def register_gateway(
         headers = {"Accept": "application/json"}
         if gateway_token:
             headers["X-Token"] = gateway_token
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                res = await client.get(f"{base}/", headers=headers)
-                if res.status_code < 400:
-                    data = res.json() if res.content else {"status": "ok"}
-                    if isinstance(data, dict):
-                        data.setdefault("online", True)
-                        data.setdefault("system_online", True)
-                        data.setdefault("message", "MQTT Gateway API LAV60 online")
-                        return data
-                    return {
-                        "status": "ok",
-                        "online": True,
-                        "system_online": True,
-                        "message": "MQTT Gateway API LAV60 online",
-                    }
-            except httpx.RequestError:
-                pass
+        try:
+            res = await http_client.client().get(f"{base}/", headers=headers, timeout=15.0)
+            if res.status_code < 400:
+                data = res.json() if res.content else {"status": "ok"}
+                if isinstance(data, dict):
+                    data.setdefault("online", True)
+                    data.setdefault("system_online", True)
+                    data.setdefault("message", "MQTT Gateway API LAV60 online")
+                    return data
+                return {
+                    "status": "ok",
+                    "online": True,
+                    "system_online": True,
+                    "message": "MQTT Gateway API LAV60 online",
+                }
+        except httpx.RequestError:
+            pass
         raise HTTPException(502, "MQTT Gateway indisponível")
 
     @router.post("/{store}/verify")
@@ -74,44 +92,45 @@ def register_gateway(
         online = False
         error = None
         api_online = False
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            try:
-                res = await client.post(
-                    f"{base}/{sid}/led/on",
-                    headers=headers,
-                    json={"command": "ON"},
-                )
-            except httpx.RequestError as exc:
-                error = str(exc)
+        try:
+            res = await http_client.client().post(
+                f"{base}/{sid}/led/on",
+                headers=headers,
+                json={"command": "ON"},
+                timeout=25.0,
+            )
+        except httpx.RequestError as exc:
+            error = str(exc)
+        else:
+            body_text = (res.text or "").lower()
+            if res.status_code < 400:
+                online = True
+                api_online = True
+            elif res.status_code == 400 and (
+                "esp8266" in body_text
+                or "did not respond" in body_text
+                or "timeout" in body_text
+            ):
+                online = False
+                error = "Módulo da loja não respondeu (API do gateway está online)"
+                api_online = True
+            elif res.status_code == 404:
+                online = False
+                error = "Loja não encontrada no gateway"
+                api_online = False
             else:
-                body_text = (res.text or "").lower()
+                online = False
                 api_online = res.status_code not in (502, 503, 504) and "connection" not in body_text
-                if res.status_code < 400:
-                    online = True
-                elif res.status_code == 400 and (
-                    "esp8266" in body_text
-                    or "did not respond" in body_text
-                    or "timeout" in body_text
-                ):
-                    online = False
-                    error = "Módulo da loja não respondeu (API do gateway está online)"
-                    api_online = True
-                elif res.status_code == 404:
-                    online = False
-                    error = "Loja não encontrada no gateway"
-                    api_online = True
-                else:
-                    online = False
-                    try:
-                        detail = res.json()
-                        error = (
-                            detail.get("detail")
-                            or detail.get("message")
-                            or detail.get("error")
-                            or f"HTTP {res.status_code}"
-                        )
-                    except Exception:
-                        error = res.text.strip() or f"HTTP {res.status_code}"
+                try:
+                    detail = res.json()
+                    error = (
+                        detail.get("detail")
+                        or detail.get("message")
+                        or detail.get("error")
+                        or f"HTTP {res.status_code}"
+                    )
+                except Exception:
+                    error = res.text.strip() or f"HTTP {res.status_code}"
 
         payload = {
             "gateway_online": online,
@@ -122,10 +141,22 @@ def register_gateway(
         _gateway_verify_cache[sid] = {"checked_at": time.time(), "payload": payload}
         return payload
 
+    @router.get("/machines/{store}")
+    async def gateway_store_machines(store: str) -> dict[str, Any]:
+        """Equipamentos da loja via API Lav60 (sessão do painel)."""
+        return await fetch_store_machines(store)
+
     @router.api_route("/{store}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def gateway_proxy(store: str, path: str, request: Request) -> Response:
         sid = store.strip().lower()
         sub = path.strip("/")
+        if request.method == "GET" and sub == "status":
+            raise HTTPException(
+                400,
+                "GET /{store}/status (todos) desativado — use status/washer|dryer|doser/{id} ou status/ac",
+            )
+        if request.method == "GET" and sub == "machines":
+            return JSONResponse(content=await fetch_store_machines(sid))
         url = f"{base}/{sid}/{sub}" if sub else f"{base}/{sid}"
         headers = {"Accept": "application/json"}
         if gateway_token:
@@ -134,16 +165,16 @@ def register_gateway(
         if body:
             headers["Content-Type"] = request.headers.get("content-type", "application/json")
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            try:
-                upstream = await client.request(
-                    request.method,
-                    url,
-                    headers=headers,
-                    content=body if body else None,
-                )
-            except httpx.RequestError as exc:
-                raise HTTPException(502, f"Erro ao conectar MQTT Gateway: {exc}") from exc
+        try:
+            upstream = await http_client.client().request(
+                request.method,
+                url,
+                headers=headers,
+                content=body if body else None,
+                timeout=60.0,
+            )
+        except httpx.RequestError as exc:
+            raise HTTPException(502, f"Erro ao conectar MQTT Gateway: {exc}") from exc
 
         content_type = upstream.headers.get("content-type", "")
         if "application/json" in content_type and upstream.content:

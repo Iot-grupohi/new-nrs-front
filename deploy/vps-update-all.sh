@@ -51,6 +51,9 @@ patch_env "FIREBASE_STATUS_COLLECTION" "store_status"
 patch_env "FIREBASE_STATUS_WRITE_INTERVAL_SEC" "45"
 patch_env "FIREBASE_STATUS_READ_FIRESTORE" "1"
 patch_env "FIREBASE_STATUS_HYDRATE_ON_START" "1"
+patch_env "FIREBASE_DATABASE_URL" "https://portal-franqueado-lav60-default-rtdb.firebaseio.com"
+patch_env "FIREBASE_RTD_HEARTBEAT_ENABLED" "1"
+patch_env "FIREBASE_RTD_HEARTBEAT_PATH" ""
 
 if [[ -n "${DIGITALOCEAN_TOKEN:-}" ]]; then
   patch_env "DIGITALOCEAN_TOKEN" "$DIGITALOCEAN_TOKEN"
