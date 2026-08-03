@@ -11,14 +11,14 @@ import sys
 from pathlib import Path
 from urllib.parse import urlencode
 
+_BACKEND_DIR = Path(__file__).resolve().parent
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+
 from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from panel.lav60_env import FRONTEND_DIR
-from panel.runtime_paths import backend_dir
-
-if str(backend_dir()) not in sys.path:
-    sys.path.insert(0, str(backend_dir()))
 
 _HTML_NO_CACHE = {
     "Cache-Control": "no-cache, no-store, must-revalidate",

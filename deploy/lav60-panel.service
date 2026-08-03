@@ -7,6 +7,7 @@ Type=simple
 WorkingDirectory=/root/lav60-panel
 EnvironmentFile=/root/lav60-panel/.env
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/root/lav60-panel/backend
 
 ExecStart=/root/lav60-panel/.venv/bin/gunicorn \
     -w 1 \
