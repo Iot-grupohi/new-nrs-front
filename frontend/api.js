@@ -2634,6 +2634,23 @@
     return friendlyUserMessage(msg);
   }
 
+  function syncGatewayVerifyToPanels(storeId, result) {
+    const sid = normalizeStoreId(storeId);
+    if (!sid || !result || result.skipped) return;
+    window.Lav60GatewayOverview?.noteStoreStatus?.(sid, {
+      online: result.online === true,
+      apiOnline: result.apiOnline === true,
+      error: result.error || null,
+      checkedAt: result.checkedAt || Date.now(),
+      gatewayOfflineSinceMs: result.online === true ? null : result.checkedAt || Date.now(),
+    });
+  }
+
+  function publishGatewayVerifyResult(storeId, result) {
+    syncGatewayVerifyToPanels(storeId, result);
+    return result;
+  }
+
   async function verifyStoreGatewayLed(storeId, fetchFn, { force = false } = {}) {
     const sid = normalizeStoreId(storeId);
     if (!sid) throw new Error('Loja inválida');
@@ -2645,26 +2662,26 @@
       const inCatalog = catalogStores.some((meta) => normalizeStoreId(meta.id) === sid);
       if (!inCatalog) {
         const error = formatStoreGatewayError(sid, 'not found');
-        return {
+        return publishGatewayVerifyResult(sid, {
           online: false,
           error,
           fromCache: false,
           checkedAt: Date.now(),
           apiOnline: false,
           skipped: true,
-        };
+        });
       }
     }
 
     const cached = getStoreGatewayCacheEntry(sid);
     if (!force && cached && isGatewayCacheFresh(cached.checkedAt)) {
-      return {
+      return publishGatewayVerifyResult(sid, {
         online: Boolean(cached.online),
         error: cached.error || null,
         fromCache: true,
         checkedAt: cached.checkedAt,
         apiOnline: Boolean(cached.apiOnline ?? cached.online),
-      };
+      });
     }
 
     const res = await fetchFn(`/api/gateway/${encodeURIComponent(sid)}/verify`, {
@@ -2677,13 +2694,13 @@
       const detail = data.detail || data.error || data.message || `HTTP ${res.status}`;
       const error = formatStoreGatewayError(sid, detail);
       setStoreGatewayCacheEntry(sid, { online: false, error, apiOnline: false });
-      return {
+      return publishGatewayVerifyResult(sid, {
         online: false,
         error,
         fromCache: false,
         checkedAt: Date.now(),
         apiOnline: false,
-      };
+      });
     }
 
     const online = data.gateway_online === true;
@@ -2691,7 +2708,13 @@
     const error = online ? null : formatStoreGatewayError(sid, data.gateway_error);
     const checkedAt = data.gateway_checked_at_ms || Date.now();
     setStoreGatewayCacheEntry(sid, { online, error, apiOnline: apiOnline || online });
-    return { online, error, fromCache: false, checkedAt, apiOnline: apiOnline || online };
+    return publishGatewayVerifyResult(sid, {
+      online,
+      error,
+      fromCache: false,
+      checkedAt,
+      apiOnline: apiOnline || online,
+    });
   }
 
   async function fetchStoreStatuses(fetchFn, options = {}) {

@@ -125,7 +125,27 @@
 
   function overviewStatusForStore(storeId) {
     const sid = normalizeStoreId(storeId);
-    return storeOverviewStatus[sid] || getStoreGatewayCacheEntry(sid) || null;
+    const overview = storeOverviewStatus[sid] || null;
+    const cached = getStoreGatewayCacheEntry(sid) || null;
+    if (!cached) return overview;
+    if (!overview) return { ...cached, checking: false };
+    if (overview.checking) return overview;
+
+    const cachedAt = Number(cached.checkedAt) || 0;
+    const overviewAt = Number(overview.checkedAt) || 0;
+    const cachedFresh = cachedAt > 0 && isGatewayCacheFresh(cachedAt);
+    const overviewFresh = overviewAt > 0 && isGatewayCacheFresh(overviewAt);
+
+    if (cachedFresh && (!overviewFresh || cachedAt >= overviewAt)) {
+      return {
+        ...cached,
+        checking: false,
+        agentAlive: overview.agentAlive,
+        agentOfflineSinceMs: overview.agentOfflineSinceMs,
+        gatewayOfflineSinceMs: cached.online ? null : overview.gatewayOfflineSinceMs,
+      };
+    }
+    return overview;
   }
 
   function getOnlineStoreMetas() {

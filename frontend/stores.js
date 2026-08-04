@@ -2643,7 +2643,7 @@
         if (currentPageMode !== 'dashboard' || !lastPayload?.dashboard) return;
         renderDashboard(lastPayload.dashboard, lastPayload);
       },
-      probeActiveOnMount: false,
+      probeActiveOnMount: true,
     });
   }
 

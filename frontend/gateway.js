@@ -188,7 +188,7 @@
 
   function onlineStoresForGet02() {
     const fromOverview = window.Lav60GatewayOverview?.getOnlineStoreMetas?.();
-    if (Array.isArray(fromOverview)) return fromOverview;
+    if (Array.isArray(fromOverview) && fromOverview.length) return fromOverview;
     return (catalog?.stores || []).filter((meta) => isGet02StoreOnline(meta));
   }
 
@@ -1898,14 +1898,14 @@
           void applyStore(sid);
         },
         onStoresUpdated: () => refreshGet02HubList(),
-        probeActiveOnMount: false,
+        probeActiveOnMount: true,
       });
       mountGet02HubList();
       if (initial) {
         void Lav60GatewayOverview?.probeStore?.(initial, { force: false });
         void applyStore(initial);
       } else {
-        Lav60GatewayOverview?.refreshFromCache?.({ fetchServer: false });
+        Lav60GatewayOverview?.refreshFromCache?.({ fetchServer: true });
       }
     } catch (err) {
       showToast(err.message, false);
