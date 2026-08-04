@@ -1,9 +1,15 @@
 # Envia JSON do Firebase, sincroniza tokens do .env local e atualiza a VPS.
 # Uso (PowerShell na pasta do projeto):
-#   .\deploy\update-vps-from-windows.ps1
+#   .\deploy\update-vps-from-windows.ps1          # exige origin/main atualizado
+#   .\deploy\update-vps-from-windows.ps1 -Push    # git push + deploy
+
+param(
+  [switch]$Push
+)
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+Set-Location $Root
 $EnvFile = Join-Path $Root ".env"
 $Vps = "root@161.97.110.117"
 $RemoteDir = "/root/lav60-panel"
@@ -46,6 +52,35 @@ if (-not $openAiKey) {
   Write-Host "AVISO: OPENAI_API_KEY nao encontrado no .env local (assistente IA desativado)" -ForegroundColor Yellow
 }
 
+Write-Host "==> Verificando Git (a VPS usa origin/main, nao o codigo local)" -ForegroundColor Cyan
+git fetch origin main 2>&1 | Out-Null
+$localHead = (git rev-parse HEAD).Trim()
+$remoteHead = (git rev-parse origin/main).Trim()
+$ahead = [int](git rev-list --count "origin/main..HEAD" 2>$null)
+if ($ahead -gt 0) {
+  Write-Host ""
+  Write-Host "ERRO: $ahead commit(s) local(is) ainda nao enviado(s) para origin/main." -ForegroundColor Red
+  Write-Host "  Local:  $(git log -1 --oneline HEAD)"
+  Write-Host "  Remoto: $(git log -1 --oneline origin/main)"
+  Write-Host ""
+  if ($Push) {
+    Write-Host "Enviando commits para origin/main (-Push)..." -ForegroundColor Yellow
+    git push origin main
+    git fetch origin main 2>&1 | Out-Null
+    $remoteHead = (git rev-parse origin/main).Trim()
+    $ahead = [int](git rev-list --count "origin/main..HEAD" 2>$null)
+    if ($ahead -gt 0) {
+      Write-Host "ERRO: push concluido mas origin/main ainda difere do HEAD local." -ForegroundColor Red
+      exit 1
+    }
+  } else {
+    Write-Host "Execute: git push origin main" -ForegroundColor Yellow
+    Write-Host "   ou:  .\deploy\update-vps-from-windows.ps1 -Push" -ForegroundColor Yellow
+    exit 1
+  }
+}
+Write-Host "  OK: origin/main = $(git log -1 --oneline origin/main)"
+
 Write-Host "1/2 Enviando service account para VPS..." -ForegroundColor Cyan
 scp $JsonLocal "${Vps}:${JsonRemote}"
 
@@ -68,6 +103,19 @@ bash deploy/vps-update-all.sh
 ssh $Vps $remoteCmd
 
 Write-Host ""
+Write-Host "==> Versao em producao (store.html)" -ForegroundColor Cyan
+try {
+  $prod = (curl.exe -s -m 20 "https://nrs.lav60.com/store.html" 2>$null) -join "`n"
+  $apiVer = if ($prod -match 'api\.js\?v=(\d+)') { $Matches[1] } else { "?" }
+  $storeVer = if ($prod -match 'store\.js\?v=(\d+)') { $Matches[1] } else { "?" }
+  Write-Host "  nrs.lav60.com -> api.js?v=$apiVer store.js?v=$storeVer"
+} catch {
+  Write-Host "  AVISO: nao foi possivel verificar store.html em producao" -ForegroundColor Yellow
+}
+
+Write-Host ""
 Write-Host "Concluido. Teste:" -ForegroundColor Green
 Write-Host "  https://nrs.lav60.com/index.html#/infra/vps"
 Write-Host "  https://nrs.lav60.com/index.html#/registros"
+Write-Host ""
+Write-Host "Lembrete: alteracoes em agent_cloudflare/ exigem update do agente na loja (nao vai pela VPS)." -ForegroundColor DarkGray
