@@ -32,6 +32,7 @@ def _machine_type_key(raw: Any) -> str:
         "secadora": "dryer",
         "doser": "doser",
         "dosadora": "doser",
+        "dosage": "doser",
     }
     return aliases.get(value, value)
 

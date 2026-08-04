@@ -48,6 +48,10 @@
     isAgentsDisabled,
     isPowpayHealthPanel,
     isRtdbOnlyPanel,
+    dryerMinuteChoices,
+    dryerChoicePickerColumns,
+    dryerChoiceRequireSelection,
+    fetchPortalMachinesCatalog,
   } = window.Lav60;
 
   const pageStoreFromUrl = () =>
@@ -833,12 +837,8 @@
       if (merged.length) payload.machines = merged;
     }
     const networkSource = data && typeof data === 'object' ? data : null;
-    if (payload) {
-      delete payload.washers;
-      delete payload.dryers;
-      delete payload.dosers;
-      delete payload.ac;
-    }
+    // Mapas de rede (washers/dryers/dosers) são necessários para exibir TITAN (321/210/321)
+    // em isDeviceVisibleInFrontend — o card das lojas usa a mesma regra do dashboard.
     statusData = payload ? applyFrontendDeviceVisibility(payload, acId) : payload;
     if (config) {
       if (statusData?.machines?.length) {
@@ -902,6 +902,23 @@
     }
   }
 
+  async function supplementMachinesFromPortal() {
+    const portal = await fetchPortalMachinesCatalog(pageStore);
+    if (!portal.length) return false;
+    const merged = mergeMachinesCatalog(config?.machines, statusData?.machines, portal);
+    if (!merged.length) return false;
+    if (config) config.machines = merged;
+    if (statusData) {
+      statusData.machines = merged;
+      applyStatus(statusData, { render: uiReady });
+    } else if (config) {
+      syncConfigDevices(config, statusData);
+      rebuildPingStatusFromConfig();
+      if (uiReady) renderDevices();
+    }
+    return true;
+  }
+
   async function loadConfig() {
     if (!agentEndpoint || agentEndpoint.unmatched) {
       agentEndpoint = await resolveAgentEndpointForStore(storeMeta, catalog, agentToken);
@@ -910,7 +927,8 @@
       throw new Error(noAgentMessage(pageStore));
     }
     config = await fetchAgentConfig(storeMeta, catalog, agentToken, agentEndpoint);
-    const merged = mergeMachinesCatalog(config.machines, statusData?.machines);
+    const portal = await fetchPortalMachinesCatalog(pageStore);
+    const merged = mergeMachinesCatalog(config.machines, statusData?.machines, portal);
     if (merged.length) {
       config.machines = merged;
       if (statusData) statusData.machines = merged;
@@ -1461,11 +1479,11 @@
           statusEl.setAttribute('aria-live', 'polite');
           actions.appendChild(statusEl);
 
-          const minuteOptions = (config.dryer_minutes || [15, 30, 45]).map((min) => ({
-            value: String(min),
-            label: `${min} min`,
-          }));
-          const picker = createChoicePicker(minuteOptions, { columns: 3, requireSelection: true });
+          const minuteOptions = dryerMinuteChoices(meta, config.dryer_minutes);
+          const picker = createChoicePicker(minuteOptions, {
+            columns: dryerChoicePickerColumns(meta),
+            requireSelection: dryerChoiceRequireSelection(meta),
+          });
           if (!ctx.operable) picker.setDisabled(true);
           actions.appendChild(picker.root);
 
@@ -1838,6 +1856,10 @@
           alive: statusCache?.alive,
         });
       }
+
+      void supplementMachinesFromPortal().then((ok) => {
+        if (ok) lav60Debug('store', 'machines supplemented from portal API');
+      });
 
       lav60Debug('store', 'cache', {
         hasCard: Boolean(cached?.card),

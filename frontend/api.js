@@ -1271,6 +1271,31 @@
     return model === 'giant' || model === 'titan' ? model : '';
   }
 
+  const TITAN_DRYER_MINUTES = 60;
+
+  function isTitanDryer(meta) {
+    if (machineRecordType(meta) !== 'dryer') return false;
+    if (machineModelLabel(meta) === 'titan') return true;
+    return normalizeStoreId(meta?.id) === '210';
+  }
+
+  /** Secadora TITAN: um único pulso de 60 min; GIANT: opções do config (15/30/45). */
+  function dryerMinuteChoices(meta, minutesList) {
+    if (isTitanDryer(meta)) {
+      return [{ value: String(TITAN_DRYER_MINUTES), label: '60 min' }];
+    }
+    const list = Array.isArray(minutesList) && minutesList.length ? minutesList : [15, 30, 45];
+    return list.map((min) => ({ value: String(min), label: `${min} min` }));
+  }
+
+  function dryerChoicePickerColumns(meta) {
+    return isTitanDryer(meta) ? 1 : 3;
+  }
+
+  function dryerChoiceRequireSelection(_meta) {
+    return true;
+  }
+
   /** Dosadora espelha a lavadora com o mesmo ID (ex.: dos 432 → lav 432). */
   function doserWasherLink(doserId, machines) {
     const did = normalizeStoreId(doserId);
@@ -1314,6 +1339,7 @@
       doser: 'doser',
       dosadora: 'doser',
       dosadoras: 'doser',
+      dosage: 'doser',
     };
     return aliases[value] || value;
   }
@@ -1650,6 +1676,37 @@
     });
   }
 
+  function catalogTitanMachine(machines, dtype) {
+    return (machines || []).find(
+      (m) => machineRecordType(m) === dtype && machineModelLabel(m) === 'titan'
+    );
+  }
+
+  function catalogHasTitanOfType(machines, dtype) {
+    return Boolean(catalogTitanMachine(machines, dtype));
+  }
+
+  function canonicalFixedExtraId(dtype) {
+    const rule = HIDE_WHEN_OFFLINE.find((row) => row.type === dtype);
+    return rule ? normalizeStoreId(rule.id) : null;
+  }
+
+  function resolveFixedExtraNetworkOnline(dtype, machineId, network) {
+    const mid = normalizeStoreId(machineId);
+    const key =
+      dtype === 'washer' ? 'washers' : dtype === 'dryer' ? 'dryers' : dtype === 'doser' ? 'dosers' : null;
+    if (!key || !network) return false;
+    const block = network[key] || {};
+    if (isNetworkMapOnline(block[mid])) return true;
+    const titan = catalogTitanMachine(network.machines, dtype);
+    if (!titan) return false;
+    const titanId = normalizeStoreId(titan.id);
+    if (titanId !== mid && isNetworkMapOnline(block[titanId])) return true;
+    const addr = String(titan.address || titan.ip || '').trim();
+    if (addr && isNetworkMapOnline(block[normalizeStoreId(addr)])) return true;
+    return false;
+  }
+
   function isFixedMapExtra(deviceType, machineId) {
     const mid = normalizeStoreId(machineId);
     const dtype = String(deviceType || '').toLowerCase();
@@ -1678,9 +1735,15 @@
       if (!Array.isArray(machines) || !machines.length) {
         return false;
       }
-      return machines.some(
-        (m) => machineRecordType(m) === dtype && normalizeStoreId(m.id) === mid
-      );
+      if (
+        machines.some(
+          (m) => machineRecordType(m) === dtype && normalizeStoreId(m.id) === mid
+        )
+      ) {
+        return true;
+      }
+      const canonicalId = canonicalFixedExtraId(dtype);
+      return Boolean(canonicalId && mid === canonicalId && catalogHasTitanOfType(machines, dtype));
     }
 
     if (!Array.isArray(machines)) {
@@ -1710,10 +1773,33 @@
 
     const mustBeOnline = isFixedMapExtra(dtype, mid);
     if (!mustBeOnline) return true;
-    const key =
-      dtype === 'washer' ? 'washers' : dtype === 'dryer' ? 'dryers' : dtype === 'doser' ? 'dosers' : null;
-    if (!key || !network) return false;
-    return isNetworkMapOnline((network[key] || {})[mid]);
+    return resolveFixedExtraNetworkOnline(dtype, mid, network);
+  }
+
+  async function fetchPortalMachinesCatalog(storeId) {
+    const sid = normalizeStoreId(storeId);
+    if (!sid) return [];
+    const urls = [
+      `/api/stores/${encodeURIComponent(sid)}/machines`,
+      `/api/gateway/machines/${encodeURIComponent(sid)}`,
+      `/api/gateway/${encodeURIComponent(sid)}/machines`,
+    ];
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, {
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (Array.isArray(data.machines) && data.machines.length) {
+          return normalizeMachinesList(data.machines);
+        }
+      } catch {
+        /* tenta próxima rota */
+      }
+    }
+    return [];
   }
 
   function applyFrontendDeviceVisibility(status, acId = '110') {
@@ -5325,6 +5411,11 @@
     mergeMachinesCatalog,
     normalizeMachineCapacity,
     machineModelLabel,
+    isTitanDryer,
+    dryerMinuteChoices,
+    dryerChoicePickerColumns,
+    dryerChoiceRequireSelection,
+    TITAN_DRYER_MINUTES,
     machineDisplayTitle,
     looksLikeUuid,
     doserWasherLink,
@@ -5344,6 +5435,7 @@
     syncConfigDevices,
     isDeviceVisibleInFrontend,
     isDeviceRegisteredInCatalog,
+    fetchPortalMachinesCatalog,
     isDoserMirroredToWasher,
     applyFrontendDeviceVisibility,
     resolveStoreLav60Status,

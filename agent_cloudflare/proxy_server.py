@@ -1334,7 +1334,7 @@ def normalize_api_machine_type(raw: str | None) -> str:
     aliases = {
         'washer': 'washer', 'lavadora': 'washer', 'washers': 'washer',
         'dryer': 'dryer', 'secadora': 'dryer', 'dryers': 'dryer',
-        'doser': 'doser', 'dosadora': 'doser', 'dosadoras': 'doser',
+        'doser': 'doser', 'dosadora': 'doser', 'dosadoras': 'doser', 'dosage': 'doser',
         'ac': 'ac', 'ar': 'ac', 'air-conditioner': 'ac',
     }
     return aliases.get(value, '')
@@ -1962,6 +1962,39 @@ def registered_device_keys() -> frozenset[tuple[str, str]] | None:
     return frozenset(keys)
 
 
+def _catalog_has_titan(dtype: str) -> bool:
+    for machine in get_store_machines_list():
+        if canonical_device_type(machine.get('type', '')) != dtype:
+            continue
+        cap = normalize_machine_capacity(str(machine.get('capacity') or machine.get('capacity_raw') or ''))
+        if cap == 'titan':
+            return True
+    return False
+
+
+def _resolve_fixed_extra_network_online(dtype: str, machine_id: str, network: dict | None) -> bool:
+    mid = normalize_machine_id(machine_id)
+    group_key = {'washer': 'washers', 'dryer': 'dryers', 'doser': 'dosers'}.get(dtype)
+    if not group_key or not network:
+        return False
+    items = network.get(group_key) or {}
+    if items.get(mid) is True:
+        return True
+    for machine in get_store_machines_list():
+        if canonical_device_type(machine.get('type', '')) != dtype:
+            continue
+        cap = normalize_machine_capacity(str(machine.get('capacity') or machine.get('capacity_raw') or ''))
+        if cap != 'titan':
+            continue
+        tid = normalize_machine_id(str(machine.get('id', '')))
+        if tid != mid and items.get(tid) is True:
+            return True
+        addr = normalize_device_address(str(machine.get('address') or '').strip())
+        if addr and items.get(addr) is True:
+            return True
+    return False
+
+
 def is_device_registered_in_catalog(device_type: str, machine_id: str) -> bool:
     """Lav/sec exigem API Lav60; dosadoras usam mapa local (ping). Extras 321/210/321 só na API."""
     dtype = canonical_device_type(device_type) or str(device_type or '').strip().lower()
@@ -1970,7 +2003,10 @@ def is_device_registered_in_catalog(device_type: str, machine_id: str) -> bool:
         registered = registered_device_keys()
         if registered is None:
             return False
-        return (dtype, mid) in registered
+        if (dtype, mid) in registered:
+            return True
+        canonical = {'washer': '321', 'dryer': '210', 'doser': '321'}
+        return mid == canonical.get(dtype) and _catalog_has_titan(dtype)
     if dtype == 'doser':
         return mid in get_doser_map()
     registered = registered_device_keys()
@@ -1988,13 +2024,7 @@ def is_device_visible_in_frontend(device_type: str, machine_id: str, network: di
     if (dtype, mid) not in FRONTEND_HIDE_WHEN_OFFLINE:
         return True
     net = network if network is not None else get_cached_network_status()
-    if not net:
-        return False
-    group_key = {'washer': 'washers', 'dryer': 'dryers', 'doser': 'dosers'}.get(dtype)
-    if not group_key:
-        return False
-    items = net.get(group_key) or {}
-    return items.get(mid) is True
+    return _resolve_fixed_extra_network_online(dtype, mid, net)
 
 
 def filter_machines_for_frontend(machines: list[dict], network: dict | None = None) -> list[dict]:
@@ -2601,8 +2631,16 @@ def build_dosadora_response_info(machine_id: str, params: dict) -> dict | None:
     }
 
 
-def get_dryer_release_count(timer: int) -> int:
+def get_dryer_release_count(timer: int, machine_id: str | None = None) -> int:
+    if machine_id and normalize_machine_id(machine_id) == '210':
+        return 1
     return DRYER_TIMER_RELEASES.get(timer, 1)
+
+
+def allowed_dryer_minutes(machine_id: str) -> set[int]:
+    if normalize_machine_id(machine_id) == '210':
+        return {60}
+    return set(DRYER_TIMER_RELEASES.keys())
 
 
 def device_catalog(network: dict | None = None) -> dict:
@@ -2792,7 +2830,7 @@ def release_machine_impl(params: dict) -> tuple[dict, int]:
 
     is_dryer = is_dryer_id(machine_id)
     timer = int(params.get('timer', 0) or 0) if is_dryer else 0
-    release_count = get_dryer_release_count(timer) if is_dryer else 1
+    release_count = get_dryer_release_count(timer, machine_id) if is_dryer else 1
 
     future = thread_executor.submit(
         process_release_async,
@@ -3048,12 +3086,12 @@ def gateway_release_dryer(store: str, machine: str, minutes: int):
     mid = normalize_machine_id(machine)
     if not is_dryer_id(mid):
         return err_equipamento_invalido()
-    if minutes not in DRYER_TIMER_RELEASES:
+    if minutes not in allowed_dryer_minutes(mid):
         return err_parametro_invalido()
 
     store_key = normalize_store_id(store)
     target_url = get_release_url(mid, 'dryer')
-    release_count = get_dryer_release_count(minutes)
+    release_count = get_dryer_release_count(minutes, mid)
     request_id = getattr(request, 'request_id', f"dryer_{mid}_{int(time.time() * 1000)}")
 
     try:

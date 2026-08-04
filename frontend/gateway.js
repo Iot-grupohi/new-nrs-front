@@ -26,6 +26,9 @@
     getStoreGatewayCacheEntry,
     setStoreGatewayCacheEntry,
     isStoreCardSuspended,
+    dryerMinuteChoices,
+    dryerChoicePickerColumns,
+    dryerChoiceRequireSelection,
   } = window.Lav60;
   const { guardPage, mountUserMenu, panelFetch } = window.Lav60Auth;
 
@@ -1650,7 +1653,7 @@
     grid.innerHTML = '';
     if (!gatewayConfig) return;
     setSectionCount('dryersCount', pingStatus?.dryers);
-    const minutes = gatewayConfig.dryer_minutes || [15, 30, 45];
+    const defaultMinutes = gatewayConfig.dryer_minutes || [15, 30, 45];
     visibleDeviceIds('dryer', gatewayConfig.dryers).forEach((id) => {
       const online = deviceOnline('dryer', id);
       const meta = getMachineMeta(id, 'dryer');
@@ -1664,8 +1667,11 @@
           statusEl.setAttribute('aria-live', 'polite');
           actions.appendChild(statusEl);
 
-          const minuteOptions = minutes.map((min) => ({ value: String(min), label: `${min} min` }));
-          const picker = createChoicePicker(minuteOptions, { columns: 3, requireSelection: true });
+          const minuteOptions = dryerMinuteChoices(meta, defaultMinutes);
+          const picker = createChoicePicker(minuteOptions, {
+            columns: dryerChoicePickerColumns(meta),
+            requireSelection: dryerChoiceRequireSelection(meta),
+          });
           if (!ctx.operable) picker.setDisabled(true);
           actions.appendChild(picker.root);
 
