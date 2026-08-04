@@ -3,6 +3,8 @@
 
   const OFFLINE_SINCE_KEY = 'lav60_offline_since';
   const ONLINE_SINCE_KEY = 'lav60_online_since';
+  /** Último estado de pulso por loja — detecta transição online→offline no painel. */
+  const storeAgentPulseState = new Map();
   const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
   const TtlCache = () => window.Lav60Cache || null;
   const STORES_PAYLOAD_CACHE_KEY = 'lav60:panel:stores-payload';
@@ -2665,40 +2667,74 @@
     return card.heartbeatAlive === true;
   }
 
+  function resolveStoreOfflineSinceMs(card, sid, prev, offlineMap, nowMs) {
+    const backendOffline =
+      card.agent_offline_since_ms != null ? Number(card.agent_offline_since_ms) : null;
+    const backendOnline =
+      card.agent_online_since_ms != null ? Number(card.agent_online_since_ms) : null;
+    const lastOnlineAt = Math.max(
+      prev?.lastOnlineAt ?? 0,
+      backendOnline && !Number.isNaN(backendOnline) ? backendOnline : 0
+    ) || null;
+    const cachedOffline = offlineMap[sid] != null ? Number(offlineMap[sid]) : null;
+
+    if (prev?.online === true) {
+      return nowMs;
+    }
+    if (lastOnlineAt) {
+      if (backendOffline && backendOffline < lastOnlineAt) return nowMs;
+      if (cachedOffline && cachedOffline < lastOnlineAt) return nowMs;
+      if (!backendOffline && !cachedOffline) return nowMs;
+    }
+    if (backendOffline && !Number.isNaN(backendOffline)) return backendOffline;
+    if (cachedOffline && !Number.isNaN(cachedOffline)) return cachedOffline;
+    return nowMs;
+  }
+
   function syncStoreOfflineSince(cards) {
     const offlineMap = loadOfflineSinceMap();
     let offlineChanged = false;
     const cat = heartbeatCatalog;
+    const nowMs = Date.now();
 
     cards.forEach((card) => {
       if (card.loading) return;
 
+      const sid = normalizeStoreId(card.id);
+      if (!sid) return;
+
       const agentOnline = isRtdbOnlyPanel(cat)
         ? isStorePulseOnlineCard(card, cat)
         : isCardAgentReachable(card);
+      const prev = storeAgentPulseState.get(sid);
 
       if (!agentOnline) {
-        if (card.agent_offline_since_ms != null) {
-          card.offlineSince = card.agent_offline_since_ms;
-          if (offlineMap[card.id] !== card.agent_offline_since_ms) {
-            offlineMap[card.id] = card.agent_offline_since_ms;
-            offlineChanged = true;
-          }
-        } else if (!offlineMap[card.id]) {
-          offlineMap[card.id] = Date.now();
+        const offlineSince = resolveStoreOfflineSinceMs(card, sid, prev, offlineMap, nowMs);
+        card.offlineSince = offlineSince;
+        if (offlineMap[sid] !== offlineSince) {
+          offlineMap[sid] = offlineSince;
           offlineChanged = true;
-          card.offlineSince = offlineMap[card.id];
-        } else {
-          card.offlineSince = offlineMap[card.id];
         }
-        card.onlineSince = card.agent_online_since_ms ?? null;
+        card.onlineSince = null;
+        storeAgentPulseState.set(sid, {
+          online: false,
+          lastOnlineAt: prev?.lastOnlineAt ?? null,
+        });
       } else {
-        if (offlineMap[card.id]) {
-          delete offlineMap[card.id];
+        const lastOnlineAt =
+          card.agent_online_since_ms != null
+            ? Number(card.agent_online_since_ms)
+            : prev?.lastOnlineAt ?? nowMs;
+        if (offlineMap[sid]) {
+          delete offlineMap[sid];
           offlineChanged = true;
         }
         card.offlineSince = null;
-        card.onlineSince = card.agent_online_since_ms ?? null;
+        card.onlineSince = card.agent_online_since_ms ?? lastOnlineAt;
+        storeAgentPulseState.set(sid, {
+          online: true,
+          lastOnlineAt: Number.isFinite(lastOnlineAt) ? lastOnlineAt : nowMs,
+        });
       }
     });
 

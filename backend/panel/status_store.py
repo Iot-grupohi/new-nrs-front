@@ -399,13 +399,24 @@ def _merge_availability_windows(
         doc.pop("agent_offline_since_ms", None)
     else:
         received_at = float(doc.get("received_at") or time.time())
+        offline_start = int((received_at + timeout_seconds) * 1000)
         if was_alive:
-            doc["agent_offline_since_ms"] = int((received_at + timeout_seconds) * 1000)
+            doc["agent_offline_since_ms"] = offline_start
         else:
-            doc["agent_offline_since_ms"] = (
-                (existing.get("agent_offline_since_ms") if existing else None)
-                or int((received_at + timeout_seconds) * 1000)
-            )
+            existing_offline = existing.get("agent_offline_since_ms") if existing else None
+            existing_online = existing.get("agent_online_since_ms") if existing else None
+            # Loja voltou online após offline antigo — reinicia janela offline atual.
+            if isinstance(existing_online, (int, float)) and (
+                not isinstance(existing_offline, (int, float))
+                or int(existing_online) >= int(existing_offline)
+            ):
+                doc["agent_offline_since_ms"] = offline_start
+            else:
+                doc["agent_offline_since_ms"] = (
+                    int(existing_offline)
+                    if isinstance(existing_offline, (int, float))
+                    else offline_start
+                )
         doc.pop("agent_online_since_ms", None)
     return doc
 
@@ -457,10 +468,16 @@ def _public_doc(raw: dict[str, Any] | None, timeout_seconds: int = 60) -> dict[s
             doc["agent_offline_since_ms"] = None
         else:
             offline_ms = doc.get("agent_offline_since_ms")
-            if not offline_ms:
+            online_ms = doc.get("agent_online_since_ms")
+            computed_offline = int((float(received_at) + timeout_seconds) * 1000)
+            if isinstance(online_ms, (int, float)) and (
+                not isinstance(offline_ms, (int, float)) or int(online_ms) >= int(offline_ms)
+            ):
+                offline_ms = computed_offline
+            elif not offline_ms:
                 # Calcula na resposta; não grava em memória (evita revision thrash no GET).
-                offline_ms = int((float(received_at) + timeout_seconds) * 1000)
-            doc["agent_offline_since_ms"] = offline_ms
+                offline_ms = computed_offline
+            doc["agent_offline_since_ms"] = int(offline_ms)
             doc["agent_online_since_ms"] = None
     doc["timeout_seconds"] = timeout_seconds
     config_snap = doc.get("config_snapshot")
