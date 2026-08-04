@@ -10,6 +10,44 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $Root
+
+function Invoke-Git {
+  param(
+    [Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)]
+    [string[]]$GitArgs
+  )
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $output = & git @GitArgs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      if ($output) { Write-Host ($output | Out-String).Trim() -ForegroundColor Red }
+      throw "git $($GitArgs -join ' ') falhou (exit $LASTEXITCODE)"
+    }
+    return $output
+  } finally {
+    $ErrorActionPreference = $prev
+  }
+}
+
+function Invoke-GitQuiet {
+  param(
+    [Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)]
+    [string[]]$GitArgs
+  )
+  Invoke-Git @GitArgs | Out-Null
+}
+
+function Get-GitOutput {
+  param(
+    [Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)]
+    [string[]]$GitArgs
+  )
+  $text = Invoke-Git @GitArgs
+  if ($null -eq $text) { return "" }
+  if ($text -is [System.Array]) { return ($text | Out-String).Trim() }
+  return [string]$text
+}
 $EnvFile = Join-Path $Root ".env"
 $Vps = "root@161.97.110.117"
 $RemoteDir = "/root/lav60-panel"
@@ -53,22 +91,22 @@ if (-not $openAiKey) {
 }
 
 Write-Host "==> Verificando Git (a VPS usa origin/main, nao o codigo local)" -ForegroundColor Cyan
-git fetch origin main 2>&1 | Out-Null
-$localHead = (git rev-parse HEAD).Trim()
-$remoteHead = (git rev-parse origin/main).Trim()
-$ahead = [int](git rev-list --count "origin/main..HEAD" 2>$null)
+Invoke-GitQuiet fetch origin main
+$localHead = Get-GitOutput rev-parse HEAD
+$remoteHead = Get-GitOutput rev-parse origin/main
+$ahead = [int](Get-GitOutput rev-list --count "origin/main..HEAD")
 if ($ahead -gt 0) {
   Write-Host ""
   Write-Host "ERRO: $ahead commit(s) local(is) ainda nao enviado(s) para origin/main." -ForegroundColor Red
-  Write-Host "  Local:  $(git log -1 --oneline HEAD)"
-  Write-Host "  Remoto: $(git log -1 --oneline origin/main)"
+  Write-Host "  Local:  $(Get-GitOutput log -1 --oneline HEAD)"
+  Write-Host "  Remoto: $(Get-GitOutput log -1 --oneline origin/main)"
   Write-Host ""
   if ($Push) {
     Write-Host "Enviando commits para origin/main (-Push)..." -ForegroundColor Yellow
-    git push origin main
-    git fetch origin main 2>&1 | Out-Null
-    $remoteHead = (git rev-parse origin/main).Trim()
-    $ahead = [int](git rev-list --count "origin/main..HEAD" 2>$null)
+    Invoke-GitQuiet push origin main
+    Invoke-GitQuiet fetch origin main
+    $remoteHead = Get-GitOutput rev-parse origin/main
+    $ahead = [int](Get-GitOutput rev-list --count "origin/main..HEAD")
     if ($ahead -gt 0) {
       Write-Host "ERRO: push concluido mas origin/main ainda difere do HEAD local." -ForegroundColor Red
       exit 1
@@ -79,7 +117,7 @@ if ($ahead -gt 0) {
     exit 1
   }
 }
-Write-Host "  OK: origin/main = $(git log -1 --oneline origin/main)"
+Write-Host "  OK: origin/main = $(Get-GitOutput log -1 --oneline origin/main)"
 
 Write-Host "1/2 Enviando service account para VPS..." -ForegroundColor Cyan
 scp $JsonLocal "${Vps}:${JsonRemote}"
