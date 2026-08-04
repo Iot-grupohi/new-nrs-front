@@ -6,7 +6,7 @@
   const AUTH_ME_URL = '/api/auth/me';
   const AUTH_SESSION_URL = '/api/auth/session';
   const AUTH_TOUCH_URL = '/api/auth/touch';
-  const LOGIN_PAGE = 'login.html?v=3';
+  const LOGIN_PAGE = 'login.html?v=4';
   const AUTH_LOGOUT_URL = '/api/auth/logout';
 
   let authConfig = null;

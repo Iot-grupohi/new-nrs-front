@@ -62,6 +62,44 @@ async def audit_log(request: Request) -> dict[str, Any]:
     return {"ok": True, "collection": status.get("collection")}
 
 
+def _invalidate_operator_stats_cache() -> None:
+    _operator_stats_cache["key"] = None
+    _operator_stats_cache["data"] = None
+    _operator_stats_cache["expires_at"] = 0.0
+
+
+@router.post("/clear")
+async def audit_clear(request: Request) -> dict[str, Any]:
+    """Apaga todos os registros de auditoria. Requer sessão e confirmação explícita."""
+    status = await asyncio.to_thread(audit_store.audit_status)
+    if not status.get("available"):
+        raise HTTPException(503, "audit_unavailable")
+
+    user = get_session_user(request)
+    if auth_enabled() and not user:
+        raise HTTPException(401, "Login required")
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(400, "JSON inválido") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(400, "JSON inválido")
+    if body.get("confirm") != "CLEAR_ALL_AUDIT_LOGS":
+        raise HTTPException(
+            400,
+            'Confirme com {"confirm":"CLEAR_ALL_AUDIT_LOGS"}',
+        )
+
+    try:
+        result = await asyncio.to_thread(audit_store.clear_all_logs)
+    except Exception as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+    _invalidate_operator_stats_cache()
+    return result
+
+
 @router.get("/logs")
 async def audit_logs(
     limit: int = Query(50, ge=1, le=200),

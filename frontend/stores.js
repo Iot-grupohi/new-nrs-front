@@ -500,13 +500,6 @@
     return 'Agente offline';
   }
 
-  function renderHeartbeatSourceBadge(store) {
-    if (isAgentsDisabled(catalogConfig)) return '';
-    if (!isStorePulseOnline(store)) return '';
-    if (store.heartbeatSource !== 'rtdb') return '';
-    return `<span class="store-card__heartbeat-src store-card__heartbeat-src--rtdb" title="Pulso recebido via Firebase Realtime Database">RTDB</span>`;
-  }
-
   function buildStoreMetrics(store, { accessible, online, total, pct, suspended, operable }) {
     if (store.loading) {
       return { tone: 'neutral', segments: [], offlineReason: '' };
@@ -536,9 +529,6 @@
           since: store.onlineSince,
         });
       }
-      if (store.heartbeatSource === 'rtdb') {
-        segments.push({ kind: 'rtdb', text: 'Pulso RTDB' });
-      }
       tone = pct >= 90 ? 'ok' : pct >= 70 ? 'warn' : 'danger';
     } else if (agentUp && suspended) {
       if (total > 0) segments.push({ kind: 'equip', text: `${online}/${total}` });
@@ -552,9 +542,6 @@
           live: true,
           since: store.onlineSince,
         });
-      }
-      if (store.heartbeatSource === 'rtdb') {
-        segments.push({ kind: 'rtdb', text: 'Pulso RTDB' });
       }
       tone = 'suspended';
     } else if (suspended) {
@@ -823,7 +810,6 @@
           <div class="store-card__list-main">
             <span class="store-card__list-code">${escapeHtml(code)}</span>
             <span class="store-card__status pill pill--${pillState} pill--xs">${stateLabel}</span>
-            ${renderHeartbeatSourceBadge(store)}
             <span class="store-card__list-ratio" title="${online} de ${total} online">${ratio}</span>
             ${dotsHtml}
           </div>
@@ -924,7 +910,6 @@
           </div>
           <div class="store-card__status-group">
             <span class="store-card__status pill pill--${pillState}${isLojasCompactMode() ? ' pill--xs' : ''}">${stateLabel}</span>
-            ${renderHeartbeatSourceBadge(store)}
           </div>
         </div>
         ${bodyHtml}`;
@@ -1230,7 +1215,57 @@
     subtitle.textContent = 'Carregando monitoramento…';
   }
 
+  function storeOfflineReasonFromGateway(entry) {
+    const parts = [];
+    if (entry.agentAlive === false && entry.agentOfflineSinceMs) {
+      parts.push(`Agente offline há ${formatOfflineDuration(entry.agentOfflineSinceMs)}`);
+    }
+    if (entry.online === false) {
+      if (entry.error) parts.push(entry.error);
+      else if (entry.gatewayOfflineSinceMs) {
+        parts.push(`Gateway offline há ${formatOfflineDuration(entry.gatewayOfflineSinceMs)}`);
+      } else {
+        parts.push('Gateway offline');
+      }
+    } else if (entry.agentAlive === false && !parts.length) {
+      parts.push('Agente offline');
+    } else if (entry.online == null && !entry.checking) {
+      parts.push('Ainda não verificada');
+    } else if (!parts.length) {
+      parts.push('Sem conexão');
+    }
+    return parts.join(' · ') || 'Sem conexão';
+  }
+
+  function applyDashboardStoreOfflineFromGateway(dashboard) {
+    if (currentPageMode !== 'dashboard' || !isMqttGatewayEnabled(catalogConfig)) {
+      return dashboard;
+    }
+    const lists = window.Lav60GatewayOverview?.getDashboardEventLists?.();
+    if (!lists) return dashboard;
+
+    const stores = { ...(dashboard.stores || {}) };
+    const events = { ...(dashboard.events || {}) };
+    stores.offline = lists.offline.length;
+    events.stores_offline = lists.offline.map((entry) => {
+      const sid = String(entry.store || '').trim().toLowerCase();
+      return {
+        store: sid,
+        store_name: entry.name || sid.toUpperCase(),
+        state: 'unreachable',
+        summary_online: 0,
+        summary_total: 0,
+        kind: 'gateway_offline',
+        reason: storeOfflineReasonFromGateway(entry),
+        offline_since: entry.gatewayOfflineSinceMs || entry.agentOfflineSinceMs || null,
+      };
+    });
+
+    return { ...dashboard, stores, events };
+  }
+
   function renderDashboard(dashboard, payload) {
+    dashboard = applyDashboardStoreOfflineFromGateway(dashboard);
     const stores = dashboard.stores || {};
     const devices = dashboard.devices || {};
     lastDashboardEvents = dashboard.events || null;
@@ -1487,7 +1522,10 @@
     }
 
     ++channelPickerGeneration;
-    const label = store.name ? `${store.name} (${store.id.toUpperCase()})` : store.id.toUpperCase();
+    const sid = String(store.id || '').trim().toLowerCase();
+    const name = String(store.name || '').trim();
+    const label =
+      !name || name.toLowerCase() === sid ? sid.toUpperCase() : `${name} (${store.id.toUpperCase()})`;
     $('storeChannelTitle').textContent = label;
     $('storeChannelSubtitle').textContent = 'Escolha como operar esta loja';
     modal.classList.remove('hidden');
@@ -2600,6 +2638,10 @@
       getStores: gatewayDashboardStoreList,
       onStoreAction: (storeId) => {
         window.location.href = gatewayPageHref(storeId);
+      },
+      onStoresUpdated: () => {
+        if (currentPageMode !== 'dashboard' || !lastPayload?.dashboard) return;
+        renderDashboard(lastPayload.dashboard, lastPayload);
       },
       probeActiveOnMount: false,
     });

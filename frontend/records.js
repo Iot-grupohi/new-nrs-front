@@ -2,7 +2,7 @@
   'use strict';
 
   const PAGE_SIZE = 20;
-  const CACHE_VERSION = '14';
+  const CACHE_VERSION = '15';
   const CACHE_TTL_MS = 5 * 60 * 1000;
   const CACHE_PREFIX = `lav60:records:v${CACHE_VERSION}:`;
   const FILTERS_KEY = `${CACHE_PREFIX}filters`;
@@ -214,6 +214,26 @@
       action: filters.action,
       success: filters.success,
     };
+  }
+
+  function invalidateRecordsCaches() {
+    try {
+      Object.keys(sessionStorage).forEach((key) => {
+        if (key.startsWith(CACHE_PREFIX)) sessionStorage.removeItem(key);
+      });
+    } catch {
+      /* private mode */
+    }
+    pageSnapshots = {};
+    pageCursors = { 1: null };
+  }
+
+  function onAuditLogged() {
+    if (!recordsReady) return;
+    invalidateRecordsCaches();
+    resetPagination();
+    void loadOperatorStats({ force: true });
+    void fetchLogs({ page: 1, force: true });
   }
 
   function statsCacheKey(filters) {
@@ -853,11 +873,12 @@
     initFilters(signal);
     restoreFiltersFromSession();
     syncRecordsView();
+    document.addEventListener('lav60:audit-logged', onAuditLogged, { signal });
     try {
       await loadCatalog();
       await loadOperators();
-      await loadOperatorStats();
-      await fetchLogs({ page: 1 });
+      await loadOperatorStats({ force: true });
+      await fetchLogs({ page: 1, force: true });
     } catch (e) {
       recordsReady = true;
       syncRecordsView();

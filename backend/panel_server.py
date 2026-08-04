@@ -26,7 +26,7 @@ _HTML_NO_CACHE = {
     "Expires": "0",
 }
 
-LOGIN_HTML_VERSION = "3"
+LOGIN_HTML_VERSION = "4"
 
 from server.app import app  # noqa: E402
 

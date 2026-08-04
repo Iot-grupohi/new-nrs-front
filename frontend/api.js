@@ -2153,25 +2153,103 @@
     return card.heartbeatAlive === true;
   }
 
+  function supplementSuspendedStoreEvents(storesSuspendedEvents, all, suspendedIdSet, catalog) {
+    const cardById = new Map(all.map((card) => [normalizeStoreId(card.id), card]));
+    const seen = new Set(storesSuspendedEvents.map((entry) => normalizeStoreId(entry.store)));
+    suspendedIdSet.forEach((sid) => {
+      if (seen.has(sid)) return;
+      const card = cardById.get(sid);
+      const meta = catalogStoreMeta(catalog, sid);
+      const hb = heartbeatState.get(sid);
+      const hbAlive = Boolean(hb && isStoreHeartbeatAlive(hb, catalog));
+      storesSuspendedEvents.push({
+        store: sid,
+        store_name: meta.name || sid.toUpperCase(),
+        state: 'suspended',
+        summary_online: card?.summary?.online ?? 0,
+        summary_total: card?.summary?.total ?? 0,
+        reason: card?.storeNotice || STORE_SUSPENDED_NOTICE,
+        agent_online: card?.heartbeatAlive ?? hbAlive,
+      });
+    });
+  }
+
+  function supplementStoresPulseEvents(
+    storesOnlineEvents,
+    storesOfflineEvents,
+    all,
+    suspendedIdSet,
+    catalog
+  ) {
+    const cardById = new Map(all.map((card) => [normalizeStoreId(card.id), card]));
+    const onlineIds = new Set(storesOnlineEvents.map((e) => normalizeStoreId(e.store)));
+    const offlineIds = new Set(storesOfflineEvents.map((e) => normalizeStoreId(e.store)));
+    const scopeIds = new Set();
+    (catalog?.stores || []).forEach((meta) => {
+      const sid = normalizeStoreId(meta.id);
+      if (sid && !suspendedIdSet.has(sid)) scopeIds.add(sid);
+    });
+    all.forEach((card) => {
+      const sid = normalizeStoreId(card.id);
+      if (sid && !suspendedIdSet.has(sid)) scopeIds.add(sid);
+    });
+
+    scopeIds.forEach((sid) => {
+      const card = cardById.get(sid);
+      if (card?.loading) return;
+
+      const meta = catalogStoreMeta(catalog, sid);
+      const hb = heartbeatState.get(sid);
+      const pulseOnline = card
+        ? isStorePulseOnline(card, catalog)
+        : Boolean(hb && isStoreHeartbeatAlive(hb, catalog));
+
+      if (pulseOnline) {
+        if (onlineIds.has(sid)) return;
+        const summaryOnline = card?.summary?.online ?? 0;
+        const summaryTotal = card?.summary?.total ?? 0;
+        storesOnlineEvents.push({
+          store: sid,
+          store_name: meta.name || sid.toUpperCase(),
+          state: card?.state || 'online',
+          summary_online: summaryOnline,
+          summary_total: summaryTotal,
+          health_pct: summaryTotal ? Math.round((summaryOnline / summaryTotal) * 100) : 0,
+        });
+        onlineIds.add(sid);
+        return;
+      }
+
+      if (offlineIds.has(sid)) return;
+      storesOfflineEvents.push({
+        store: sid,
+        store_name: meta.name || sid.toUpperCase(),
+        state: card?.state || 'unreachable',
+        summary_online: card?.summary?.online ?? 0,
+        summary_total: card?.summary?.total ?? 0,
+        kind: card?.heartbeatAlive ? 'agent_unreachable' : 'heartbeat_offline',
+        reason: card
+          ? card.agentProbeFailed
+            ? card.error || 'Agente não respondeu'
+            : card.heartbeatAlive
+              ? card.error || 'Agente sem resposta HTTP'
+              : 'Sem pulso do agente'
+          : 'Sem conexão com a loja',
+        offline_since: card?.offlineSince || null,
+      });
+      offlineIds.add(sid);
+    });
+  }
+
+  function uniqueStoreEventCount(events) {
+    return new Set((events || []).map((entry) => normalizeStoreId(entry.store)).filter(Boolean)).size;
+  }
+
   function buildDashboard(cards) {
     const all = cards || [];
     const ready = all.filter((c) => !c.loading);
     const connected = ready.filter((c) => c.accessible);
     const suspendedIdSet = catalogSuspendedIdSet(heartbeatCatalog);
-    const storesSuspendedCards = all.filter((c) =>
-      suspendedIdSet.has(normalizeStoreId(c.id))
-    );
-    const suspendedCount = Math.max(
-      storesSuspendedCards.length,
-      Number(heartbeatCatalog?.suspended_count) || 0,
-      panelCatalogSuspendedIds.size
-    );
-    const heartbeatOnlineStores = ready.filter(
-      (c) => !suspendedIdSet.has(normalizeStoreId(c.id)) && isStorePulseOnline(c, heartbeatCatalog)
-    );
-    const heartbeatOfflineStores = ready.filter(
-      (c) => !suspendedIdSet.has(normalizeStoreId(c.id)) && !isStorePulseOnline(c, heartbeatCatalog)
-    );
     const unreachable = ready.filter(
       (c) => !suspendedIdSet.has(normalizeStoreId(c.id)) && !c.accessible
     );
@@ -2262,6 +2340,20 @@
       }
     });
 
+    supplementSuspendedStoreEvents(storesSuspendedEvents, all, suspendedIdSet, heartbeatCatalog);
+    supplementStoresPulseEvents(
+      storesOnlineEvents,
+      storesOfflineEvents,
+      all,
+      suspendedIdSet,
+      heartbeatCatalog
+    );
+    const suspendedCount = Math.max(
+      storesSuspendedEvents.length,
+      Number(heartbeatCatalog?.suspended_count) || 0,
+      panelCatalogSuspendedIds.size
+    );
+
     connected.forEach((card) => {
       const summary = card.summary || {};
       devicesOnline += summary.online || 0;
@@ -2313,9 +2405,9 @@
     return {
       stores: {
         total: cards.length,
-        online: heartbeatOnlineStores.length,
+        online: uniqueStoreEventCount(storesOnlineEvents),
         connected: connected.length,
-        offline: heartbeatOfflineStores.length,
+        offline: uniqueStoreEventCount(storesOfflineEvents),
         partial: partialCount,
         suspended: suspendedCount,
         pending: all.filter((c) => c.loading).length,
@@ -2917,6 +3009,7 @@
     const expected = backendPulseSource(catalog);
     return (cards || []).filter((card) => {
       if (card.loading) return true;
+      if (isStoreCardSuspended(card, catalog)) return true;
       if (card.heartbeatSource === expected) return true;
       if (isBackendPulseStore(card.id, catalog)) return true;
       return false;
@@ -3048,11 +3141,20 @@
     if (!panelCatalogSuspendedIds.size) return catalog;
     catalog.suspended_store_ids = [...panelCatalogSuspendedIds].sort();
     catalog.suspended_count = panelCatalogSuspendedIds.size;
-    catalog.stores = (catalog.stores || []).map((store) => {
-      const sid = normalizeStoreId(store.id);
-      if (!panelCatalogSuspendedIds.has(sid)) return store;
-      return { ...store, lav60_status: 'suspended' };
+    const byId = new Map(
+      (catalog.stores || []).map((store) => [normalizeStoreId(store.id), store])
+    );
+    panelCatalogSuspendedIds.forEach((sid) => {
+      const existing = byId.get(sid);
+      if (existing) {
+        byId.set(sid, { ...existing, lav60_status: 'suspended' });
+      } else {
+        byId.set(sid, { id: sid, name: sid.toUpperCase(), lav60_status: 'suspended' });
+      }
     });
+    catalog.stores = [...byId.values()].sort((a, b) =>
+      normalizeStoreId(a.id).localeCompare(normalizeStoreId(b.id))
+    );
     return catalog;
   }
 

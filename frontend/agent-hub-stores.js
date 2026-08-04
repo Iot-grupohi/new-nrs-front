@@ -15,9 +15,10 @@
 
   function storeDisplayName(meta) {
     const sid = normalizeStoreId(meta?.id || meta?.store);
-    const name = meta?.name;
-    if (name) return `${name} (${sid.toUpperCase()})`;
-    return sid.toUpperCase();
+    const name = String(meta?.name || '').trim();
+    if (!name) return sid.toUpperCase();
+    if (normalizeStoreId(name) === sid) return sid.toUpperCase();
+    return `${name} (${sid.toUpperCase()})`;
   }
 
   function normalizeQuery(value) {

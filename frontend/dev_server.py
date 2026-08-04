@@ -136,7 +136,7 @@ _HTML_NO_CACHE = {
     "Expires": "0",
 }
 
-LOGIN_HTML_VERSION = "3"
+LOGIN_HTML_VERSION = "4"
 
 
 async def serve_login_html(request: Request) -> FileResponse | RedirectResponse:

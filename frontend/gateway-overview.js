@@ -708,6 +708,7 @@
     closeGatewayKpiModal,
     clearGatewayKpiActive,
     getOnlineStoreMetas,
+    getDashboardEventLists: buildGatewayEventLists,
     statusForStore: overviewStatusForStore,
   };
 

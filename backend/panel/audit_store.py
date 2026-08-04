@@ -260,6 +260,27 @@ def invalidate_audit_caches() -> None:
     _count_cache.clear()
 
 
+def clear_all_logs(*, batch_size: int = 400) -> dict[str, Any]:
+    """Remove todos os documentos da coleção de auditoria (operação irreversível)."""
+    db = _get_db()
+    collection = _collection_name()
+    deleted = 0
+    batch_size = max(1, min(int(batch_size or 400), 400))
+
+    while True:
+        docs = list(db.collection(collection).limit(batch_size).stream())
+        if not docs:
+            break
+        batch = db.batch()
+        for doc in docs:
+            batch.delete(doc.reference)
+        batch.commit()
+        deleted += len(docs)
+
+    invalidate_audit_caches()
+    return {"deleted": deleted, "collection": collection, "ok": True}
+
+
 def write_log(
     entry: dict[str, Any],
     *,

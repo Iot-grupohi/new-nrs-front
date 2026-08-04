@@ -50,7 +50,7 @@ _STATIC_EXACT = frozenset(
 
 def is_frontend_static_path(path: str) -> bool:
     """Arquivos estáticos do painel (VPS: panel_server serve frontend na mesma origem)."""
-    if path.startswith("/fac/") or path.startswith("/views/"):
+    if path.startswith("/fac/") or path.startswith("/views/") or path.startswith("/data/"):
         return True
     if path in _STATIC_EXACT:
         return True

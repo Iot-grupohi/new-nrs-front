@@ -96,7 +96,14 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildAuditEntry(entry)),
       });
-      if (res.ok) return true;
+      if (res.ok) {
+        try {
+          window.dispatchEvent(new CustomEvent('lav60:audit-logged'));
+        } catch {
+          /* ignore */
+        }
+        return true;
+      }
       if (res.status === 503) {
         auditEnabled = false;
         auditStatusReason = 'audit_unavailable';
