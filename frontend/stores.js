@@ -1215,7 +1215,57 @@
     subtitle.textContent = 'Carregando monitoramento…';
   }
 
+  function storeOfflineReasonFromGateway(entry) {
+    const parts = [];
+    if (entry.agentAlive === false && entry.agentOfflineSinceMs) {
+      parts.push(`Agente offline há ${formatOfflineDuration(entry.agentOfflineSinceMs)}`);
+    }
+    if (entry.online === false) {
+      if (entry.error) parts.push(entry.error);
+      else if (entry.gatewayOfflineSinceMs) {
+        parts.push(`Gateway offline há ${formatOfflineDuration(entry.gatewayOfflineSinceMs)}`);
+      } else {
+        parts.push('Gateway offline');
+      }
+    } else if (entry.agentAlive === false && !parts.length) {
+      parts.push('Agente offline');
+    } else if (entry.online == null && !entry.checking) {
+      parts.push('Ainda não verificada');
+    } else if (!parts.length) {
+      parts.push('Sem conexão');
+    }
+    return parts.join(' · ') || 'Sem conexão';
+  }
+
+  function applyDashboardStoreOfflineFromGateway(dashboard) {
+    if (currentPageMode !== 'dashboard' || !isMqttGatewayEnabled(catalogConfig)) {
+      return dashboard;
+    }
+    const lists = window.Lav60GatewayOverview?.getDashboardEventLists?.();
+    if (!lists) return dashboard;
+
+    const stores = { ...(dashboard.stores || {}) };
+    const events = { ...(dashboard.events || {}) };
+    stores.offline = lists.offline.length;
+    events.stores_offline = lists.offline.map((entry) => {
+      const sid = String(entry.store || '').trim().toLowerCase();
+      return {
+        store: sid,
+        store_name: entry.name || sid.toUpperCase(),
+        state: 'unreachable',
+        summary_online: 0,
+        summary_total: 0,
+        kind: 'gateway_offline',
+        reason: storeOfflineReasonFromGateway(entry),
+        offline_since: entry.gatewayOfflineSinceMs || entry.agentOfflineSinceMs || null,
+      };
+    });
+
+    return { ...dashboard, stores, events };
+  }
+
   function renderDashboard(dashboard, payload) {
+    dashboard = applyDashboardStoreOfflineFromGateway(dashboard);
     const stores = dashboard.stores || {};
     const devices = dashboard.devices || {};
     lastDashboardEvents = dashboard.events || null;
