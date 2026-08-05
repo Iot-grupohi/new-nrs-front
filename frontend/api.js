@@ -793,22 +793,47 @@
     if (doc.agent_offline_since_ms != null) {
       card.agent_offline_since_ms = doc.agent_offline_since_ms;
     }
+    if (doc.received_at_iso) {
+      card.timestamp = doc.received_at_iso;
+    } else if (doc.received_at != null) {
+      const received = Number(doc.received_at);
+      if (Number.isFinite(received)) {
+        const ms = received > 1e12 ? received : Math.round(received * 1000);
+        card.timestamp = new Date(ms).toISOString();
+      }
+    }
     const source = resolveHeartbeatSource(card.heartbeatSource, doc.heartbeat_source);
     if (source) card.heartbeatSource = source;
     return card;
   }
 
-  function enrichCardsFromStatusCache(cards, catalog, bulk) {
-    if (isRtdbOnlyPanel(catalog)) return;
+  function applyAvailabilityMetaFromStatusBulk(cards, bulk) {
     const storesMap = bulk?.stores;
     if (!bulk?.available || !storesMap || typeof storesMap !== 'object') return;
+    (cards || []).forEach((card) => {
+      const doc = storesMap[normalizeStoreId(card.id)];
+      if (doc) applyStatusCacheAvailabilityMeta(card, doc);
+    });
+  }
+
+  function enrichCardsFromStatusCache(cards, catalog, bulk) {
+    const storesMap = bulk?.stores;
+    if (!bulk?.available || !storesMap || typeof storesMap !== 'object') return;
+
+    applyAvailabilityMetaFromStatusBulk(cards, bulk);
+
+    if (isRtdbOnlyPanel(catalog)) {
+      cards.forEach((card, index) => {
+        cards[index] = reapplyStoreCardPolicy(card, catalog);
+      });
+      return;
+    }
 
     for (const card of cards) {
       const lacksDots = !cardHasDeviceDots(card);
       if (card.accessible && !card.agentPulseStale && card.fromLiveProbe && !lacksDots) continue;
       const doc = storesMap[normalizeStoreId(card.id)];
       if (!doc) continue;
-      applyStatusCacheAvailabilityMeta(card, doc);
       const meta = catalogStoreMeta(catalog, card.id);
       const status = statusFromStatusCacheDoc(meta, doc, card.id);
       if (!status?.summary?.total) continue;
@@ -2800,9 +2825,40 @@
     return nowMs;
   }
 
+  function resolveStoreOnlineSinceMs(card, sid, prev, onlineMap, nowMs) {
+    const fromCard =
+      card.agent_online_since_ms != null ? Number(card.agent_online_since_ms) : null;
+    if (fromCard && !Number.isNaN(fromCard)) return fromCard;
+
+    const doc = getStoreStatusCacheDoc(sid);
+    if (doc?.agent_online_since_ms != null) {
+      const fromDoc = Number(doc.agent_online_since_ms);
+      if (!Number.isNaN(fromDoc)) return fromDoc;
+    }
+
+    const hb = heartbeatState.get(normalizeStoreId(sid));
+    const payloadOnline = hb?.payload?.agent_online_since_ms;
+    if (payloadOnline != null) {
+      const fromHb = Number(payloadOnline);
+      if (!Number.isNaN(fromHb)) return fromHb;
+    }
+
+    const cachedOnline = onlineMap[sid] != null ? Number(onlineMap[sid]) : null;
+    if (cachedOnline && !Number.isNaN(cachedOnline)) return cachedOnline;
+
+    if (prev?.lastOnlineAt) return prev.lastOnlineAt;
+
+    const pulseMs = heartbeatAgentPulseMs(hb);
+    if (pulseMs) return pulseMs;
+
+    return nowMs;
+  }
+
   function syncStoreOfflineSince(cards) {
     const offlineMap = loadOfflineSinceMap();
+    const onlineMap = loadOnlineSinceMap();
     let offlineChanged = false;
+    let onlineChanged = false;
     const cat = heartbeatCatalog;
     const nowMs = Date.now();
 
@@ -2824,30 +2880,37 @@
           offlineMap[sid] = offlineSince;
           offlineChanged = true;
         }
+        if (onlineMap[sid]) {
+          delete onlineMap[sid];
+          onlineChanged = true;
+        }
         card.onlineSince = null;
         storeAgentPulseState.set(sid, {
           online: false,
           lastOnlineAt: prev?.lastOnlineAt ?? null,
         });
       } else {
-        const lastOnlineAt =
-          card.agent_online_since_ms != null
-            ? Number(card.agent_online_since_ms)
-            : prev?.lastOnlineAt ?? nowMs;
+        const onlineSince = resolveStoreOnlineSinceMs(card, sid, prev, onlineMap, nowMs);
         if (offlineMap[sid]) {
           delete offlineMap[sid];
           offlineChanged = true;
         }
+        if (onlineMap[sid] !== onlineSince) {
+          onlineMap[sid] = onlineSince;
+          onlineChanged = true;
+        }
         card.offlineSince = null;
-        card.onlineSince = card.agent_online_since_ms ?? lastOnlineAt;
+        card.onlineSince = onlineSince;
+        card.agent_online_since_ms = card.agent_online_since_ms ?? onlineSince;
         storeAgentPulseState.set(sid, {
           online: true,
-          lastOnlineAt: Number.isFinite(lastOnlineAt) ? lastOnlineAt : nowMs,
+          lastOnlineAt: Number.isFinite(onlineSince) ? onlineSince : nowMs,
         });
       }
     });
 
     if (offlineChanged) saveOfflineSinceMap(offlineMap);
+    if (onlineChanged) saveOnlineSinceMap(onlineMap);
     return cards;
   }
 
@@ -3810,7 +3873,7 @@
   function buildOnlineCardFromHeartbeat(meta, catalog, hb, status) {
     const id = normalizeStoreId(meta.id);
     heartbeatState.set(id, { ...hb, lastStatus: status });
-    return withStoreCardPolicy(
+    let card = withStoreCardPolicy(
       attachAgentUrlToCard(
         buildStoreCard(meta, status, null, catalog, {
           fromHeartbeat: true,
@@ -3824,6 +3887,13 @@
       hb,
       catalog
     );
+    const doc = getStoreStatusCacheDoc(id);
+    if (doc) card = applyStatusCacheAvailabilityMeta(card, doc);
+    const payloadOnline = hb?.payload?.agent_online_since_ms;
+    if (payloadOnline != null && card.agent_online_since_ms == null) {
+      card.agent_online_since_ms = payloadOnline;
+    }
+    return card;
   }
 
   function heartbeatHasAgentPayload(hb) {

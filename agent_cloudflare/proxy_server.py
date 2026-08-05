@@ -234,6 +234,15 @@ tunnel_monitoring = True
 network_monitoring = True
 last_network_status: dict = {}
 network_status_lock = threading.Lock()
+_agent_online_since_ms: int | None = None
+
+
+def agent_online_since_ms() -> int:
+    """Unix ms fixo desde que o agente subiu — enviado no heartbeat/RTDB."""
+    global _agent_online_since_ms
+    if _agent_online_since_ms is None:
+        _agent_online_since_ms = int(time.time() * 1000)
+    return _agent_online_since_ms
 store_machines_catalog: dict | None = None
 store_machines_lock = threading.Lock()
 store_lav60_api_status: str = 'unknown'
@@ -2179,6 +2188,7 @@ def build_panel_heartbeat_payload() -> dict:
         'agent_local_url': f'http://127.0.0.1:{SERVER_PORT}',
         'timestamp': datetime.now().isoformat(),
         'lav60_status': store_lav60_api_status or 'unknown',
+        'agent_online_since_ms': agent_online_since_ms(),
         'network': filter_network_status_for_frontend(network),
         'machines': machines_for_frontend(network=network),
     }
