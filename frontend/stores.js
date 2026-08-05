@@ -6,7 +6,6 @@
     ensureDefaultAgentToken,
     friendlyUserMessage,
     formatOfflineDuration,
-    formatOnlineDuration,
     noAgentMessage,
     isAgentUnavailableError,
     loadCatalog,
@@ -520,29 +519,11 @@
       if (updated !== '—') {
         segments.push({ kind: 'updated', text: `Atualizado ${updated}` });
       }
-      const onlineDur = formatOnlineDuration(store.onlineSince);
-      if (onlineDur) {
-        segments.push({
-          kind: 'online',
-          text: `Online há ${onlineDur}`,
-          live: true,
-          since: store.onlineSince,
-        });
-      }
       tone = pct >= 90 ? 'ok' : pct >= 70 ? 'warn' : 'danger';
     } else if (agentUp && suspended) {
       if (total > 0) segments.push({ kind: 'equip', text: `${online}/${total}` });
       const updated = formatTime(store.timestamp);
       if (updated !== '—') segments.push({ kind: 'updated', text: `Atualizado ${updated}` });
-      const onlineDur = formatOnlineDuration(store.onlineSince);
-      if (onlineDur) {
-        segments.push({
-          kind: 'online',
-          text: `Online há ${onlineDur}`,
-          live: true,
-          since: store.onlineSince,
-        });
-      }
       tone = 'suspended';
     } else if (suspended) {
       offlineReason = store.storeNotice || 'Loja suspensa';
@@ -565,11 +546,8 @@
   }
 
   function renderMetricsSegmentHtml(segment) {
-    if (segment.live && segment.since) {
-      const cls =
-        segment.kind === 'online' ? 'store-card__online-since' : 'store-card__offline-since';
-      const prefix = segment.kind === 'online' ? 'Online há ' : 'Offline há ';
-      return `${prefix}<strong class="${cls}">${escapeHtml(formatOfflineDuration(segment.since))}</strong>`;
+    if (segment.live && segment.since && segment.kind === 'offline') {
+      return `Offline há <strong class="store-card__offline-since">${escapeHtml(formatOfflineDuration(segment.since))}</strong>`;
     }
     return escapeHtml(segment.text);
   }
@@ -620,7 +598,6 @@
 
     const equip = metrics.segments.find((s) => s.kind === 'equip');
     const updated = metrics.segments.find((s) => s.kind === 'updated');
-    const onlineSeg = metrics.segments.find((s) => s.kind === 'online');
     const parts = [];
     if (equip && total) {
       if (online <= 0 && isStorePulseOnline(store)) {
@@ -630,7 +607,6 @@
       }
     }
     if (updated) parts.push(updated.text);
-    if (onlineSeg) parts.push(renderMetricsSegmentHtml(onlineSeg));
     if (!parts.length) {
       if (isStoreSuspended(store)) return renderSuspendedHealthLabel(store);
       if (isStorePulseOnline(store)) {
@@ -727,13 +703,6 @@
       const el = card.querySelector('.store-card__offline-since');
       if (!el) return;
       el.textContent = formatOfflineDuration(since) || '';
-    });
-    document.querySelectorAll('.store-card[data-online-since]').forEach((card) => {
-      const since = Number(card.dataset.onlineSince);
-      if (!since) return;
-      const el = card.querySelector('.store-card__online-since');
-      if (!el) return;
-      el.textContent = formatOnlineDuration(since) || '';
     });
   }
 
@@ -859,9 +828,6 @@
     card.dataset.state = suspended ? 'suspended' : state;
     if (isOfflineAlert && store.offlineSince) {
       card.dataset.offlineSince = String(store.offlineSince);
-    }
-    if (store.onlineSince && agentUp) {
-      card.dataset.onlineSince = String(store.onlineSince);
     }
 
     const storeLabel = store.name || store.id.toUpperCase();
