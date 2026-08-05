@@ -2830,7 +2830,7 @@
       card.agent_online_since_ms != null ? Number(card.agent_online_since_ms) : null;
     if (fromCard && !Number.isNaN(fromCard)) return fromCard;
 
-    const doc = getStoreStatusCacheDoc(sid);
+    const doc = getStatusCacheDoc(sid);
     if (doc?.agent_online_since_ms != null) {
       const fromDoc = Number(doc.agent_online_since_ms);
       if (!Number.isNaN(fromDoc)) return fromDoc;
@@ -3887,7 +3887,7 @@
       hb,
       catalog
     );
-    const doc = getStoreStatusCacheDoc(id);
+    const doc = getStatusCacheDoc(id);
     if (doc) card = applyStatusCacheAvailabilityMeta(card, doc);
     const payloadOnline = hb?.payload?.agent_online_since_ms;
     if (payloadOnline != null && card.agent_online_since_ms == null) {
