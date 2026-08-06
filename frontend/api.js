@@ -168,7 +168,12 @@
       }
       return 'Acesso negado — verifique o token';
     }
-    if (m.includes('404')) return 'Recurso não encontrado';
+    if (m.includes('404') || m.includes('not found')) {
+      if (ctx.includes('dosador') || ctx.includes('consulta')) {
+        return 'Comando da dosadora indisponível no túnel da loja. O painel tentará via gateway; se persistir, atualize o agente local.';
+      }
+      return 'Recurso não encontrado no painel ou na loja';
+    }
     if (m.includes('stores.json') || m.includes('configuração do painel')) return 'Configuração do painel indisponível';
 
     if (

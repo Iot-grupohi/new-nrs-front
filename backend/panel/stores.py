@@ -184,7 +184,21 @@ def register_stores(
         sid = store_id.strip().lower()
         return f"{gw_base}/{sid}/{sub}" if sub else f"{gw_base}/{sid}"
 
-    def _should_fallback_to_gateway(response: httpx.Response | None, error: Exception | None) -> bool:
+    def _is_store_gateway_operation_subpath(sub: str) -> bool:
+        parts = [p for p in (sub or "").strip("/").lower().split("/") if p]
+        if not parts:
+            return False
+        head = parts[0]
+        if head in {"washer", "dryer", "doser", "status", "led", "devices"}:
+            return True
+        return head == "ac" and len(parts) == 1
+
+    def _should_fallback_to_gateway(
+        response: httpx.Response | None,
+        error: Exception | None,
+        *,
+        sub: str = "",
+    ) -> bool:
         if not gw_base:
             return False
         if error is not None:
@@ -192,6 +206,8 @@ def register_stores(
         if response is None:
             return True
         if response.status_code in (502, 503, 504):
+            return True
+        if response.status_code in (404, 405) and _is_store_gateway_operation_subpath(sub):
             return True
         body = (response.text or "").lower()
         return (
@@ -253,7 +269,7 @@ def register_stores(
             except httpx.RequestError as exc:
                 powpay_error = exc
 
-            if not _should_fallback_to_gateway(powpay_response, powpay_error):
+            if not _should_fallback_to_gateway(powpay_response, powpay_error, sub=sub):
                 return _proxy_response(powpay_response)
 
             try:
